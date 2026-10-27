@@ -101,6 +101,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <filesystem>
+#include <sstream>
 static const QString processInstance=QUuid::createUuid().toString(QUuid::WithoutBraces);
 using namespace alaser;
 namespace fs=std::filesystem;
