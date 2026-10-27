@@ -46,6 +46,7 @@
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QToolButton>
+#include <QCursor>
 #include <QMenu>
 #include <QScrollArea>
 #include <QGridLayout>
@@ -573,7 +574,13 @@ public:
  }
  QGraphicsPathItem* pathItem(Key k){return objects_.at(k);}
  std::optional<Key> active()const{return active_;}
- void setTool(Tool t){if(!busy()){nativeMode_=false;tool=t;viewport()->setCursor(t==Tool::Scissors?Qt::CrossCursor:Qt::ArrowCursor);viewport()->update();}}
+ void setTool(Tool t){if(!busy()){nativeMode_=false;tool=t;viewport()->setCursor(t==Tool::Scissors?QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4):QCursor(Qt::ArrowCursor));viewport()->update();}}
+ QPointF constrainedCorner(QPointF first,QPointF last,bool shift)const{
+  if(!shift||(tool!=Tool::Rectangle&&tool!=Tool::Ellipse))return last;
+  const double dx=last.x()-first.x(),dy=last.y()-first.y();
+  const double size=std::min(std::abs(dx),std::abs(dy));
+  return {first.x()+std::copysign(size,dx),first.y()+std::copysign(size,dy)};
+ }
  void cancelCurrentGesture(){
   if(nativeContourPressing_&&nativeSession_){nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(true);}
   if(nativePressing_&&nativeSession_){nativeSession_->cancel();nativePressing_=false;updateNativePaths(false);}
@@ -713,9 +720,9 @@ void mousePressEvent(QMouseEvent* e)override{
    if(hits.empty()){if(toolWarning)toolWarning("Tesoura: clique sobre um segmento de polilinha.");e->accept();return;}
    try{
     const auto& hit=hits.front();
-    const int obj=editor.cutPolylineEdge(hit.key,hit.segment,hit.projected);
-    selected.clear();rebuild();activate(obj==hit.key.object?hit.key:Key{obj,0});
-    if(diagnosticEvent)diagnosticEvent("polyline_scissor_cut",1);
+    const int obj=editor.removePolylineEdge(hit.key,hit.segment);
+    selected.clear();rebuild();if(obj>0)activate({obj,0});
+    if(diagnosticEvent)diagnosticEvent("polyline_scissor_edge_removed",1);
     if(stateChanged)stateChanged();
    }catch(const std::exception& ex){if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));}
    e->accept();return;
@@ -738,6 +745,7 @@ void mousePressEvent(QMouseEvent* e)override{
  }
  QPainterPath temporaryShape()const{
   QPainterPath p;QPointF a=mapToScene(drawStart_.toPoint()),b=mapToScene(drawCurrent_.toPoint());
+  b=constrainedCorner(a,b,QApplication::keyboardModifiers().testFlag(Qt::ShiftModifier));
   if(tool==Tool::Line){p.moveTo(a);p.lineTo(b);}
   else if(tool==Tool::Rectangle){p.addRect(QRectF(a,b).normalized());}
   else if(tool==Tool::Ellipse){p.addEllipse(QRectF(a,b).normalized());}
@@ -847,6 +855,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   }
   if(strokeDrawing_){
    drawCurrent_=e->position();auto first=mapToScene(drawStart_.toPoint());auto last=mapToScene(drawCurrent_.toPoint());
+   last=constrainedCorner(first,last,e->modifiers().testFlag(Qt::ShiftModifier));
    QPointF a{std::min(first.x(),last.x()),std::min(first.y(),last.y())}, b{std::max(first.x(),last.x()),std::max(first.y(),last.y())};
    if(QLineF(first,last).length()>1e-5&&(tool==Tool::Line||(b.x()>a.x()&&b.y()>a.y()))){
     if(tool==Tool::Rectangle)lastCreated_=editor.rectangle(fromQt(a),b.x()-a.x(),b.y()-a.y(),targetLayer());
@@ -861,6 +870,12 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    viewport()->update();if(stateChanged)stateChanged();e->accept();return;
   }
   QGraphicsView::mouseReleaseEvent(e);
+ }
+ void keyReleaseEvent(QKeyEvent* e)override{
+  if(e->key()==Qt::Key_Shift&&strokeDrawing_&&pendingPreview_){
+   pendingPreview_->setPath(temporaryShape());viewport()->update();
+  }
+  QGraphicsView::keyReleaseEvent(e);
  }
  void keyPressEvent(QKeyEvent* e)override{
   if(nativeMode_&&nativeSession_){
@@ -888,8 +903,11 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   if(e->key()==Qt::Key_Delete&&tool==Tool::Select&&!nativeMode_){
    deleteSelectedShapes();e->accept();return;
   }
+  if(e->key()==Qt::Key_Shift&&strokeDrawing_&&pendingPreview_){
+   pendingPreview_->setPath(temporaryShape());viewport()->update();
+  }
   if(e->key()==Qt::Key_Escape){
-   if(!busy()){if(requestSelectTool)requestSelectTool();e->accept();return;}
+   if(!busy(){if(requestSelectTool)requestSelectTool();e->accept();return;}
    if(shapeDragging_){clearShapePreview();e->accept();return;}
    if(draggingNode_&&active_){
     const auto oldMarker=viewportTransform().map(toQt(dragOriginal_))+(drawCurrent_-dragStart_);
@@ -1408,9 +1426,9 @@ public:
    [this]{if(!curves){status->setText("Abra um projeto com curvas v5.");return;}
      bezierToolActive_=true;view.enableNative(true);
      status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
-  compact(editorGrid,3,0,"scissors","✂ Tesoura","Cortar polilinha no segmento (K). Curvas Bezier nao sao alteradas.",
+  compact(editorGrid,3,0,"scissors","✂ Tesoura","Remover aresta clicada (K); desfazer com Ctrl+Z. Curvas Bezier nao sao alteradas.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
-     status->setText("Tesoura: clique numa linha; Ctrl+Z desfaz. Para curvas nativas, use Bézier.");});
+     status->setText("Tesoura: clique na aresta para remove-la; Ctrl+Z desfaz.");});
   tools->addSpacing(5); // Ferramentas de desenho
   auto* shapeGrid=newGrid();
   compact(shapeGrid,0,0,"line","╱ Linha","Desenhar linha",
@@ -1938,6 +1956,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   shortcut("Esc",[this]{view.cancelCurrentGesture();buttons.at("select")->click();});
   shortcut("V",[this]{buttons.at("select")->click();});
   shortcut("K",[this]{buttons.at("scissors")->click();});
+  shortcut("Ctrl+R",[this]{buttons.at("rectangle")->click();});
+  shortcut("Ctrl+E",[this]{buttons.at("ellipse")->click();});
   shortcut("Ctrl+L",[this]{buttons.at("move_layer")->click();});
   shortcut("Ctrl+D",[this]{buttons.at("duplicate_obj")->click();});
   shortcut("Ctrl+0",[fit]{fit->click();});
