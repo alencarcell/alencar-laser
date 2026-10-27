@@ -196,3 +196,10 @@ Registrar mudanças, testes e pendências.
 - LBRN2 sem arquivo real anexado: quando parser rejeitar, agora exibe janela clara do motivo, sem alterar o documento; `SCRIPTS/ANALISAR_LBRN2.ps1` produz inventário de tipos de Shape sem dados de desenho; importador continua parcial.
 - Regressões novas em `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteFerramentas` e na suíte `-Abrir`. **Ainda não compiladas nem testadas no Windows desde essas mudanças**.
 - Especificação em `DESENVOLVIMENTO/ESPECIFICACOES/TOOLS_TEXTO_LAPIS_LOGO_LBRN2_19_8.md`. Antes de homologar, conferir visualmente texto vazado, desenho livre, recuperação e importação de .lbrn2 real. Máquina desconectada; emissão bloqueada.
+
+## 27/10/2026 — PASS Windows focado Texto/Lápis e logo instalada
+- Captura do VS Code enviada pelo usuário: CMake/Ninja compilou e vinculou `alencar_test7_qt6.exe` (2/2); teste `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteFerramentas` exibiu **"Texto/Lapis passaram nos testes sinteticos. Teste manual ainda necessario."**, retornando ao prompt sem erro.
+- Após falha inicial por ausência da imagem em Downloads, o usuário executou `SCRIPTS/INSTALAR_LOGO_OFICIAL.ps1` com a imagem disponível. Terminal confirmou **"Logo oficial instalada com SHA-256 conferido: C:\\ProjetoAlencarLaser\\DADOS\\LOGO\\logo_alencar_laser.png"** e pediu reabertura do aplicativo para atualizar cabeçalho.
+- Warnings de indentação enganosa e API depreciada `QDragEnterEvent` aparecem, sem bloquear compilação. Não considerar tais avisos erros fatais, mas programar limpeza.
+- Estado: **testes sintéticos Texto/Lápis PASS; logo instalada/com hash verificado. Ainda NÃO homologados com mouse físico/edição real, nem validado layout da logo, nem importador LBRN2 real.**
+- Próxima etapa no VS Code: `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`. Se os gates passarem, testar texto T (fonte e tamanho, vazados de letras), lápis P (arraste/undo), logo no cabeçalho, arraste/importação LBRN2 em cópia, mantendo laser desconectado.
