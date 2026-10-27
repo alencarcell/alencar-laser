@@ -2174,9 +2174,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    projectPath,"Projetos de desenho (*.alaser *.lbrn2);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2)");
   if(!chosen.isEmpty())openFilePath(chosen);
  }
+ void ensureSafeToReplace(){
+  if(!uiPersistenceEnabled_||!recoveryPolicy_.dirty())return;
+  const auto answer=QMessageBox::warning(this,"Projeto com edicoes nao salvas",
+     "O projeto atual tem alteracoes nao salvas. Salve antes de abrir outro arquivo.",
+     QMessageBox::Save|QMessageBox::Cancel,QMessageBox::Save);
+  if(answer!=QMessageBox::Save)throw std::runtime_error("Abertura cancelada: projeto atual preservado");
+  save();
+  if(recoveryPolicy_.dirty())throw std::runtime_error("Salvamento cancelado: projeto atual preservado");
+ }
  void openFilePath(const QString& path){
   const QString suffix=QFileInfo(path).suffix().toLower();
   if(suffix=="alaser"){
+   ensureSafeToReplace();
    const QString previous=projectPath;projectPath=path;
    try{open();}catch(...){projectPath=previous;throw;}
    return;
@@ -2193,6 +2203,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
       .arg(imported.shapeCount),
     QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
   if(response!=QMessageBox::Yes)return;
+  ensureSafeToReplace();
   view.attachNative(nullptr);
   curves.reset();
   view.editor=Editor(imported.state);
@@ -2817,7 +2828,7 @@ static QJsonObject lightburnImport198Test(const QString& directory){
  try{(void)lightburn::readGeometry(invalid);}catch(const std::runtime_error&){rejected=true;}
  check(rejected,"importador aceitou perda silenciosa de Path");
 
- LabWindow w(Document{});
+ LabWindow w(Document{});w.show();QApplication::processEvents();
  QMimeData mime;mime.setUrls({QUrl::fromLocalFile(filename)});
  QDragEnterEvent drag(QPoint(20,20),Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);
  QApplication::sendEvent(&w,&drag);
