@@ -595,10 +595,16 @@ public:
  }
  void updateScissorHover(QPoint where){
   if(tool!=Tool::Scissors||nativeMode_||busy()){clearScissorHover();return;}
-  if(scissorIndexVersion_!=editor.geometryGeneration){
+  if(scissorIndexVersion_!=editor.generation){
    clearScissorHover();
-   scissorPlanner_.reset(editor.state().doc);
-   scissorIndexVersion_=editor.geometryGeneration;
+   const auto& state=editor.state();
+   scissorPlanner_.reset(state.doc,[&](Key key){
+    const auto meta=state.objects.find(key.object);
+    if(meta==state.objects.end())return false;
+    const auto li=state.layers.find(meta->second.layer);
+    return li!=state.layers.end()&&li->second.visible;
+   });
+   scissorIndexVersion_=editor.generation;
   }
   std::optional<ScissorSpan> next;
   const auto& state=editor.state();
