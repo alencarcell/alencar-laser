@@ -2437,6 +2437,8 @@ static QJsonObject editTools197Test(const QString& directory){
  clickScene(w,{110,100});
  check(v.editor.undoCount()==old+1,"scissor mouse click did not create history");
  check(!get(v.editor.state().doc,{rectangle,0})->closed,"scissor failed to open closed contour");
+ check(get(v.editor.state().doc,{rectangle,0})->nodes.size()==4,"scissor left duplicate/seam nodes instead of removing edge");
+ checkRendered(w);
  pressKey(w,Qt::Key_Z,Qt::ControlModifier);
  check(get(v.editor.state().doc,{rectangle,0})->closed,"undo cut failed");
  pressKey(w,Qt::Key_V);check(v.tool==QtEditorLab::Tool::Select,"V selection shortcut missing");
