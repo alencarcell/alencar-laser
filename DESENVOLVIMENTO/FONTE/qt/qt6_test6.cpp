@@ -1495,7 +1495,25 @@ public:
   auto* header=new QFrame;header->setObjectName("topHeader");
   auto* headerRow=new QHBoxLayout(header);headerRow->setContentsMargins(11,4,11,4);
   auto* identity=new QVBoxLayout;identity->setSpacing(1);
-  auto* brand=new QLabel("ALENCAR LASER");brand->setObjectName("brandName");identity->addWidget(brand);
+  auto* brand=new QLabel("ALENCAR LASER");brand->setObjectName("brandName");
+  // Identidade oficial: usa a arte ORIGINAL fornecida pelo proprietario,
+  // nunca redesenha nem cria um substituto. Fallback textual sem arquivo.
+  const QStringList logoCandidates={
+   QDir::current().absoluteFilePath("DADOS/LOGO/logo_alencar_laser.png"),
+   QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("logo_alencar_laser.png"),
+   QStringLiteral("C:/ProjetoAlencarLaser/DADOS/LOGO/logo_alencar_laser.png")
+  };
+  for(const QString& logoPath:logoCandidates){
+   QPixmap original(logoPath);
+   if(original.isNull())continue;
+   brand->setPixmap(original.scaled(248,68,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+   brand->setToolTip("Logo oficial Alencar Laser: "+logoPath);
+   brand->setFixedHeight(70);
+   break;
+  }
+  if(brand->pixmap().isNull())
+   brand->setToolTip("Logo oficial ainda nao encontrada. Instale em DADOS/LOGO/logo_alencar_laser.png.");
+  identity->addWidget(brand);
   auto* subtitle=new QLabel("Estúdio Qt 6  •  TESTE_19.8  •  Persistência + recuperação + ícones");subtitle->setObjectName("brandSub");identity->addWidget(subtitle);
   headerRow->addLayout(identity);headerRow->addStretch();
   auto* safety=new QLabel("● MÁQUINA DESCONECTADA   |   EMISSÃO BLOQUEADA");
