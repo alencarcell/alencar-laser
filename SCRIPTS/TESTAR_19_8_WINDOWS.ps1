@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir)
+param([switch]$Abrir, [switch]$SomenteTesoura)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -60,6 +60,19 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteTesoura) {
+        Write-Host 'DIAGNOSTICO FOCADO: compila apenas Qt e executa teste da Tesoura.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt focada'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\tesoura_foco'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --edit-tools-19-7-test $fixture $destino
+        Checar-ResultadoQt 'Tesoura - hover GUI' (Join-Path $destino 'RESULTADO_TESTE_19_7_GUI.json')
+        Write-Host 'Teste focado passou; validacao completa ainda obrigatoria.' -ForegroundColor Green
+        return
+    }
     $alvos = @(
         'alencar_test7_qt6',
         'alencar_test_delete_bezier_anchor',
