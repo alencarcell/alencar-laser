@@ -128,7 +128,11 @@ public:
   double lo=0,hi=0;
   if(c->closed){
    lo=(next==edges.begin()?edges.back()-m:*(next-1));
-   hi=(next==edges.end()?edges.front()+m:*next);
+   // Se o cursor estiver antes do primeiro cruzamento, o limite direito
+   // e o PRIMEIRO cruzamento neste ciclo, nao no ciclo seguinte.
+   // Somar m aqui duplica o arco, supera a volta inteira e apaga a previa.
+   hi=(next==edges.begin()?edges.front():
+       next==edges.end()?edges.front()+m:*next);
    if(pos<lo)lo-=m;
   }else{
    if(next==edges.begin()||next==edges.end())return {};
