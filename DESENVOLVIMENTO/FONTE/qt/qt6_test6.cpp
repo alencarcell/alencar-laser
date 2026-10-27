@@ -3,6 +3,7 @@
 #include "editor_tools.hpp"
 #include "workspace_dimensions.hpp"
 #include "lightburn_reference_inspector.hpp"
+#include "lightburn_geometry_import.hpp"
 #include "diagnostics_collector.hpp"
 #include "persistent_session_store.hpp"
 #include "recovery_policy.hpp"
@@ -24,6 +25,10 @@
 #include <QPainterPathStroker>
 #include <QPen>
 #include <QMouseEvent>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QUrl>
 #include <QWheelEvent>
 #include <QScrollBar>
 #include <QSignalBlocker>
@@ -1425,6 +1430,8 @@ public:
   view.viewport()->update();
  }
  LabWindow(Document doc,CurveDocument curveDoc=CurveDocument{}):view(std::move(doc)){
+  setAcceptDrops(true);
+  view.setAcceptDrops(false);view.viewport()->setAcceptDrops(false);
   if(!curveDoc.contours.empty())curves=std::make_unique<CurveDragSession>(std::move(curveDoc));
   view.attachNative(curves.get());
   darkTheme_=QSettings("AlencarLaser","DesktopBeta").value("workspace/darkTheme",true).toBool();
@@ -2087,6 +2094,28 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    QTimer::singleShot(0,this,[this]{recoverAtStartup();});
   }
  }
+ void dragEnterEvent(QDragEnterEvent* e)override{
+  const auto* mime=e->mimeData();
+  if(!mime||!mime->hasUrls()||mime->urls().size()!=1){e->ignore();return;}
+  const QUrl url=mime->urls().first();
+  const QString suffix=QFileInfo(url.toLocalFile()).suffix().toLower();
+  if(url.isLocalFile()&&(suffix=="alaser"||suffix=="lbrn2"))
+   e->acceptProposedAction();
+  else e->ignore();
+ }
+ void dropEvent(QDropEvent* e)override{
+  const auto* mime=e->mimeData();
+  if(!mime||!mime->hasUrls()||mime->urls().size()!=1){e->ignore();return;}
+  const QUrl url=mime->urls().first();
+  const QString suffix=QFileInfo(url.toLocalFile()).suffix().toLower();
+  if(!url.isLocalFile()||(suffix!="alaser"&&suffix!="lbrn2")){e->ignore();return;}
+  e->acceptProposedAction();
+  try{openFilePath(url.toLocalFile());}
+  catch(const std::exception& error){
+   QMessageBox::warning(this,"Arquivo nao importado",QString::fromUtf8(error.what())+
+      "\n\nO desenho anterior foi preservado. Use Referencias para inspecionar o .lbrn2.");
+  }
+ }
  std::vector<int> selection()const{return {view.selected.begin(),view.selected.end()};}
  void run(const std::function<void()>& action){
   if(view.busy()||(curves&&curves->dragging())){status->setText("Conclua ou cancele o arraste antes de outro comando.");return;}
@@ -2140,11 +2169,43 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   try{save();}catch(...){projectPath=previous;throw;}
  }
  void openOther(){
-  // Somente substitui o caminho ativo apos selecionar; erros recuperam o caminho anterior.
-  const QString chosen=QFileDialog::getOpenFileName(this,"Abrir outro projeto",projectPath,"Alencar Laser (*.alaser)");
-  if(chosen.isEmpty())return;
-  const QString previous=projectPath;projectPath=chosen;
-  try{open();}catch(...){projectPath=previous;throw;}
+  const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
+   projectPath,"Projetos de desenho (*.alaser *.lbrn2);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2)");
+  if(!chosen.isEmpty())openFilePath(chosen);
+ }
+ void openFilePath(const QString& path){
+  const QString suffix=QFileInfo(path).suffix().toLower();
+  if(suffix=="alaser"){
+   const QString previous=projectPath;projectPath=path;
+   try{open();}catch(...){projectPath=previous;throw;}
+   return;
+  }
+  if(suffix!="lbrn2")throw std::runtime_error("Use .alaser ou .lbrn2");
+  // Parse COMPLETO antes de qualquer mutacao: qualquer Shape desconhecida
+  // cancela importacao inteira e preserva arquivo e desenho existentes.
+  const auto imported=lightburn::readGeometry(path);
+  const auto response=QMessageBox::question(this,"Importar LightBurn (somente desenhos)",
+    QString("Foram reconhecidas %1 formas vetoriais.\n\n"
+            "Substituir o desenho atual por uma COPIA editavel?\n"
+            "As configuracoes de corte e da maquina NAO serao importadas.\n"
+            "O arquivo .lbrn2 original nao sera alterado.")
+      .arg(imported.shapeCount),
+    QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
+  if(response!=QMessageBox::Yes)return;
+  view.attachNative(nullptr);
+  curves.reset();
+  view.editor=Editor(imported.state);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  bezierToolActive_=false;
+  loadedProject_.reset();
+  projectPath.clear(); // Nunca salvar por cima de um .lbrn2!
+  buttons.at("select")->click();
+  recoveryPolicy_.edited();
+  captureEvent("lightburn_geometry_imported");
+  refresh();
+  view.setFocus();
+  status->setText(QString("Importadas %1 formas LightBurn. Salve como .alaser para preservar.")
+     .arg(imported.shapeCount));
  }
  void open(){
   if(projectPath.isEmpty())projectPath=QFileDialog::getOpenFileName(this,"Abrir projeto",{},"Alencar Laser (*.alaser)");
