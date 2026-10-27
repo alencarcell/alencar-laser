@@ -139,3 +139,11 @@ Registrar mudanças, testes e pendências.
 - Se nem a via direta funcionar, o relatório inclui \`hover_events\`, rastreamento, coordenadas e candidatos. Caso passe, o relatório \`RESULTADO_TESTE_19_7_GUI.json\` inclui \`hover_delivery\` com \`viewport_synthetic_mouse_move\` ou \`qtest_mouse_move\`.
 - **Um PASS com evento Qt sintético NÃO comprova comportamento do mouse real do notebook.** Após passar, executar suíte completa e validar manualmente cursor condicional, destaque laranja e recorte no desenho real. \`main\` preservada, conexão física bloqueada.
 - Executar no VS Code: \`git pull --ff-only\`; \`powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteTesoura\`.
+
+## Validacao Windows da Tesoura — 27/10/2026: teste focado PASS
+- Captura enviada pelo usuario no VS Code apos `git pull --ff-only` e `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteTesoura`.
+- Saida verificada: CMake configurou, Ninja compilou e vinculou `alencar_test7_qt6.exe`; terminal terminou com `Teste focado passou; validacao completa ainda obrigatoria.` e retornou ao prompt PowerShell sem erro.
+- Os warnings `-Wmisleading-indentation` em `lightburn_reference_inspector.hpp` e `qt6_test6.cpp` nao impediram a compilacao. Corrigir depois sem misturar com a homologacao da Tesoura.
+- Nao consta no print se `hover_delivery` foi `viewport_synthetic_mouse_move` ou `qtest_mouse_move`; consultar o JSON do teste quando necessario.
+- **Ainda pendente:** suite completa `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`, seguida de validação manual com mouse fisico no desenho real, verificando seta no vazio, cursor Tesoura no trecho, preview laranja do arco inteiro, clique remove sem fragmentos, Ctrl+Z e Ctrl+Y.
+- PASS focado nao homologa desempenho em arquivos reais, nem conexao Wi-Fi; maquina deve permanecer desconectada e `main` preservada.
