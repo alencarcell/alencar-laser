@@ -393,7 +393,7 @@ public:
  void enableNative(bool enabled){
   if(busy())return;
   nativeMode_=enabled&&hasNativeDocument();
-  if(nativeMode_)tool=Tool::Select;
+  if(nativeMode_){tool=Tool::Select;viewport()->setCursor(Qt::ArrowCursor);}
   updateNativePaths(false);
  }
  void nativeHistory(bool redo){
@@ -515,6 +515,15 @@ public:
  }
  // Apenas objetos que trocam de estado visual devem ser modificados.
  // Evita milhares de chamadas setPen/setZValue em cada clique.
+ static QColor layerColor(int id){
+  static const QColor colors[]={
+   QColor("#788998"),QColor("#3A86FF"),QColor("#E63946"),QColor("#06D6A0"),
+   QColor("#FFD166"),QColor("#F77F00"),QColor("#9B5DE5"),QColor("#00BBF9"),
+   QColor("#A7C957"),QColor("#FF006E"),QColor("#748CAB"),QColor("#219EBC"),
+   QColor("#B5179E"),QColor("#38B000"),QColor("#BC6C25"),QColor("#8ECAE6")
+  };
+  return colors[(id%16+16)%16];
+ }
  void applySelectionStyles(){
   QElapsedTimer profiler;profiler.start();
   std::vector<int> changed;
@@ -525,7 +534,7 @@ public:
    if(it==itemsByObject_.end())continue;
    bool isSelected=selected.count(objectId)>0;
    for(auto* item:it->second){
-    item->setPen(QPen(isSelected?QColor(239,109,25):QColor(105,115,123),0));
+    item->setPen(QPen(isSelected?QColor(239,109,25):layerColor(editor.state().objects.at(objectId).layer),0));
     item->setZValue(isSelected?9:1);
     styleSetterCalls_+=2;
    }
@@ -542,7 +551,7 @@ public:
   clearShapePreview();endChunkPreview();
   scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
-   auto* o=scene_.addPath(pathOf(c),QPen(QColor(105,115,123),0));o->setZValue(1);
+   auto* o=scene_.addPath(pathOf(c),QPen(layerColor(editor.state().objects.at(c.key.object).layer),0));o->setZValue(1);
    auto m=editor.state().objects.at(c.key.object);auto layer=editor.state().layers.at(m.layer);
    o->setVisible(layer.visible);objects_[c.key]=o;itemsByObject_[c.key.object].push_back(o);
   }
@@ -635,7 +644,7 @@ protected:
   for(const auto& c:editor.state().doc.contours)if(c.nodes.size()==1){
    const auto& layer=editor.state().layers.at(editor.state().objects.at(c.key.object).layer);
    if(!layer.visible)continue;
-   p->setPen(Qt::NoPen);p->setBrush(selected.count(c.key.object)?QColor(239,109,25):QColor(105,115,123));
+   p->setPen(Qt::NoPen);p->setBrush(selected.count(c.key.object)?QColor(239,109,25):layerColor(editor.state().objects.at(c.key.object).layer));
    p->drawEllipse(viewportTransform().map(toQt(c.nodes.front().p)),2,2);
   }
   p->restore();
@@ -1907,8 +1916,11 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     const QString color=shades.at(id%shades.size());
     b->setStyleSheet(QString("QPushButton { background:%1; color:white; border:1px solid #69717B; border-radius:4px; padding:1px; font-size:10px;} "
       "QPushButton:checked {border:3px solid #FFFFFF;} QPushButton:disabled {background:#41454D; color:#797D82;}").arg(color));
-    b->setToolTip(QString("Clique: ativar camada %1 | Shift+clique: enviar seleção para camada (editavel)").arg(id));
+    b->setToolTip(QString("Clique: ativar ou criar camada %1 | Shift+clique: criar se necessario e enviar selecao").arg(id));
     connect(b,&QPushButton::clicked,this,[this,id]{
+     if(layers->findData(id)<0){
+      run([this,id]{view.editor.addLayer(id,"Camada "+std::to_string(id));});
+     }
      const int ix=layers->findData(id);
      if(ix<0)return;
      if(QApplication::keyboardModifiers().testFlag(Qt::ShiftModifier)){
@@ -1994,7 +2006,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   int current=layers->currentData().toInt();refreshing=true;layers->clear();for(const auto& [id,l]:view.editor.state().layers)layers->addItem(QString::fromStdString(l.name),id);
   int ix=layers->findData(current);layers->setCurrentIndex(ix<0?0:ix);refreshing=false;refreshFlags();
   for(size_t i=0;i<layerPalette_.size();++i){
-   auto* b=layerPalette_[i];b->setEnabled(layers->findData(int(i))>=0);
+   auto* b=layerPalette_[i];b->setEnabled(true);
    b->setChecked(int(i)==layers->currentData().toInt());
   }
   const int curveCount=curves?int(curves->committed().contours.size()):0;
