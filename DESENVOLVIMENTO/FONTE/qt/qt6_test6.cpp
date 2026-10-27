@@ -2077,6 +2077,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   shortcut("Esc",[this]{view.cancelCurrentGesture();buttons.at("select")->click();});
   shortcut("V",[this]{buttons.at("select")->click();});
   shortcut("K",[this]{buttons.at("scissors")->click();});
+  shortcut("Ctrl+K",[this]{buttons.at("scissors")->click();});
   shortcut("Ctrl+R",[this]{buttons.at("rectangle")->click();});
   shortcut("Ctrl+E",[this]{buttons.at("ellipse")->click();});
   shortcut("Ctrl+L",[this]{buttons.at("move_layer")->click();});
