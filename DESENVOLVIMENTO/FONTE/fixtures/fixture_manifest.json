@@ -1,0 +1,12 @@
+{
+  "web_objects": 575,
+  "web_paths": 575,
+  "web_nodes": 13415,
+  "bezier_segments": 37,
+  "line_segments": 4,
+  "sources": [
+    "bezier_missing_cp.lbrn2",
+    "butterfly_vectorized.lbrn2"
+  ],
+  "original_files_read_only": true
+}
