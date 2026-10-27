@@ -1375,7 +1375,7 @@ public:
   persistentSplitter_=splitter;
   splitter->setChildrenCollapsible(false);splitter->setHandleWidth(3);
   auto* left=new QFrame;left->setObjectName("leftPanel");
-  left->setMinimumWidth(132);left->setMaximumWidth(200);
+  left->setMinimumWidth(52);left->setMaximumWidth(64);
   auto* leftOuter=new QVBoxLayout(left);leftOuter->setContentsMargins(4,5,4,5);
   auto* toolScroll=new QScrollArea;toolScroll->setWidgetResizable(true);
   toolScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -1389,60 +1389,61 @@ public:
     b->setAccessibleName(title);
     b->setIcon(alaser::toolGlyph(id));
     b->setText(QString());
-    b->setIconSize(QSize(23,23));
-    b->setMinimumHeight(39);
-    b->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
+    b->setIconSize(QSize(20,20));
+    b->setFixedSize(QSize(38,36));
+    b->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Fixed);
     b->setToolTip(title+" — "+tooltip);b->setFocusPolicy(Qt::NoFocus);
     buttons[id]=b;grid->addWidget(b,row,col);
     b->setCheckable(true);toolGroup->addButton(b);
     connect(b,&QPushButton::clicked,this,[this,action]{run(action);});return b;
   };
-  auto newGrid=[&](){auto* g=new QGridLayout;g->setSpacing(3);tools->addLayout(g);return g;};
-  tools->addWidget(titleLabel("EDITAR"));
+  auto newGrid=[&](){auto* g=new QGridLayout;g->setSpacing(3);g->setAlignment(Qt::AlignHCenter);tools->addLayout(g);return g;};
+  tools->addSpacing(4); // Barra compacta: ferramentas de edicao
   auto* editorGrid=newGrid();
   compact(editorGrid,0,0,"select","↖ Seleção","Selecionar (Alt alterna contornos sobrepostos)",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Select);});
-  compact(editorGrid,0,1,"nodes","✎ Nós","Editar nós das polilinhas",
+  compact(editorGrid,1,0,"nodes","✎ Nós","Editar nós das polilinhas",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Nodes);});
-  [[maybe_unused]] auto* bezier=compact(editorGrid,1,0,"bezier","⌁ Bézier","Editar âncoras e alças Bézier nativas",
+  [[maybe_unused]] auto* bezier=compact(editorGrid,2,0,"bezier","⌁ Bézier","Editar âncoras e alças Bézier nativas",
    [this]{if(!curves){status->setText("Abra um projeto com curvas v5.");return;}
      bezierToolActive_=true;view.enableNative(true);
      status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
-  compact(editorGrid,1,1,"scissors","✂ Tesoura","Cortar polilinha no segmento (K). Curvas Bezier nao sao alteradas.",
+  compact(editorGrid,3,0,"scissors","✂ Tesoura","Cortar polilinha no segmento (K). Curvas Bezier nao sao alteradas.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
      status->setText("Tesoura: clique numa linha; Ctrl+Z desfaz. Para curvas nativas, use Bézier.");});
-  tools->addWidget(titleLabel("DESENHO"));
+  tools->addSpacing(5); // Ferramentas de desenho
   auto* shapeGrid=newGrid();
   compact(shapeGrid,0,0,"line","╱ Linha","Desenhar linha",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Line);});
-  compact(shapeGrid,0,1,"rectangle","▭ Retâng.","Desenhar retângulo",
+  compact(shapeGrid,1,0,"rectangle","▭ Retâng.","Desenhar retângulo",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Rectangle);});
-  compact(shapeGrid,1,0,"ellipse","◯ Elipse","Desenhar elipse",
+  compact(shapeGrid,2,0,"ellipse","◯ Elipse","Desenhar elipse",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Ellipse);});
-  compact(shapeGrid,1,1,"polygon","⬡ Políg.","Desenhar polígono",
+  compact(shapeGrid,3,0,"polygon","⬡ Políg.","Desenhar polígono",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Polygon);});
   buttons.at("select")->setChecked(true);
   auto future=[&](const QString& name,const QString& tip){
-    auto* b=new QPushButton(name);b->setProperty("compact",true);
+    auto* b=new QPushButton(name.left(1));b->setProperty("compact",true);
+    b->setFixedSize(QSize(38,32));b->setAccessibleName(name);
     b->setEnabled(false);b->setToolTip(tip+" — em desenvolvimento; função desativada");
     b->setFocusPolicy(Qt::NoFocus);return b;
   };
-  tools->addWidget(titleLabel("VETOR  ·  FUTURO"));
+  tools->addSpacing(6); // Ferramentas futuras desativadas
   auto* vectorGrid=newGrid();
   for(const auto& data:std::vector<std::tuple<QString,QString>>{
    {"T  Texto","Texto vetorial"},{"◎ Offset","Contorno interno/externo"},
    {"⊕ União","Soldar vetores"},{"⊖ Subtr.","Subtrair formas"},
    {"⊞ Alinhar","Alinhamento e distribuição"},{"⌗ Medir","Ferramenta de medição"}}){
-    const int index=vectorGrid->count();vectorGrid->addWidget(future(std::get<0>(data),std::get<1>(data)),index/2,index%2);
+    const int index=vectorGrid->count();vectorGrid->addWidget(future(std::get<0>(data),std::get<1>(data)),index,0);
   }
-  tools->addWidget(titleLabel("ARQUIVOS  ·  FUTURO"));
+  tools->addSpacing(5); // Importadores futuros desativados
   auto* fileGrid=newGrid();
   for(const auto& data:std::vector<QString>{"SVG", "DXF", "Imagem", "LightBurn"}){
-   const int index=fileGrid->count();fileGrid->addWidget(future(data,"Importação de "+data),index/2,index%2);
+   const int index=fileGrid->count();fileGrid->addWidget(future(data,"Importação de "+data),index,0);
   }
   tools->addStretch();
   auto* tip=new QLabel("Arraste: mover forma\nDelete: excluir forma\nCtrl+arraste: mover curva Bézier\nScroll: zoom no cursor\nBotão central: mover tela\nCtrl+Z/Y: histórico");
-  tip->setObjectName("brandSub");tip->setWordWrap(true);tools->addWidget(tip);
+  tip->setObjectName("brandSub");tip->setWordWrap(true);tip->hide();tools->addWidget(tip);
   toolScroll->setWidget(leftContent);leftOuter->addWidget(toolScroll);
   splitter->addWidget(left);
 
