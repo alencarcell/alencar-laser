@@ -66,6 +66,7 @@ try {
         'alencar_test19_5_grbl_observer',
         'alencar_test19_6_rules',
         'alencar_test19_7_scissors_layers',
+        'alencar_test19_8_scissors_span',
         'alencar_test19_8_recovery_policy',
         'alencar_test_v5_codec_regression'
     )
