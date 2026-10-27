@@ -194,6 +194,7 @@ class QtEditorLab final:public QGraphicsView{
  uint64_t scissorIndexVersion_=std::numeric_limits<uint64_t>::max();
  std::optional<ScissorSpan> scissorHover_;
  QGraphicsPathItem* scissorPreview_=nullptr;
+ uint64_t scissorHoverEvents_=0;
  // TESTE_12: caminho continuo e o modo seguro padrao.
  // Blocos sao EXCLUSIVAMENTE experimentais (ALENCAR_LAB_CHUNKS_EXPERIMENTAL=1).
  bool continuousPreview_=false;
@@ -588,12 +589,40 @@ public:
  QGraphicsPathItem* pathItem(Key k){return objects_.at(k);}
  std::optional<Key> active()const{return active_;}
  std::optional<ScissorSpan> scissorPreview()const{return scissorHover_;}
+ std::string scissorHoverDiagnostics(QPoint at){
+  const auto scenePt=mapToScene(at);
+  std::ostringstream out;
+  out<<"hover_events="<<scissorHoverEvents_
+     <<" mode="<<int(tool)<<" native="<<nativeMode_<<" busy="<<busy()
+     <<" point=("<<at.x()<<","<<at.y()<<")"
+     <<" viewport=("<<viewport()->width()<<","<<viewport()->height()<<")"
+     <<" scene=("<<scenePt.x()<<","<<scenePt.y()<<")";
+  auto hits=clickHits(at);
+  out<<" hits="<<hits.size();
+  ScissorSpanPlanner checker;
+  checker.reset(editor.state().doc,[&](Key k){
+   auto it=editor.state().objects.find(k.object);
+   if(it==editor.state().objects.end())return false;
+   auto li=editor.state().layers.find(it->second.layer);
+   return li!=editor.state().layers.end()&&li->second.visible;
+  });
+  for(size_t i=0;i<std::min<size_t>(hits.size(),3);++i){
+   auto candidate=checker.candidate(editor.state().doc,hits[i]);
+   out<<" hit"<<i<<"=(object:"<<hits[i].key.object
+      <<",edge:"<<hits[i].segment<<",candidate:"<<(bool(candidate))
+      <<",pts:"<<(candidate?candidate->preview.size():0)<<")";
+  }
+  out<<" preview="<<(bool(scissorHover_))
+     <<" overlay="<<(scissorPreview_!=nullptr);
+  return out.str();
+ }
  void clearScissorHover(){
   scissorHover_.reset();
   if(scissorPreview_){scene_.removeItem(scissorPreview_);delete scissorPreview_;scissorPreview_=nullptr;}
   viewport()->setCursor(Qt::ArrowCursor);
  }
  void updateScissorHover(QPoint where){
+  ++scissorHoverEvents_;
   if(tool!=Tool::Scissors||nativeMode_||busy()){clearScissorHover();return;}
   if(scissorIndexVersion_!=editor.generation){
    clearScissorHover();
@@ -2495,9 +2524,13 @@ static QJsonObject editTools197Test(const QString& directory){
  check(v.tool==QtEditorLab::Tool::Select,"Esc failed from drawing mode");
  pressKey(w,Qt::Key_K);check(v.tool==QtEditorLab::Tool::Scissors,"K scissor shortcut missing");
  check(v.viewport()->cursor().shape()==Qt::ArrowCursor,"tesoura fora do objeto deveria ser seta");
- QTest::mouseMove(v.viewport(),v.mapFromScene({110,100}));QApplication::processEvents();
+ const QPoint hoverPoint=v.mapFromScene({110,100});
+ QTest::mouseMove(v.viewport(),hoverPoint);QApplication::processEvents();
  auto preview=v.scissorPreview();
- check(bool(preview)&&preview->preview.size()>=4,"hover nao iluminou arco completo");
+ if(!preview||preview->preview.size()<4){
+  w.grab().save(directory+"/FALHA_HOVER_TESOURA.png");
+  throw std::runtime_error("hover nao iluminou arco completo: "+v.scissorHoverDiagnostics(hoverPoint));
+ }
  check(v.viewport()->cursor().shape()!=Qt::ArrowCursor,"cursor nao mudou sobre trecho valido");
  QTest::mouseMove(v.viewport(),v.mapFromScene({138,135}));QApplication::processEvents();
  check(!v.scissorPreview()&&v.viewport()->cursor().shape()==Qt::ArrowCursor,
