@@ -2486,14 +2486,19 @@ static QJsonObject editTools197Test(const QString& directory){
 // Integrated Qt test: v5 recovery snapshots never overwrite the user's file.
 static QJsonObject recovery198Test(const QString& directory){
  QStandardPaths::setTestModeEnabled(true);
+ // Em cada rodada, arquivos originais sintéticos vivem num diretorio exclusivo.
+ // Nunca apagar resultados anteriores nem reaproveitar um arquivo ja salvo.
+ check(QDir().mkpath(directory),"cannot prepare test report directory");
+ QTemporaryDir isolated(QDir(directory).filePath("recovery_case_XXXXXX"));
+ check(isolated.isValid(),"cannot create isolated recovery test directory");
  alaser::PersistentSessionStore::discard();
- QDir().mkpath(directory);
  LabWindow w(Document{});
  w.uiPersistenceEnabled_=true; // test explicitly drives recovery without timer/UI prompts
  const int id=w.view.editor.rectangle({20,30},50,40);
  w.view.rebuild();w.recoveryPolicy_.edited();
  check(w.recoveryPolicy_.needsSnapshot(),"recovery did not observe edit");
- const QString original=directory+"/original_untouched.alaser";
+ const QString original=isolated.filePath("original_untouched.alaser");
+ check(!QFile::exists(original),"isolated test target not empty before snapshot");
  w.projectPath=original;
  w.snapshotForRecovery();
  check(alaser::PersistentSessionStore::hasSnapshot(),"no recovery copy");
