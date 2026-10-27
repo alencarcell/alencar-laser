@@ -46,7 +46,7 @@ inline std::vector<Pt> spanPoints(const Contour& c,double a,double b){
 }
 inline double cross2(Pt a,Pt b){return a.x*b.y-a.y*b.x;}
 class ScissorSpanPlanner {
- struct Boundaries {std::vector<double> crossings;bool ambiguous=false;};
+ struct Boundaries {std::vector<double> crossings;std::vector<std::pair<double,double>> unsafe;};
  std::vector<Segment> segments_;
  std::unique_ptr<SegmentBVH> index_;
  std::map<Key,Boundaries> cache_;
@@ -57,7 +57,7 @@ class ScissorSpanPlanner {
   for(int i=0;i<edges;i++){
    Pt a=c.nodes[size_t(i)].p,b=c.nodes[size_t(i+1)%c.nodes.size()].p;
    Pt r=b-a;const double rr=norm2(r);
-   if(rr<=1e-18){out.ambiguous=true;return out;}
+   if(rr<=1e-18){out.unsafe.push_back({double(i),double(i+1)});continue;}
    const auto candidates=index_->candidateIdsBox(std::min(a.x,b.x),std::min(a.y,b.y),
                                                    std::max(a.x,b.x),std::max(a.y,b.y));
    for(int id:candidates){
@@ -77,7 +77,10 @@ class ScissorSpanPlanner {
      if(std::abs(cross2(q-a,r))<=1e-10*std::sqrt(rr)*std::max(1.,dist(q,a))){
       const double v0=((q-a).x*r.x+(q-a).y*r.y)/rr;
       const double v1=((s.b-a).x*r.x+(s.b-a).y*r.y)/rr;
-      if(std::min(v0,v1)<1.-1e-8&&std::max(v0,v1)>1e-8)out.ambiguous=true;
+      if(std::min(v0,v1)<1.-1e-8&&std::max(v0,v1)>1e-8){
+       out.unsafe.push_back({i+std::max(0.,std::min(v0,v1)),
+                             i+std::min(1.,std::max(v0,v1))});
+      }
      }
      continue;
     }
@@ -85,7 +88,10 @@ class ScissorSpanPlanner {
     if(x< -1e-9||x>1.+1e-9||y< -1e-9||y>1.+1e-9)continue;
     // Intersecoes exatamente em vertices podem ser tangencias; recusamos
     // estes casos ate haver classificacao topologica de ambos os lados.
-    if(x<1e-7||x>1.-1e-7||y<1e-7||y>1.-1e-7){out.ambiguous=true;continue;}
+    if(x<1e-7||x>1.-1e-7||y<1e-7||y>1.-1e-7){
+     const double p=double(i)+std::clamp(x,0.,1.);
+     out.unsafe.push_back({p-1e-6,p+1e-6});continue;
+    }
     out.crossings.push_back(double(i)+x);
    }
   }
@@ -115,7 +121,7 @@ public:
   auto it=cache_.find(hit.key);
   if(it==cache_.end())it=cache_.emplace(hit.key,compute(*c)).first;
   const auto& bs=it->second;
-  if(bs.ambiguous||(c->closed&&bs.crossings.size()<2))return {};
+  if(c->closed&&bs.crossings.size()<2)return {};
   std::vector<double> edges=bs.crossings;
   if(!c->closed){edges.insert(edges.begin(),0.);edges.push_back(double(m));}
   const auto next=std::upper_bound(edges.begin(),edges.end(),pos+1e-8);
@@ -129,6 +135,15 @@ public:
    lo=*(next-1);hi=*next;
   }
   if(pos-lo<1e-7||hi-pos<1e-7||hi-lo<1e-7||hi-lo>m+1e-7)return {};
+  // Bloqueia apenas spans que atravessam sobreposicoes/tangencias ambiguas,
+  // sem inutilizar os outros arcos do mesmo objeto.
+  for(const auto& bad:bs.unsafe){
+   for(int shift=-1;shift<=1;shift++){
+    const double offset=c->closed?double(shift*m):0.;
+    if(bad.second+offset>lo+1e-8&&bad.first+offset<hi-1e-8)return {};
+    if(!c->closed)break;
+   }
+  }
   // Janela de previsualizacao deve ser igual ao intervalo aplicado no commit.
   ScissorSpan result{hit.key,lo,hi,c->closed,spanPoints(*c,lo,hi)};
   if(result.preview.size()<2)return {};
