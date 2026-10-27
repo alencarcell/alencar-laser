@@ -201,6 +201,7 @@ class QtEditorLab final:public QGraphicsView{
  std::optional<ScissorSpan> scissorHover_;
  QGraphicsPathItem* scissorPreview_=nullptr;
  uint64_t scissorHoverEvents_=0;
+ std::optional<QPoint> scissorLastHoverPosition_;
  // TESTE_12: caminho continuo e o modo seguro padrao.
  // Blocos sao EXCLUSIVAMENTE experimentais (ALENCAR_LAB_CHUNKS_EXPERIMENTAL=1).
  bool continuousPreview_=false;
@@ -600,6 +601,9 @@ public:
  std::optional<Key> active()const{return active_;}
  std::optional<ScissorSpan> scissorPreview()const{return scissorHover_;}
  uint64_t scissorHoverEventCount()const{return scissorHoverEvents_;}
+ bool scissorHoverReceivedAt(QPoint expected)const{
+  return scissorLastHoverPosition_&&*scissorLastHoverPosition_==expected;
+ }
  std::string scissorHoverDiagnostics(QPoint at){
   const auto scenePt=mapToScene(at);
   std::ostringstream out;
@@ -609,6 +613,9 @@ public:
      <<" viewport=("<<viewport()->width()<<","<<viewport()->height()<<")"
      <<" tracking="<<viewport()->hasMouseTracking()
      <<" hover_attr="<<viewport()->testAttribute(Qt::WA_Hover)
+     <<" last_hover="<<(scissorLastHoverPosition_?
+       ("("+std::to_string(scissorLastHoverPosition_->x())+","+
+             std::to_string(scissorLastHoverPosition_->y())+")"):"none")
      <<" scene=("<<scenePt.x()<<","<<scenePt.y()<<")";
   auto hits=clickHits(at);
   out<<" hits="<<hits.size();
@@ -636,6 +643,7 @@ public:
  }
  void updateScissorHover(QPoint where){
   ++scissorHoverEvents_;
+  scissorLastHoverPosition_=where;
   if(tool!=Tool::Scissors||nativeMode_||busy()){clearScissorHover();return;}
   if(scissorIndexVersion_!=editor.generation){
    clearScissorHover();
@@ -2623,15 +2631,17 @@ static QJsonObject editTools197Test(const QString& directory){
  auto moveHover=[&](QPoint at){
   const uint64_t before=v.scissorHoverEventCount();
   QTest::mouseMove(v.viewport(),at);QApplication::processEvents();
-  if(v.scissorHoverEventCount()!=before)return;
+  // QTest pode entregar um evento atrasado com coordenadas anteriores.
+  // Receber ALGUM evento nao demonstra que o cursor saiu do contorno.
+  if(v.scissorHoverEventCount()!=before&&v.scissorHoverReceivedAt(at))return;
   usedViewportEventFallback=true;
   const QPointF local(at),global(v.viewport()->mapToGlobal(at));
   QMouseEvent mouse(QEvent::MouseMove,local,global,
                     Qt::NoButton,Qt::NoButton,Qt::NoModifier);
   QApplication::sendEvent(v.viewport(),&mouse);
   QApplication::processEvents();
-  if(v.scissorHoverEventCount()==before)
-   throw std::runtime_error("MouseMove nao chegou ao QtEditorLab mesmo via viewport: "+v.scissorHoverDiagnostics(at));
+  if(v.scissorHoverEventCount()==before||!v.scissorHoverReceivedAt(at))
+   throw std::runtime_error("MouseMove nao chegou na coordenada esperada pela viewport: "+v.scissorHoverDiagnostics(at));
  };
  moveHover(clearPoint);
  moveHover(hoverPoint);
@@ -2642,8 +2652,11 @@ static QJsonObject editTools197Test(const QString& directory){
  }
  check(v.viewport()->cursor().shape()!=Qt::ArrowCursor,"cursor nao mudou sobre trecho valido");
  moveHover(clearPoint);
- check(!v.scissorPreview()&&v.viewport()->cursor().shape()==Qt::ArrowCursor,
-       "Tesoura permaneceu ativa fora do trecho");
+ if(v.scissorPreview()||v.viewport()->cursor().shape()!=Qt::ArrowCursor){
+  w.grab().save(directory+"/FALHA_SAIDA_TESOURA.png");
+  throw std::runtime_error("Tesoura permaneceu ativa fora do trecho: "+
+                           v.scissorHoverDiagnostics(clearPoint));
+ }
  const size_t old=v.editor.undoCount();
  clickScene(w,{110,100});
  check(v.editor.undoCount()==old+1,"scissor mouse click did not create history");
