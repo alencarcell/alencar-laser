@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao)
+param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -60,6 +60,19 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteFerramentas) {
+        Write-Host 'TESTE FOCADO: Texto vetorial e Lapis experimental.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt das ferramentas'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\desenho'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --drawing-tools-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Texto e Lapis' (Join-Path $destino 'RESULTADO_TEXTO_LAPIS_19_8.json')
+        Write-Host 'Texto/Lapis passaram nos testes sinteticos. Teste manual ainda necessario.' -ForegroundColor Green
+        return
+    }
     if ($SomenteImportacao) {
         Write-Host 'VALIDACAO FOCADA: importacao segura LightBurn .lbrn2.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test7_qt6
@@ -127,6 +140,10 @@ try {
     $dirImportacao = Join-Path $destino 'importacao'
     & $app --lbrn2-import-test $fixture $dirImportacao
     Checar-ResultadoQt 'Importacao geometrica LBRN2' (Join-Path $dirImportacao 'RESULTADO_IMPORTACAO_LBRN2.json')
+    $dirDesenho = Join-Path $destino 'desenho'
+    New-Item -ItemType Directory -Path $dirDesenho -Force | Out-Null
+    & $app --drawing-tools-19-8-test $fixture $dirDesenho
+    Checar-ResultadoQt 'Texto e Lapis Qt' (Join-Path $dirDesenho 'RESULTADO_TEXTO_LAPIS_19_8.json')
 
     Write-Host 'BUILD E REGRESSOES AUTOMATIZADAS PASSARAM. AVALIACAO VISUAL AINDA NECESSARIA.' -ForegroundColor Green
     if ($Abrir) {
