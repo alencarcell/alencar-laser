@@ -180,3 +180,9 @@ Registrar mudanças, testes e pendências.
 - Ainda SEM PASS da suite completa apos esse commit, SEM verificacao de mouse real, SEM confirmacao de arrastar soltar arquivo real e SEM compatibilidade LBRN2 em trabalho real.
 - Proxima execucao: `git pull --ff-only` seguido de `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`; testar Tesoura manualmente com laser desconectado. Se falhar importacao, priorizar JSON `RELATORIOS/AUDITORIAS/GITHUB_19_8/importacao/RESULTADO_IMPORTACAO_LBRN2.json`.
 - Branch `fix/scissors-continuous-span-19-8`, PR #2 ainda experimental; main intocada.
+
+## Rodada Qt: teste focado da Tesoura PASS após validação das coordenadas — 27/10/2026
+- Usuário mostrou nova execução Windows/VS Code com **`[2/2] Linking CXX executable alencar_test7_qt6.exe`** e a mensagem final **`Teste focado passou; validacao completa ainda obrigatoria.`**; retorno ao prompt PowerShell sem falha.
+- A mudança anterior (commit `4604ea6`) passou o teste automatizado de cursor e remoção da prévia após sair do trecho. Ainda **não equivale à homologação com mouse físico**.
+- Warnings de `-Wmisleading-indentation` em `lightburn_reference_inspector.hpp` e `qt6_test6.cpp` e aviso de construtor `QDragEnterEvent` obsoleto não impediram a compilação; limpeza deve ser feita separadamente.
+- Próximo teste: `git pull --ff-only` e `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`. Este roda a suíte completa, incluindo importação geométrica `.lbrn2` em fixtures, e abre a candidata apenas se passar. Testar mouse físico em retângulo/círculo isolados, contornos cruzados e arraste de arquivos reais. Máquina desconectada; nenhuma homologação até então.
