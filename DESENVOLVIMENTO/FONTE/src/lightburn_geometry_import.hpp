@@ -10,6 +10,7 @@
 #include <QTransform>
 #include <QXmlStreamReader>
 #include <cmath>
+#include <numbers>
 #include <set>
 #include <stdexcept>
 #include <vector>
@@ -127,11 +128,23 @@ inline ImportResult readGeometry(const QString& path){
  for(const auto& root:roots)flatten(root,QTransform(),shapes);
  if(shapes.empty())throw std::runtime_error("Projeto sem formas vetoriais compativeis");
  if(shapes.size()>30000)throw std::runtime_error("Limite de objetos excedido");
- Editor editor(Document{});
- std::set<int> requiredLayers;
- for(const auto& shape:shapes)requiredLayers.insert(shape.layer);
- for(int id:requiredLayers)if(id>0)editor.addLayer(id,"LightBurn C"+std::to_string(id));
- for(auto& shape:shapes)editor.addContour(std::move(shape.points),true,shape.layer);
- return ImportResult(editor.state(),int(shapes.size()));
+ // Construir documento isolado diretamente, sem registrar uma copia integral
+ // por objeto no historico. Evita custo quadratico em projetos grandes.
+ EditorState state=fromDocument(Document{});
+ int object=0;
+ size_t totalNodes=0;
+ for(auto& shape:shapes){
+  totalNodes+=shape.points.size();
+  if(totalNodes>250000)throw std::runtime_error("Limite de 250 mil nos na importacao LBRN2");
+  if(!state.layers.count(shape.layer)){
+   state.layers[shape.layer]={shape.layer,"LightBurn C"+std::to_string(shape.layer),true,false};
+  }
+  Contour contour;contour.key={++object,0};contour.closed=true;
+  for(Pt p:shape.points)contour.nodes.push_back({state.doc.nextId++,p});
+  state.doc.contours.push_back(std::move(contour));
+  state.objects[object]={shape.layer,0};
+ }
+ validate(state);
+ return ImportResult(std::move(state),int(shapes.size()));
 }
 } // namespace alaser::lightburn
