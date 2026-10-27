@@ -2313,9 +2313,21 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    return;
   }
   if(suffix!="lbrn2")throw std::runtime_error("Use .alaser ou .lbrn2");
-  // Parse COMPLETO antes de qualquer mutacao: qualquer Shape desconhecida
-  // cancela importacao inteira e preserva arquivo e desenho existentes.
-  const auto imported=lightburn::readGeometry(path);
+  // Mensagem visivel quando um arquivo LBRN2 real contem formas ausentes
+  // do importador. Nunca trocar o desenho atual numa importacao incompleta.
+  lightburn::ImportResult imported=lightburn::ImportResult(fromDocument(Document{}),0);
+  try{imported=lightburn::readGeometry(path);}
+  catch(const std::exception& error){
+   QMessageBox::warning(this,"LightBurn: importacao ainda nao compativel",
+      QString("Nao foi possivel abrir este arquivo .lbrn2 por inteiro.\n\n"
+       "Motivo tecnico: %1\n\n"
+       "O projeto aberto no Alencar Laser NAO foi alterado. "
+       "Nao sera feita uma importacao parcial sem sua autorizacao.\n\n"
+       "Para ampliar a compatibilidade, envie uma copia deste .lbrn2 para analise.")
+        .arg(QString::fromUtf8(error.what())));
+   status->setText("Importacao LBRN2 nao realizada: formato ainda incompatível");
+   return;
+  }
   const auto response=QMessageBox::question(this,"Importar LightBurn (somente desenhos)",
     QString("Foram reconhecidas %1 formas vetoriais.\n\n"
             "Substituir o desenho atual por uma COPIA editavel?\n"
