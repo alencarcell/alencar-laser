@@ -57,6 +57,31 @@ int main(){
   require(ring.undo()&&sameDoc(ringBefore,ring.state().doc),"undo do arco falhou");
   validate(ring.state());
 
+  // Curva que cruza a si mesma: a intersecao tambem delimita dois arcos.
+  Editor bow(Document{});
+  const int bowId=bow.addContour({{-2,-2},{2,2},{-2,2},{2,-2}},true);
+  const Document bowBefore=bow.state().doc;
+  planner.reset(bow.state().doc);
+  auto bowSpan=planner.candidate(bow.state().doc,{{bowId,0},1,0,{0,2}});
+  require(bool(bowSpan)&&bowSpan->preview.size()>2,"autocruzamento nao delimita trecho");
+  bow.removeScissorSpan(*bowSpan);
+  require(get(bow.state().doc,{bowId,0})&&!get(bow.state().doc,{bowId,0})->closed,
+          "autocruzamento nao removeu arco");
+  require(bow.undo()&&sameDoc(bowBefore,bow.state().doc),"undo autocruzamento falhou");
+
+  // Uma camada invisivel nao pode criar limites de corte fantasma.
+  Editor invis(Document{});
+  const int face=invis.rectangle({0,0},10,10);
+  const int helper=invis.line({-5,5},{15,5});
+  invis.addLayer(4,"Limite oculto");invis.moveToLayer(helper,4);
+  invis.setLayerFlags(4,false,false);
+  const auto& st=invis.state();
+  planner.reset(st.doc,[&](Key key){
+   auto meta=st.objects.find(key.object);
+   return meta!=st.objects.end()&&st.layers.at(meta->second.layer).visible;
+  });
+  require(!planner.candidate(st.doc,{{face,0},0,0,{5,0}}),
+          "contorno invisivel gerou limite de Tesoura");
   Editor noCross(Document{});
   int plain=noCross.ellipse({0,0},10,10,64);
   planner.reset(noCross.state().doc);
@@ -83,7 +108,7 @@ int main(){
           "objeto vazio deixou geometria fantasma");
   validate(lock.state());
 
-  std::cout<<"PASS: trechos densos, elipse 64 segmentos, previas completas, limites, undo/redo, guardas\n";
+  std::cout<<"PASS: trechos densos, elipse 64, autocruzamentos, invisibilidade, previas, undo/redo, guardas\n";
   return 0;
  }catch(const std::exception& ex){
   std::cerr<<"FAIL: "<<ex.what()<<"\n";return 1;
