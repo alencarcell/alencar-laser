@@ -81,7 +81,8 @@ int main(){
   need(split.undo()&&snapshot(split)==openBefore,"open removal undo differs");
   need(split.redo()&&get(split.state().doc,{remaining,0}),"open removal redo failed");
   split.setLayerFlags(7,true,true);
-  const auto lockedState=snapshot(split), lockedHistory=split.undoCount();
+  const auto lockedState=snapshot(split);
+  const auto lockedHistory=split.undoCount();
   bool refused=false;
   try{split.removePolylineEdge({o,0},0);}catch(const std::runtime_error&){refused=true;}
   need(refused&&snapshot(split)==lockedState&&split.undoCount()==lockedHistory,"locked removal altered document");
