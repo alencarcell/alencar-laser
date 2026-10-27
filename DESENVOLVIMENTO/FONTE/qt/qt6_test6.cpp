@@ -2535,18 +2535,33 @@ static QJsonObject editTools197Test(const QString& directory){
  const QPoint hoverPoint=v.mapFromScene({110,100});
  check(v.viewport()->hasMouseTracking(),"viewport sem mouse tracking");
  const QPoint clearPoint=v.mapFromScene({138,135});
- const uint64_t eventsBefore=v.scissorHoverEventCount();
- QTest::mouseMove(v.viewport(),clearPoint);QApplication::processEvents();
- QTest::mouseMove(v.viewport(),hoverPoint);QApplication::processEvents();
- if(v.scissorHoverEventCount()==eventsBefore)
-  throw std::runtime_error("Qt nao entregou mouseMoveEvent na viewport: "+v.scissorHoverDiagnostics(hoverPoint));
+ bool usedViewportEventFallback=false;
+ // QTest::mouseMove pode nao gerar hover SEM botao no ambiente de testes
+ // Windows/Qt. A segunda via envia um QMouseEvent real ao QWidget viewport,
+ // atravessando QAbstractScrollArea/viewportEvent -> QtEditorLab::mouseMoveEvent.
+ // Nao chama updateScissorHover diretamente, nem altera documento ou preview.
+ auto moveHover=[&](QPoint at){
+  const uint64_t before=v.scissorHoverEventCount();
+  QTest::mouseMove(v.viewport(),at);QApplication::processEvents();
+  if(v.scissorHoverEventCount()!=before)return;
+  usedViewportEventFallback=true;
+  const QPointF local(at),global(v.viewport()->mapToGlobal(at));
+  QMouseEvent mouse(QEvent::MouseMove,local,global,
+                    Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+  QApplication::sendEvent(v.viewport(),&mouse);
+  QApplication::processEvents();
+  if(v.scissorHoverEventCount()==before)
+   throw std::runtime_error("MouseMove nao chegou ao QtEditorLab mesmo via viewport: "+v.scissorHoverDiagnostics(at));
+ };
+ moveHover(clearPoint);
+ moveHover(hoverPoint);
  auto preview=v.scissorPreview();
  if(!preview||preview->preview.size()<4){
   w.grab().save(directory+"/FALHA_HOVER_TESOURA.png");
   throw std::runtime_error("hover nao iluminou arco completo: "+v.scissorHoverDiagnostics(hoverPoint));
  }
  check(v.viewport()->cursor().shape()!=Qt::ArrowCursor,"cursor nao mudou sobre trecho valido");
- QTest::mouseMove(v.viewport(),v.mapFromScene({138,135}));QApplication::processEvents();
+ moveHover(clearPoint);
  check(!v.scissorPreview()&&v.viewport()->cursor().shape()==Qt::ArrowCursor,
        "Tesoura permaneceu ativa fora do trecho");
  const size_t old=v.editor.undoCount();
@@ -2596,6 +2611,8 @@ static QJsonObject editTools197Test(const QString& directory){
  w.grab().save(directory+"/TESTE_19_7_FERRAMENTAS.png");
  return {{"status","PASS"},{"selection_esc",true},{"selection_v",true},
    {"scissors_k",true},{"scissors_mouse",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"undo_scissors",true},
+   {"hover_delivery",usedViewportEventFallback?"viewport_synthetic_mouse_move":"qtest_mouse_move"},
+   {"hardware_hover_verified",false},
    {"ctrl_r_rectangle",true},{"ctrl_e_ellipse",true},{"shift_square_circle",true},{"create_layer_by_palette",true},
    {"move_layer_ctrl_l",true},{"layer_lock_rejected",true},
    {"document_before_lock_attempt",QString::number(before.size())},
