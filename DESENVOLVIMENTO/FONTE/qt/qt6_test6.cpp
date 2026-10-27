@@ -1103,6 +1103,33 @@ static IntegratedProject openNative(const QString& file){
  return readIntegratedProject(file.toStdString());
 }
 static double percentile(std::vector<double> values,double q){if(values.empty())return 0;std::sort(values.begin(),values.end());return values[size_t((values.size()-1)*q)];}
+// Vetorizador unico usado pelo botao Texto e pela regressao Qt; nao envia G-code.
+static std::vector<std::vector<Pt>> vectorTextOutlines(const QString& value,QFont font,
+                                                        double height,Pt origin){
+ if(value.isEmpty()||value.size()>100||!std::isfinite(height)||height<1||height>150)
+  throw std::runtime_error("Texto ou altura fora do limite");
+ font.setPixelSize(180);
+ QPainterPath outline;outline.addText(QPointF(0,0),font,value);
+ if(outline.isEmpty())throw std::runtime_error("A fonte nao produziu contornos");
+ const QRectF bounds=outline.boundingRect();
+ if(bounds.height()<1e-6)throw std::runtime_error("Fonte sem altura util");
+ QTransform t;t.translate(origin.x,origin.y);
+ const double scale=height/bounds.height();t.scale(scale,scale);
+ t.translate(-bounds.left(),-bounds.top());
+ const auto polygons=outline.toSubpathPolygons(t);
+ std::vector<std::vector<Pt>> shapes;
+ for(const QPolygonF& polygon:polygons){
+  std::vector<Pt> points;points.reserve(size_t(polygon.size()));
+  for(const QPointF& q:polygon){
+   const Pt p{q.x(),q.y()};
+   if(points.empty()||dist(points.back(),p)>1e-5)points.push_back(p);
+  }
+  if(points.size()>1&&dist(points.front(),points.back())<1e-5)points.pop_back();
+  if(points.size()>=3)shapes.push_back(std::move(points));
+ }
+ if(shapes.empty())throw std::runtime_error("Texto sem contornos fechados");
+ return shapes;
+}
 class LabWindow final:public QWidget{
 public:
  QtEditorLab view;
@@ -2257,31 +2284,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(!ok)return;
   const QFont selected=QFontDialog::getFont(&ok,QFont("Arial",12),this,"Fonte do texto");
   if(!ok)return;
-  QFont font=selected;font.setPixelSize(180);
-  QPainterPath outline;
-  outline.addText(QPointF(0,0),font,message);
-  if(outline.isEmpty())throw std::runtime_error("Fonte nao produziu contornos vetoriais");
-  const QRectF rect=outline.boundingRect();
-  if(rect.height()<1e-6)throw std::runtime_error("Altura invalida do texto");
-  const double scale=height/rect.height();
-  QTransform transform;transform.translate(at.x,at.y);
-  transform.scale(scale,scale);
-  transform.translate(-rect.left(),-rect.top());
-  // Contornos aproximados de cada subcaminho; cada letra pode ter aneis
-  // internos separados. Sao vetores editaveis, nao texto editavel.
-  const auto polygons=outline.toSubpathPolygons(transform);
-  std::vector<std::vector<Pt>> shapes;
-  for(const QPolygonF& polygon:polygons){
-   std::vector<Pt> points;
-   points.reserve(size_t(polygon.size()));
-   for(const QPointF& q:polygon){
-    const Pt p{q.x(),q.y()};
-    if(points.empty()||dist(points.back(),p)>1e-5)points.push_back(p);
-   }
-   if(points.size()>1&&dist(points.front(),points.back())<1e-5)points.pop_back();
-   if(points.size()>=3)shapes.push_back(std::move(points));
-  }
-  if(shapes.empty())throw std::runtime_error("Fonte sem contornos fechados");
+  auto shapes=vectorTextOutlines(message,selected,height,at);
   const auto ids=view.editor.addContours(std::move(shapes),true,layers->currentData().toInt());
   view.clearSelection();view.invalidateSelectionCache();view.rebuild();
   view.activate({ids.front(),0});
@@ -2906,7 +2909,16 @@ static QJsonObject recovery198Test(const QString& directory){
 // TESTE_19.8 importacao: XMLs sinteticos representam formas garantidas.
 // Testes sem abrir dialogos, sem salvar ou conectar a maquina.
 static QJsonObject newDrawingTools198Test(const QString& directory){
- // Somente interface de edicao: sem dialogos de texto, sem hardware.
+ // O mesmo vetorizador do botão Texto e exercitado sem dialogos.
+ const auto letters=vectorTextOutlines("LASER",QFont("Sans Serif",12),12.,{10,20});
+ check(!letters.empty(),"Fonte instalada nao gerou letra vetorial");
+ size_t letterNodes=0;for(const auto& contour:letters)letterNodes+=contour.size();
+ check(letterNodes>=12&&letterNodes<50000,"Texto vetorial inesperado");
+ Editor glyphs(Document{});
+ const auto allGlyphs=glyphs.addContours(letters,true,0);
+ check(allGlyphs.size()==letters.size()&&glyphs.undoCount()==1,
+       "Texto real nao entrou numa unica transacao");
+ check(glyphs.undo()&&glyphs.state().doc.contours.empty(),"Undo de fonte real falhou");
  Editor editor(Document{});
  const auto start=editor.undoCount();
  const std::vector<std::vector<Pt>> outlines={
