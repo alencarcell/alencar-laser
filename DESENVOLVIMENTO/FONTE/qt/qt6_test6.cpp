@@ -2208,8 +2208,15 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
      .arg(imported.shapeCount));
  }
  void open(){
-  if(projectPath.isEmpty())projectPath=QFileDialog::getOpenFileName(this,"Abrir projeto",{},"Alencar Laser (*.alaser)");
-  if(projectPath.isEmpty())return;
+  if(projectPath.isEmpty()){
+   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir projeto",{},
+    "Projetos (*.alaser *.lbrn2);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2)");
+   if(chosen.isEmpty())return;
+   if(QFileInfo(chosen).suffix().compare("lbrn2",Qt::CaseInsensitive)==0){
+    openFilePath(chosen);return;
+   }
+   projectPath=chosen;
+  }
   auto project=openNative(projectPath);
   auto state=editorStateForIntegratedProject(project);
   view.editor=Editor(std::move(state));
