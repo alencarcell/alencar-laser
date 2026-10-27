@@ -916,7 +916,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    pendingPreview_->setPath(temporaryShape());viewport()->update();
   }
   if(e->key()==Qt::Key_Escape){
-   if(!busy(){if(requestSelectTool)requestSelectTool();e->accept();return;}
+   if(!busy()){if(requestSelectTool)requestSelectTool();e->accept();return;}
    if(shapeDragging_){clearShapePreview();e->accept();return;}
    if(draggingNode_&&active_){
     const auto oldMarker=viewportTransform().map(toQt(dragOriginal_))+(drawCurrent_-dragStart_);
