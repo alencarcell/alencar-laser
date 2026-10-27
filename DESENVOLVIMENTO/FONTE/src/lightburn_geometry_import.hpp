@@ -19,12 +19,14 @@ namespace alaser::lightburn {
 struct GeometryShape {
  std::vector<Pt> points;
  int layer=0;
+ bool closed=true;
 };
 struct ParseNode{
  QString type;
  QTransform xform;
  double w=0,h=0,radius=0;
  int cutIndex=0;
+ QString vertList,primList;
  std::vector<ParseNode> children;
 };
 struct ImportResult {
@@ -61,17 +63,19 @@ inline ParseNode readShape(QXmlStreamReader& xml,int depth,int& seen){
  node.cutIndex=attrs.value("CutIndex").toString().toInt(&validLayer);
  if(!validLayer)node.cutIndex=0;
  if(node.cutIndex<0||node.cutIndex>31)throw std::runtime_error("CutIndex fora das camadas 0-31");
- if(node.type!="Group"&&node.type!="Rect"&&node.type!="Ellipse"){
+ if(node.type!="Group"&&node.type!="Rect"&&node.type!="Ellipse"&&node.type!="Path"){
   throw std::runtime_error(("Tipo de forma LightBurn ainda nao suportado: "+node.type).toStdString());
  }
  // Arcos arredondados ainda precisam de conversao de bezier; nao fingir que sao retos.
  if(node.type=="Rect"&&std::abs(node.radius)>1e-9)
   throw std::runtime_error("Retangulo com cantos arredondados ainda nao suportado");
- if(node.type!="Group"&&(!(node.w>0)||!(node.h>0)))
+ if(node.type!="Group"&&node.type!="Path"&&(!(node.w>0)||!(node.h>0)))
   throw std::runtime_error("Dimensoes ausentes para Rect/Ellipse");
  while(xml.readNextStartElement()){
   const QString tag=xml.name().toString();
   if(tag=="XForm")node.xform=parseXForm(xml.readElementText());
+  else if(tag=="VertList")node.vertList=xml.readElementText();
+  else if(tag=="PrimList")node.primList=xml.readElementText();
   else if(tag=="Children"){
    while(xml.readNextStartElement()){
     if(xml.name()==QLatin1String("Shape"))node.children.push_back(readShape(xml,depth+1,seen));
@@ -81,6 +85,93 @@ inline ParseNode readShape(QXmlStreamReader& xml,int depth,int& seen){
  }
  return node;
 }
+struct PackedVertex {
+ Pt p{};
+ Pt out{},in{};
+ bool hasOutX=false,hasOutY=false,hasInX=false,hasInY=false;
+};
+inline std::vector<PackedVertex> decodeVertices(const QString& encoded){
+ static const QRegularExpression vexpr(
+  R"(V([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s+([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)([^V]*))");
+ static const QRegularExpression hExpr(
+  R"(c([01])([xy])([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?))");
+ std::vector<PackedVertex> result;
+ auto it=vexpr.globalMatch(encoded);
+ qsizetype offset=0;
+ while(it.hasNext()){
+  auto m=it.next();
+  if(!encoded.mid(offset,m.capturedStart()-offset).trimmed().isEmpty())
+   throw std::runtime_error("VertList contem dados nao reconhecidos");
+  offset=m.capturedEnd();
+  if(result.size()>=50000)throw std::runtime_error("Excesso de vertices LightBurn");
+  PackedVertex v;
+  bool okX=false,okY=false;
+  v.p.x=m.captured(1).toDouble(&okX);v.p.y=m.captured(2).toDouble(&okY);
+  if(!okX||!okY||!std::isfinite(v.p.x)||!std::isfinite(v.p.y))
+   throw std::runtime_error("Coordenada LightBurn invalida");
+  const QString tail=m.captured(3);
+  auto h=hExpr.globalMatch(tail);qsizetype k=0;
+  while(h.hasNext()){
+   const auto a=h.next();
+   QString between=tail.mid(k,a.capturedStart()-k).trimmed();
+   if(between!="S"&&!between.isEmpty())throw std::runtime_error("Controle de Bezier desconhecido");
+   k=a.capturedEnd();
+   bool ok=false;const double val=a.captured(3).toDouble(&ok);
+   if(!ok||!std::isfinite(val))throw std::runtime_error("Controle de Bezier invalido");
+   const bool isOut=a.captured(1)=="0",x=a.captured(2)=="x";
+   if(isOut){if(x){v.out.x=val;v.hasOutX=true;}else{v.out.y=val;v.hasOutY=true;}}
+   else{if(x){v.in.x=val;v.hasInX=true;}else{v.in.y=val;v.hasInY=true;}}
+  }
+  QString trailing=tail.mid(k).trimmed();
+  if(trailing!="S"&&!trailing.isEmpty())throw std::runtime_error("Dados extras VertList desconhecidos");
+  result.push_back(v);
+ }
+ if(!encoded.mid(offset).trimmed().isEmpty()||result.empty())
+  throw std::runtime_error("VertList nao decodificavel");
+ return result;
+}
+inline std::pair<std::vector<Pt>,bool> decodePath(const ParseNode& n){
+ const auto vertices=decodeVertices(n.vertList);
+ static const QRegularExpression primitive(R"(([LB])(\d+)\s+(\d+))");
+ auto it=primitive.globalMatch(n.primList);
+ std::vector<Pt> points;
+ int first=-1,previous=-1,primitives=0;
+ qsizetype offset=0;
+ while(it.hasNext()){
+  auto m=it.next();
+  if(!n.primList.mid(offset,m.capturedStart()-offset).trimmed().isEmpty())
+   throw std::runtime_error("PrimList contem trecho desconhecido");
+  offset=m.capturedEnd();
+  bool o1=false,o2=false;
+  int a=m.captured(2).toInt(&o1),b=m.captured(3).toInt(&o2);
+  if(!o1||!o2||a<0||b<0||a>=int(vertices.size())||b>=int(vertices.size()))
+   throw std::runtime_error("Indice PrimList fora de VertList");
+  if(first<0){first=a;points.push_back(vertices[size_t(a)].p);}
+  else if(previous!=a)throw std::runtime_error("Path contem multiplas cadeias; importacao parcial bloqueada");
+  if(++primitives>50000)throw std::runtime_error("Excesso de segmentos LightBurn");
+  if(m.captured(1)=="B"){
+   const auto& va=vertices[size_t(a)],& vb=vertices[size_t(b)];
+   if(!(va.hasOutX&&va.hasOutY&&vb.hasInX&&vb.hasInY))
+    throw std::runtime_error("Bezier LightBurn sem duas alcas completas");
+   const Pt p0=va.p,p1=va.out,p2=vb.in,p3=vb.p;
+   // Aproximacao segura em 24 segmentos por cubica; curvas nativas continuam
+   // pendentes de importador proprio (sem emitir comandos para laser).
+   for(int step=1;step<=24;step++){
+    const double t=double(step)/24.,u=1.-t;
+    points.push_back(p0*(u*u*u)+p1*(3*u*u*t)+p2*(3*u*t*t)+p3*(t*t*t));
+   }
+  }else points.push_back(vertices[size_t(b)].p);
+  previous=b;
+ }
+ if(!n.primList.mid(offset).trimmed().isEmpty()||primitives==0)
+  throw std::runtime_error("PrimList desconhecida ou vazia");
+ const bool closed=first==previous;
+ if(closed&&!points.empty()&&dist(points.front(),points.back())<1e-7)points.pop_back();
+ if(points.size()<(closed?3U:2U))
+  throw std::runtime_error("Path sem nos suficientes");
+ return {std::move(points),closed};
+}
+
 inline void flatten(const ParseNode& n,const QTransform& parent,
                     std::vector<GeometryShape>& result){
  // A composicao Qt opera com coordenadas como vetores linha:
@@ -95,6 +186,18 @@ inline void flatten(const ParseNode& n,const QTransform& parent,
  if(n.type=="Rect"){
   const double x=n.w/2.,y=n.h/2.;
   pts={{-x,-y},{x,-y},{x,y},{-x,y}};
+ }else if(n.type=="Path"){
+  auto converted=decodePath(n);
+  pts=std::move(converted.first);
+  if(n.children.size())throw std::runtime_error("Path com filhos nao suportada");
+  for(auto& p:pts){
+   const QPointF q=total.map(QPointF(p.x,p.y));
+   if(!std::isfinite(q.x())||!std::isfinite(q.y())||std::abs(q.x())>1e7||std::abs(q.y())>1e7)
+    throw std::runtime_error("Path fora dos limites seguros");
+   p={q.x(),q.y()};
+  }
+  result.push_back({std::move(pts),n.cutIndex,converted.second});
+  return;
  }else if(n.type=="Ellipse"){
   constexpr int steps=96;
   for(int i=0;i<steps;i++){
@@ -108,7 +211,7 @@ inline void flatten(const ParseNode& n,const QTransform& parent,
    throw std::runtime_error("Posicao transformada fora dos limites seguros");
   p={q.x(),q.y()};
  }
- result.push_back({std::move(pts),n.cutIndex});
+ result.push_back({std::move(pts),n.cutIndex,true});
 }
 inline ImportResult readGeometry(const QString& path){
  QFile file(path);
@@ -139,7 +242,7 @@ inline ImportResult readGeometry(const QString& path){
   if(!state.layers.count(shape.layer)){
    state.layers[shape.layer]={shape.layer,"LightBurn C"+std::to_string(shape.layer),true,false};
   }
-  Contour contour;contour.key={++object,0};contour.closed=true;
+  Contour contour;contour.key={++object,0};contour.closed=shape.closed;
   for(Pt p:shape.points)contour.nodes.push_back({state.doc.nextId++,p});
   state.doc.contours.push_back(std::move(contour));
   state.objects[object]={shape.layer,0};
