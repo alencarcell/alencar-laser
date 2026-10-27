@@ -2737,12 +2737,20 @@ static QJsonObject lightburnImport198Test(const QString& directory){
   </Children>
  </Shape>
  <Shape Type="Ellipse" CutIndex="3" W="30" H="20"><XForm>1 0 0 1 0 0</XForm></Shape>
+ <Shape Type="Path" CutIndex="4">
+  <VertList>V0 0c0x1c1x1V10 0c0x1c1x1V10 10c0x1c1x1</VertList>
+  <PrimList>L0 1L1 2</PrimList><XForm>1 0 0 1 8 9</XForm>
+ </Shape>
+ <Shape Type="Path" CutIndex="5">
+  <VertList>V0 0c0x5c0y5c1x1V10 0c0x1c1x5c1y5</VertList>
+  <PrimList>B0 1</PrimList><XForm>1 0 0 1 0 0</XForm>
+ </Shape>
 </LightBurnProject>)XML";
  QFile f(filename);check(f.open(QIODevice::WriteOnly),"falhou fixture LightBurn");
  check(f.write(xml)==xml.size(),"fixture LightBurn truncada");f.close();
  auto imported=lightburn::readGeometry(filename);
- check(imported.shapeCount==3&&imported.state.doc.contours.size()==3,"3 formas nao foram reconhecidas");
- check(imported.state.layers.size()==4,"camadas do XML nao foram mapeadas");
+ check(imported.shapeCount==5&&imported.state.doc.contours.size()==5,"5 formas nao foram reconhecidas");
+ check(imported.state.layers.size()==6,"camadas do XML nao foram mapeadas");
  check(imported.state.objects.at(1).layer==1&&imported.state.objects.at(2).layer==2,
        "indices de camada foram perdidos");
  const auto& first=imported.state.doc.contours.at(0);
@@ -2753,6 +2761,13 @@ static QJsonObject lightburnImport198Test(const QString& directory){
        std::abs(nested.nodes[0].p.y-202.)<1e-8,"transformacao de grupo incorreta");
  const auto& ellipse=imported.state.doc.contours.at(2);
  check(ellipse.nodes.size()==96,"elipse nao foi convertida para pontos");
+ const auto& path=imported.state.doc.contours.at(3);
+ check(!path.closed&&path.nodes.size()==3&&std::abs(path.nodes[0].p.x-8.)<1e-8,
+       "Path com segmentos retos ou XForm incorreto");
+ const auto& cubic=imported.state.doc.contours.at(4);
+ check(!cubic.closed&&cubic.nodes.size()==25&&
+       std::abs(cubic.nodes[12].p.y-3.75)<1e-8,
+       "Cubic Bezier importada com interpolacao errada");
  validate(imported.state);
 
  // Projetos mistos sao RECUSADOS, nunca importados parcialmente.
@@ -2772,7 +2787,7 @@ static QJsonObject lightburnImport198Test(const QString& directory){
  QApplication::sendEvent(&w,&drag);
  check(drag.isAccepted(),"janela nao aceita arrastar .lbrn2");
  return {{"status","PASS"},{"rect_transform",true},{"group_transform",true},
-         {"ellipse_96_segments",true},{"layers",true},{"unsupported_path_rejected",true},
+         {"ellipse_96_segments",true},{"path_lines",true},{"path_bezier",true},{"layers",true},{"unsupported_path_rejected",true},
          {"drag_enter_lbrn2",true},{"hardware_commands_sent",false}};
 }
 
