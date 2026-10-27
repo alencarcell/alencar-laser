@@ -1,6 +1,6 @@
 # Alencar Laser 19.8 — Tesoura por trecho contínuo (referência: comportamento relatado no LightBurn)
 Data: 27/10/2026
-Estado: CRITÉRIOS DE ACEITAÇÃO / NÃO IMPLEMENTADO / NÃO HOMOLOGADO
+Estado: CÓDIGO EXPERIMENTAL IMPLEMENTADO NA BRANCH / AINDA NÃO COMPILADO OU HOMOLOGADO
 
 ## Relato do teste real
 O usuário observou que a Tesoura recorta segmentos minúsculos e em outras regiões não recorta.
@@ -49,3 +49,13 @@ No comportamento de referência do LightBurn, ao selecionar a ferramenta o curso
 - Branch de engenharia `fix/scissors-continuous-span-19-8` criada a partir da candidata experimental.
 - `main` permanece estável; não realizar merge até todos os testes.
 - A antiga ferramenta por **aresta única** pode continuar no núcleo por compatibilidade com regressões antigas, mas não representar a nova Tesoura de trechos na interface.
+
+## Execução experimental na branch — 27/10/2026
+- Adicionado `src/scissors_span.hpp` com interseções de segmentos, consulta BVH por caixas, autocruzamentos não adjacentes e plano de recorte imutável.
+- Adicionada `Editor::removeScissorSpan`: preserva contornos alheios, IDs existentes, camada, bloqueios, histórico atômico.
+- `qt/qt6_test6.cpp`: cursor seta em espaço livre; Tesoura e sobreposição laranja na aproximação do intervalo; clique aplica o intervalo, não uma aresta arbitrária.
+- Teste de núcleo `alencar_test19_8_scissors_span` cobre linha densa, elipse 64 segmentos, autocruzamento, invisibilidade, objeto bloqueado, undo/redo.
+- Teste GUI ampliado com contorno atravessado duas vezes, mudança de cursor e limpeza da prévia.
+- O script Windows já compila e executa o novo teste antes da interface. Não houve build Windows nem validação visual após esses commits.
+- Limites deliberados: pontos finais tangentes, cruzamentos de vértices e sobreposições são recusados conservadoramente no trecho afetado; curvas Bézier nativas ainda não são recortadas.
+- Critérios A1–A10 ainda não foram integralmente homologados. Não fazer merge para `main`.
