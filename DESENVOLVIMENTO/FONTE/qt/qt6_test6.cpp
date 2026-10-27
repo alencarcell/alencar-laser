@@ -516,7 +516,11 @@ public:
  QtEditorLab(Document d):QGraphicsView(),editor(std::move(d)){
   setScene(&scene_);setSceneRect(-2000,-2000,5000,5000);setRenderHints(QPainter::Antialiasing);
   setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);setTransformationAnchor(QGraphicsView::NoAnchor);
-  setMouseTracking(true);setFocusPolicy(Qt::StrongFocus);resize(780,560);
+  // QAbstractScrollArea entrega os movimentos atraves do QWidget viewport.
+  // Garantir rastreamento explicitamente no filho que recebe os eventos.
+  setMouseTracking(true);viewport()->setMouseTracking(true);
+  viewport()->setAttribute(Qt::WA_Hover,true);
+  setFocusPolicy(Qt::StrongFocus);resize(780,560);
   clock_.start();rebuild();
  }
  // Apenas objetos que trocam de estado visual devem ser modificados.
@@ -590,6 +594,7 @@ public:
  QGraphicsPathItem* pathItem(Key k){return objects_.at(k);}
  std::optional<Key> active()const{return active_;}
  std::optional<ScissorSpan> scissorPreview()const{return scissorHover_;}
+ uint64_t scissorHoverEventCount()const{return scissorHoverEvents_;}
  std::string scissorHoverDiagnostics(QPoint at){
   const auto scenePt=mapToScene(at);
   std::ostringstream out;
@@ -597,6 +602,8 @@ public:
      <<" mode="<<int(tool)<<" native="<<nativeMode_<<" busy="<<busy()
      <<" point=("<<at.x()<<","<<at.y()<<")"
      <<" viewport=("<<viewport()->width()<<","<<viewport()->height()<<")"
+     <<" tracking="<<viewport()->hasMouseTracking()
+     <<" hover_attr="<<viewport()->testAttribute(Qt::WA_Hover)
      <<" scene=("<<scenePt.x()<<","<<scenePt.y()<<")";
   auto hits=clickHits(at);
   out<<" hits="<<hits.size();
@@ -2526,7 +2533,13 @@ static QJsonObject editTools197Test(const QString& directory){
  pressKey(w,Qt::Key_K);check(v.tool==QtEditorLab::Tool::Scissors,"K scissor shortcut missing");
  check(v.viewport()->cursor().shape()==Qt::ArrowCursor,"tesoura fora do objeto deveria ser seta");
  const QPoint hoverPoint=v.mapFromScene({110,100});
+ check(v.viewport()->hasMouseTracking(),"viewport sem mouse tracking");
+ const QPoint clearPoint=v.mapFromScene({138,135});
+ const uint64_t eventsBefore=v.scissorHoverEventCount();
+ QTest::mouseMove(v.viewport(),clearPoint);QApplication::processEvents();
  QTest::mouseMove(v.viewport(),hoverPoint);QApplication::processEvents();
+ if(v.scissorHoverEventCount()==eventsBefore)
+  throw std::runtime_error("Qt nao entregou mouseMoveEvent na viewport: "+v.scissorHoverDiagnostics(hoverPoint));
  auto preview=v.scissorPreview();
  if(!preview||preview->preview.size()<4){
   w.grab().save(directory+"/FALHA_HOVER_TESOURA.png");
