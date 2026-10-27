@@ -108,6 +108,18 @@ class SegmentBVH{
    auto left=build(begin,mid);auto right=build(mid,end);tree[pos].left=left;tree[pos].right=right;tree[pos].count=0;
   }return pos;
  }
+ static bool boxesOverlap(Box b,double x0,double y0,double x1,double y1){
+  return b.x1>=x0&&b.x0<=x1&&b.y1>=y0&&b.y0<=y1;
+ }
+ void boxCandidates(int node,double x0,double y0,double x1,double y1,std::vector<int>&out)const{
+  const auto& b=tree[size_t(node)];
+  if(!boxesOverlap(b.bbox,x0,y0,x1,y1))return;
+  if(b.left>=0){boxCandidates(b.left,x0,y0,x1,y1,out);boxCandidates(b.right,x0,y0,x1,y1,out);}
+  else for(int j=b.start;j<b.start+b.count;j++){
+   const int id=order[size_t(j)];
+   if(boxesOverlap(bounds((*source)[size_t(id)]),x0,y0,x1,y1))out.push_back(id);
+  }
+ }
  void candidates(int node,Pt p,double tol,std::vector<int>&out)const{
   const auto&t=tree[node];if(!overlaps(t.bbox,p,tol))return;
   if(t.left>=0){candidates(t.left,p,tol,out);candidates(t.right,p,tol,out);}else for(int i=t.start;i<t.start+t.count;i++){
@@ -117,6 +129,14 @@ class SegmentBVH{
 public:
  SegmentBVH()=default;explicit SegmentBVH(const std::vector<Segment>&s){reset(s);}
  void reset(const std::vector<Segment>&s){source=&s;tree.clear();order.resize(s.size());std::iota(order.begin(),order.end(),0);if(!order.empty())build(0,int(order.size()));}
+ std::vector<int> candidateIdsBox(double x0,double y0,double x1,double y1)const{
+  if(!source)throw std::runtime_error("BVH not initialized");
+  if(!std::isfinite(x0)||!std::isfinite(y0)||!std::isfinite(x1)||!std::isfinite(y1)||
+     x1<x0||y1<y0)throw std::runtime_error("invalid BVH bounding box");
+  std::vector<int> ids;
+  if(!tree.empty())boxCandidates(0,x0,y0,x1,y1,ids);
+  return ids;
+ }
  std::vector<int> candidateIds(Pt p,double tol)const{
   if(!source)throw std::runtime_error("BVH not initialized");
   std::vector<int> ids;if(!tree.empty())candidates(0,p,tol,ids);return ids;
