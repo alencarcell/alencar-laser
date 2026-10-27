@@ -269,3 +269,10 @@ endif()
 # TESTE_19.8: dirty/snapshot state machine, no Qt dependency.
 add_executable(alencar_test19_8_recovery_policy tests/test19_8_recovery_policy.cpp)
 target_include_directories(alencar_test19_8_recovery_policy PRIVATE src)
+
+# TESTE_19.8: Tesoura por intervalos de contorno; sem Qt / sem acesso fisico.
+add_executable(alencar_test19_8_scissors_span tests/test19_8_scissors_span.cpp src/boost_json_impl.cpp)
+target_include_directories(alencar_test19_8_scissors_span PRIVATE src ${BOOST_JSON_INCLUDE_DIR})
+if(NOT MSVC)
+ target_compile_options(alencar_test19_8_scissors_span PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
