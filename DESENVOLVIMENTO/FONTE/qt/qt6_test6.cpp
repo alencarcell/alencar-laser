@@ -50,6 +50,8 @@
 #include <QTimer>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QFontDialog>
+#include <QFont>
 #include <QToolButton>
 #include <QCursor>
 #include <QMenu>
@@ -195,6 +197,7 @@ class QtEditorLab final:public QGraphicsView{
  std::vector<QGraphicsPathItem*> shapePreviewItems_;
  bool nativeContourPressing_=false;
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
+ std::vector<Pt> pencilPoints_;
  QGraphicsPathItem* pendingPreview_=nullptr;
  ScissorSpanPlanner scissorPlanner_;
  uint64_t scissorIndexVersion_=std::numeric_limits<uint64_t>::max();
@@ -366,7 +369,7 @@ class QtEditorLab final:public QGraphicsView{
  }
 
 public:
- enum class Tool{Select,Nodes,Scissors,Rectangle,Line,Ellipse,Polygon};
+ enum class Tool{Select,Nodes,Scissors,Rectangle,Line,Ellipse,Polygon,Pencil,Text};
  Tool tool=Tool::Select;
  Editor editor;
  std::set<int> selected;
@@ -378,6 +381,7 @@ public:
  qint64 markerCandidates=0,markerDraws=0;
  std::function<void()> stateChanged;
  std::function<void(const QString&)> toolWarning;
+ std::function<void(Pt)> requestTextAt;
  std::function<void()> requestSelectTool;
  std::function<void(const QString&,int)> diagnosticEvent;
  std::function<void(double)> zoomChanged;
@@ -697,7 +701,7 @@ public:
   if(nativePressing_&&nativeSession_){nativeSession_->cancel();nativePressing_=false;updateNativePaths(false);}
   if(shapeDragging_)clearShapePreview();
   if(draggingNode_){endChunkPreview();draggingNode_.reset();viewport()->update();}
-  if(strokeDrawing_){strokeDrawing_=false;if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();}
+  if(strokeDrawing_){strokeDrawing_=false;pencilPoints_.clear();if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();}
  }
  void history(bool redo){if(busy())return;if(redo?editor.redo():editor.undo()){
   active_.reset();selected.clear();rebuild();if(diagnosticEvent)diagnosticEvent(redo?"redo":"undo",1);
@@ -853,6 +857,22 @@ void mousePressEvent(QMouseEvent* e)override{
    if(draggingNode_){dragStart_=e->position();drawCurrent_=e->position();startChunkPreview(*active_,*draggingNode_);}
    e->accept();return;
   }
+  if(tool==Tool::Text){
+   if(requestTextAt)requestTextAt(fromQt(mapToScene(e->position().toPoint())));
+   e->accept();return;
+  }
+  if(tool==Tool::Pencil){
+   const auto& layer=editor.state().layers.at(targetLayer());
+   if(!layer.visible||layer.locked){e->accept();return;}
+   strokeDrawing_=true;drawStart_=e->position();drawCurrent_=drawStart_;
+   pencilPoints_.clear();pencilPoints_.push_back(fromQt(mapToScene(e->position().toPoint())));
+   if(!pendingPreview_){
+    QPen previewPen(QColor(255,159,35),1.4);previewPen.setCosmetic(true);
+    pendingPreview_=scene_.addPath(QPainterPath(),previewPen);
+    pendingPreview_->setZValue(20);
+   }
+   e->accept();return;
+  }
   if(tool==Tool::Rectangle||tool==Tool::Ellipse||tool==Tool::Line||tool==Tool::Polygon){
    const auto& layer=editor.state().layers.at(targetLayer());if(!layer.visible||layer.locked){e->accept();return;}
    strokeDrawing_=true;drawStart_=e->position();drawCurrent_=drawStart_;
@@ -922,6 +942,17 @@ void mouseMoveEvent(QMouseEvent* e)override{
    updateNodeMarkers(previousDisplay,nextDisplay);
    frameUpdates++;e->accept();return;
   }
+  if(strokeDrawing_&&tool==Tool::Pencil){
+   const Pt here=fromQt(mapToScene(e->position().toPoint()));
+   const double step=std::max(.005,1.4/std::max(currentZoom(),.001));
+   if(pencilPoints_.size()<20000&&dist(pencilPoints_.back(),here)>=step){
+    pencilPoints_.push_back(here);
+    QPainterPath stroke;stroke.moveTo(toQt(pencilPoints_.front()));
+    for(size_t i=1;i<pencilPoints_.size();++i)stroke.lineTo(toQt(pencilPoints_[i]));
+    pendingPreview_->setPath(stroke);++frameUpdates;
+   }
+   e->accept();return;
+  }
   if(strokeDrawing_){drawCurrent_=e->position();pendingPreview_->setPath(temporaryShape());frameUpdates++;e->accept();return;}
   if(tool==Tool::Scissors){updateScissorHover(e->position().toPoint());e->accept();return;}
   QGraphicsView::mouseMoveEvent(e);
@@ -971,6 +1002,19 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    updateNodeMarkers(viewportTransform().map(toQt(dragOriginal_))+(drawCurrent_-dragStart_),
                      viewportTransform().map(toQt(dragOriginal_))+ (e->position()-dragStart_));
    e->accept();return;
+  }
+  if(strokeDrawing_&&tool==Tool::Pencil){
+   const Pt final=fromQt(mapToScene(e->position().toPoint()));
+   if(pencilPoints_.size()<20000&&dist(pencilPoints_.back(),final)>1e-8)
+    pencilPoints_.push_back(final);
+   if(pencilPoints_.size()>=2){
+    lastCreated_=editor.addContour(std::move(pencilPoints_),false,targetLayer());
+    ++toolCreates;rebuild();activate({lastCreated_,0});
+    if(diagnosticEvent)diagnosticEvent("pencil_stroke_created",1);
+   }
+   pencilPoints_.clear();strokeDrawing_=false;
+   if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}
+   if(stateChanged)stateChanged();e->accept();return;
   }
   if(strokeDrawing_){
    drawCurrent_=e->position();auto first=mapToScene(drawStart_.toPoint());auto last=mapToScene(drawCurrent_.toPoint());
@@ -1035,7 +1079,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
     draggingNode_.reset();updateNodeMarkers(oldMarker,originalMarker);
     e->accept();return;
    }
-   if(strokeDrawing_){strokeDrawing_=false;if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();e->accept();return;}
+   if(strokeDrawing_){strokeDrawing_=false;pencilPoints_.clear();if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();e->accept();return;}
   }
   QGraphicsView::keyPressEvent(e);
  }
