@@ -2449,9 +2449,32 @@ static QJsonObject editTools197Test(const QString& directory){
  v.activate({line,0});w.layers->setCurrentIndex(w.layers->findData(1));
  pressKey(w,Qt::Key_L,Qt::ControlModifier);
  check(v.editor.state().objects.at(line).layer==0,"locked layer transfer accepted");
+ // Regressao visual 19.8: Ctrl+R, Ctrl+E e Shift preservam proporcoes.
+ w.layers->setCurrentIndex(w.layers->findData(0));
+ auto shiftedShape=[&](Qt::Key shortcut,QtEditorLab::Tool expected,QPointF first,QPointF second){
+  pressKey(w,shortcut,Qt::ControlModifier);
+  check(v.tool==expected,"Ctrl+R/E nao ativou ferramenta");
+  const auto p1=v.mapFromScene(first),p2=v.mapFromScene(second);
+  QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::ShiftModifier,p1);
+  QTest::mouseMove(v.viewport(),p2);QApplication::processEvents();
+  QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::ShiftModifier,p2);
+  QApplication::processEvents();
+  const int id=v.lastCreated();
+  check(id>0&&v.editor.state().objects.count(id),"forma proporcional nao criada");
+  auto [lo,hi]=boundsOf(v.editor.state().doc,{id});
+  check(std::abs((hi.x-lo.x)-(hi.y-lo.y))<1e-6,"Shift nao preservou dimensoes iguais");
+ };
+ shiftedShape(Qt::Key_R,QtEditorLab::Tool::Rectangle,{180,112},{201,123});
+ shiftedShape(Qt::Key_E,QtEditorLab::Tool::Ellipse,{180,143},{208,155});
+ auto* layer6=w.findChild<QPushButton*>("layer_swatch_6");
+ check(layer6!=nullptr,"paleta de camadas incompleta");
+ layer6->click();
+ check(w.layers->findData(6)>=0&&w.layers->currentData().toInt()==6,"camada nao criada por clique");
+ w.layers->setCurrentIndex(w.layers->findData(0));
  w.grab().save(directory+"/TESTE_19_7_FERRAMENTAS.png");
  return {{"status","PASS"},{"selection_esc",true},{"selection_v",true},
    {"scissors_k",true},{"scissors_mouse",true},{"undo_scissors",true},
+   {"ctrl_r_rectangle",true},{"ctrl_e_ellipse",true},{"shift_square_circle",true},{"create_layer_by_palette",true},
    {"move_layer_ctrl_l",true},{"layer_lock_rejected",true},
    {"document_before_lock_attempt",QString::number(before.size())},
    {"hardware_commands_sent",false}};
