@@ -2480,18 +2480,29 @@ static QJsonObject editTools197Test(const QString& directory){
  LabWindow w(Document{});w.show();QApplication::processEvents();
  auto& v=w.view;v.setTransform(QTransform::fromScale(8.,8.));
  int rectangle=v.editor.rectangle({100,100},20,20);
- int line=v.editor.line({150,110},{190,110});v.rebuild();
+ int line=v.editor.line({150,110},{190,110});
+ int crossing=v.editor.line({90,110},{130,110});v.rebuild();
  v.centerOn(QPointF(135,110));QApplication::processEvents();
  clickButton(w,"nodes");check(v.tool==QtEditorLab::Tool::Nodes,"nodes tool not activated");
  pressKey(w,Qt::Key_Escape);check(v.tool==QtEditorLab::Tool::Select,"Esc failed to restore selection");
  clickButton(w,"line");pressKey(w,Qt::Key_Escape);
  check(v.tool==QtEditorLab::Tool::Select,"Esc failed from drawing mode");
  pressKey(w,Qt::Key_K);check(v.tool==QtEditorLab::Tool::Scissors,"K scissor shortcut missing");
+ check(v.viewport()->cursor().shape()==Qt::ArrowCursor,"tesoura fora do objeto deveria ser seta");
+ QTest::mouseMove(v.viewport(),v.mapFromScene({110,100}));QApplication::processEvents();
+ auto preview=v.scissorPreview();
+ check(bool(preview)&&preview->preview.size()>=4,"hover nao iluminou arco completo");
+ check(v.viewport()->cursor().shape()!=Qt::ArrowCursor,"cursor nao mudou sobre trecho valido");
+ QTest::mouseMove(v.viewport(),v.mapFromScene({138,135}));QApplication::processEvents();
+ check(!v.scissorPreview()&&v.viewport()->cursor().shape()==Qt::ArrowCursor,
+       "Tesoura permaneceu ativa fora do trecho");
  const size_t old=v.editor.undoCount();
  clickScene(w,{110,100});
  check(v.editor.undoCount()==old+1,"scissor mouse click did not create history");
  check(!get(v.editor.state().doc,{rectangle,0})->closed,"scissor failed to open closed contour");
- check(get(v.editor.state().doc,{rectangle,0})->nodes.size()==4,"scissor left duplicate/seam nodes instead of removing edge");
+ check(get(v.editor.state().doc,{rectangle,0})->nodes.size()==4,"Tesoura removeu arco incompleto ou deixou arestas");
+ check(get(v.editor.state().doc,{crossing,0})&&get(v.editor.state().doc,{crossing,0})->nodes.size()==2,
+       "Tesoura alterou contorno cruzador");
  checkRendered(w);
  pressKey(w,Qt::Key_Z,Qt::ControlModifier);
  check(get(v.editor.state().doc,{rectangle,0})->closed,"undo cut failed");
@@ -2531,7 +2542,7 @@ static QJsonObject editTools197Test(const QString& directory){
  w.layers->setCurrentIndex(w.layers->findData(0));
  w.grab().save(directory+"/TESTE_19_7_FERRAMENTAS.png");
  return {{"status","PASS"},{"selection_esc",true},{"selection_v",true},
-   {"scissors_k",true},{"scissors_mouse",true},{"undo_scissors",true},
+   {"scissors_k",true},{"scissors_mouse",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"undo_scissors",true},
    {"ctrl_r_rectangle",true},{"ctrl_e_ellipse",true},{"shift_square_circle",true},{"create_layer_by_palette",true},
    {"move_layer_ctrl_l",true},{"layer_lock_rejected",true},
    {"document_before_lock_attempt",QString::number(before.size())},
