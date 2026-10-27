@@ -46,6 +46,7 @@
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QToolButton>
+#include <QCursor>
 #include <QMenu>
 #include <QScrollArea>
 #include <QGridLayout>
@@ -392,7 +393,7 @@ public:
  void enableNative(bool enabled){
   if(busy())return;
   nativeMode_=enabled&&hasNativeDocument();
-  if(nativeMode_)tool=Tool::Select;
+  if(nativeMode_){tool=Tool::Select;viewport()->setCursor(Qt::ArrowCursor);}
   updateNativePaths(false);
  }
  void nativeHistory(bool redo){
@@ -492,7 +493,7 @@ protected:
     painter->drawLine(QPointF(clipped.left(),y),QPointF(clipped.right(),y));
   }
   painter->setPen(QPen(QColor(90,135,165,190),0));
-  painter->drawRect(drawing);
+  if(workspace_.showDrawingFrame)painter->drawRect(drawing);
   if(workspace_.showMachineFrame){
    QPen edge(QColor(242,145,47,210),0);edge.setStyle(Qt::DashLine);
    painter->setPen(edge);painter->drawRect(bed);
@@ -514,6 +515,15 @@ public:
  }
  // Apenas objetos que trocam de estado visual devem ser modificados.
  // Evita milhares de chamadas setPen/setZValue em cada clique.
+ static QColor layerColor(int id){
+  static const QColor colors[]={
+   QColor("#788998"),QColor("#3A86FF"),QColor("#E63946"),QColor("#06D6A0"),
+   QColor("#FFD166"),QColor("#F77F00"),QColor("#9B5DE5"),QColor("#00BBF9"),
+   QColor("#A7C957"),QColor("#FF006E"),QColor("#748CAB"),QColor("#219EBC"),
+   QColor("#B5179E"),QColor("#38B000"),QColor("#BC6C25"),QColor("#8ECAE6")
+  };
+  return colors[(id%16+16)%16];
+ }
  void applySelectionStyles(){
   QElapsedTimer profiler;profiler.start();
   std::vector<int> changed;
@@ -524,7 +534,7 @@ public:
    if(it==itemsByObject_.end())continue;
    bool isSelected=selected.count(objectId)>0;
    for(auto* item:it->second){
-    item->setPen(QPen(isSelected?QColor(239,109,25):QColor(105,115,123),0));
+    item->setPen(QPen(isSelected?QColor(239,109,25):layerColor(editor.state().objects.at(objectId).layer),0));
     item->setZValue(isSelected?9:1);
     styleSetterCalls_+=2;
    }
@@ -541,7 +551,7 @@ public:
   clearShapePreview();endChunkPreview();
   scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
-   auto* o=scene_.addPath(pathOf(c),QPen(QColor(105,115,123),0));o->setZValue(1);
+   auto* o=scene_.addPath(pathOf(c),QPen(layerColor(editor.state().objects.at(c.key.object).layer),0));o->setZValue(1);
    auto m=editor.state().objects.at(c.key.object);auto layer=editor.state().layers.at(m.layer);
    o->setVisible(layer.visible);objects_[c.key]=o;itemsByObject_[c.key.object].push_back(o);
   }
@@ -573,7 +583,13 @@ public:
  }
  QGraphicsPathItem* pathItem(Key k){return objects_.at(k);}
  std::optional<Key> active()const{return active_;}
- void setTool(Tool t){if(!busy()){nativeMode_=false;tool=t;viewport()->setCursor(t==Tool::Scissors?Qt::CrossCursor:Qt::ArrowCursor);viewport()->update();}}
+ void setTool(Tool t){if(!busy()){nativeMode_=false;tool=t;viewport()->setCursor(t==Tool::Scissors?QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4):QCursor(Qt::ArrowCursor));viewport()->update();}}
+ QPointF constrainedCorner(QPointF first,QPointF last,bool shift)const{
+  if(!shift||(tool!=Tool::Rectangle&&tool!=Tool::Ellipse))return last;
+  const double dx=last.x()-first.x(),dy=last.y()-first.y();
+  const double size=std::min(std::abs(dx),std::abs(dy));
+  return {first.x()+std::copysign(size,dx),first.y()+std::copysign(size,dy)};
+ }
  void cancelCurrentGesture(){
   if(nativeContourPressing_&&nativeSession_){nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(true);}
   if(nativePressing_&&nativeSession_){nativeSession_->cancel();nativePressing_=false;updateNativePaths(false);}
@@ -628,7 +644,7 @@ protected:
   for(const auto& c:editor.state().doc.contours)if(c.nodes.size()==1){
    const auto& layer=editor.state().layers.at(editor.state().objects.at(c.key.object).layer);
    if(!layer.visible)continue;
-   p->setPen(Qt::NoPen);p->setBrush(selected.count(c.key.object)?QColor(239,109,25):QColor(105,115,123));
+   p->setPen(Qt::NoPen);p->setBrush(selected.count(c.key.object)?QColor(239,109,25):layerColor(editor.state().objects.at(c.key.object).layer));
    p->drawEllipse(viewportTransform().map(toQt(c.nodes.front().p)),2,2);
   }
   p->restore();
@@ -713,9 +729,9 @@ void mousePressEvent(QMouseEvent* e)override{
    if(hits.empty()){if(toolWarning)toolWarning("Tesoura: clique sobre um segmento de polilinha.");e->accept();return;}
    try{
     const auto& hit=hits.front();
-    const int obj=editor.cutPolylineEdge(hit.key,hit.segment,hit.projected);
-    selected.clear();rebuild();activate(obj==hit.key.object?hit.key:Key{obj,0});
-    if(diagnosticEvent)diagnosticEvent("polyline_scissor_cut",1);
+    const int obj=editor.removePolylineEdge(hit.key,hit.segment);
+    selected.clear();rebuild();if(obj>0)activate({obj,0});
+    if(diagnosticEvent)diagnosticEvent("polyline_scissor_edge_removed",1);
     if(stateChanged)stateChanged();
    }catch(const std::exception& ex){if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));}
    e->accept();return;
@@ -738,6 +754,7 @@ void mousePressEvent(QMouseEvent* e)override{
  }
  QPainterPath temporaryShape()const{
   QPainterPath p;QPointF a=mapToScene(drawStart_.toPoint()),b=mapToScene(drawCurrent_.toPoint());
+  b=constrainedCorner(a,b,QApplication::keyboardModifiers().testFlag(Qt::ShiftModifier));
   if(tool==Tool::Line){p.moveTo(a);p.lineTo(b);}
   else if(tool==Tool::Rectangle){p.addRect(QRectF(a,b).normalized());}
   else if(tool==Tool::Ellipse){p.addEllipse(QRectF(a,b).normalized());}
@@ -847,6 +864,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   }
   if(strokeDrawing_){
    drawCurrent_=e->position();auto first=mapToScene(drawStart_.toPoint());auto last=mapToScene(drawCurrent_.toPoint());
+   last=constrainedCorner(first,last,e->modifiers().testFlag(Qt::ShiftModifier));
    QPointF a{std::min(first.x(),last.x()),std::min(first.y(),last.y())}, b{std::max(first.x(),last.x()),std::max(first.y(),last.y())};
    if(QLineF(first,last).length()>1e-5&&(tool==Tool::Line||(b.x()>a.x()&&b.y()>a.y()))){
     if(tool==Tool::Rectangle)lastCreated_=editor.rectangle(fromQt(a),b.x()-a.x(),b.y()-a.y(),targetLayer());
@@ -861,6 +879,12 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    viewport()->update();if(stateChanged)stateChanged();e->accept();return;
   }
   QGraphicsView::mouseReleaseEvent(e);
+ }
+ void keyReleaseEvent(QKeyEvent* e)override{
+  if(e->key()==Qt::Key_Shift&&strokeDrawing_&&pendingPreview_){
+   pendingPreview_->setPath(temporaryShape());viewport()->update();
+  }
+  QGraphicsView::keyReleaseEvent(e);
  }
  void keyPressEvent(QKeyEvent* e)override{
   if(nativeMode_&&nativeSession_){
@@ -888,8 +912,11 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   if(e->key()==Qt::Key_Delete&&tool==Tool::Select&&!nativeMode_){
    deleteSelectedShapes();e->accept();return;
   }
+  if(e->key()==Qt::Key_Shift&&strokeDrawing_&&pendingPreview_){
+   pendingPreview_->setPath(temporaryShape());viewport()->update();
+  }
   if(e->key()==Qt::Key_Escape){
-   if(!busy()){if(requestSelectTool)requestSelectTool();e->accept();return;}
+   if(!busy(){if(requestSelectTool)requestSelectTool();e->accept();return;}
    if(shapeDragging_){clearShapePreview();e->accept();return;}
    if(draggingNode_&&active_){
     const auto oldMarker=viewportTransform().map(toQt(dragOriginal_))+(drawCurrent_-dragStart_);
@@ -1144,6 +1171,7 @@ public:
   workspaceCfg_.machineHeight=read("workspace/machineHeight",400);
   workspaceCfg_.showGrid=settings.value("workspace/grid",true).toBool();
   workspaceCfg_.gridToBed=settings.value("workspace/gridToBed",true).toBool();
+  workspaceCfg_.showDrawingFrame=settings.value("workspace/drawingFrame",true).toBool();
   workspaceCfg_.showMachineFrame=settings.value("workspace/machineFrame",true).toBool();
   workspaceCfg_.showOrigin=settings.value("workspace/origin",true).toBool();
   const QString profile=settings.value("workspace/profile","AlgoLaser Alpha Mk2 20W").toString();
@@ -1158,6 +1186,7 @@ public:
   settings.setValue("workspace/machineHeight",workspaceCfg_.machineHeight);
   settings.setValue("workspace/grid",workspaceCfg_.showGrid);
   settings.setValue("workspace/gridToBed",workspaceCfg_.gridToBed);
+  settings.setValue("workspace/drawingFrame",workspaceCfg_.showDrawingFrame);
   settings.setValue("workspace/machineFrame",workspaceCfg_.showMachineFrame);
   settings.setValue("workspace/origin",workspaceCfg_.showOrigin);
   settings.setValue("workspace/profile",QString::fromStdString(workspaceCfg_.profile));
@@ -1200,8 +1229,9 @@ public:
   auto* gridToBed=new QCheckBox("Grade segue a mesa configurada (em vez do desenho)");
   gridToBed->setChecked(workspaceCfg_.gridToBed);
   auto* frame=new QCheckBox("Mostrar contorno da mesa");frame->setChecked(workspaceCfg_.showMachineFrame);
+  auto* drawFrame=new QCheckBox("Mostrar limite da area de desenho");drawFrame->setChecked(workspaceCfg_.showDrawingFrame);
   auto* origin=new QCheckBox("Mostrar origem (0,0)");origin->setChecked(workspaceCfg_.showOrigin);
-  vertical->addWidget(grid);vertical->addWidget(gridToBed);vertical->addWidget(frame);vertical->addWidget(origin);
+  vertical->addWidget(grid);vertical->addWidget(gridToBed);vertical->addWidget(drawFrame);vertical->addWidget(frame);vertical->addWidget(origin);
   auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
   connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);
   connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);vertical->addWidget(buttons);
@@ -1210,7 +1240,7 @@ public:
   next.drawingWidth=drawingW->value();next.drawingHeight=drawingH->value();
   next.machineWidth=machineW->value();next.machineHeight=machineH->value();
   next.showGrid=grid->isChecked();next.gridToBed=gridToBed->isChecked();
-  next.showMachineFrame=frame->isChecked();next.showOrigin=origin->isChecked();
+  next.showMachineFrame=frame->isChecked();next.showDrawingFrame=drawFrame->isChecked();next.showOrigin=origin->isChecked();
   next.validate();workspaceCfg_=next;
   view.setWorkspace(workspaceCfg_,isInteractive());persistWorkspaceSettings();refreshWorkspaceLabels();
   view.setFocus();
@@ -1223,6 +1253,7 @@ public:
     QWidget#alencarRoot { background:#121519; color:#E6ECF3; font-family:'Segoe UI'; font-size:12px; }
     QFrame#topHeader { background:#161B21; border-bottom:1px solid #303740; }
     QFrame#quickActions { background:#1A2027; border-bottom:1px solid #2D343D; }
+    QFrame#quickActions QPushButton { padding:4px 7px; min-height:22px; font-size:11px; }
     QFrame#leftPanel,QFrame#rightPanel { background:#192027; border:0; }
     QFrame#canvasPanel { background:#101419; border:0; }
     QFrame#bottomStatus,QFrame#layerPaletteBar { background:#1A2027; border-top:1px solid #333B45; }
@@ -1231,7 +1262,7 @@ public:
     QMenu { background:#1C2833; color:#ECF1F8; border:1px solid #526273; }
     QMenu::item:selected { background:#A96323; }
     QLabel { color:#DDE5EB; background:transparent; }
-    QLabel#brandName { color:#FA932C; font-weight:800; font-size:19px; }
+    QLabel#brandName { color:#FA932C; font-weight:800; font-size:17px; }
     QLabel#brandSub { color:#9CA9B6; font-size:11px; }
     QLabel#sectionTitle { color:#FF9B3C; font-size:11px; font-weight:bold; padding:4px 1px; }
     QLabel#machineState { color:#F0BB80; background:#342515; border:1px solid #624323; border-radius:6px; padding:6px 10px; }
@@ -1240,7 +1271,7 @@ public:
     QPushButton { background:#303944; color:#F1F5F8; border:1px solid #4B5662; border-radius:6px; padding:7px 11px; font-weight:500; }
     QPushButton:hover { background:#3C4854; border-color:#EF8A2C; }
     QPushButton:disabled { background:#222930; border-color:#333B43; color:#77838E; }
-    QPushButton[compact="true"] { padding:5px 3px; min-height:28px; font-size:11px; }
+    QPushButton[compact="true"] { padding:3px 2px; min-height:25px; font-size:10px; }
     QTabWidget::pane { border:0; }
     QTabBar::tab { background:#262F38; padding:6px; color:#C4D0D9; }
     QTabBar::tab:selected { background:#3B4752; color:#FFA247; }
@@ -1260,16 +1291,17 @@ public:
    view.setBackgroundBrush(QColor("#111922"));view.setWorkspaceTheme(true);
   } else {
    setStyleSheet(R"QSS(
-    QWidget#alencarRoot { background:#F3F5F7; color:#253342; font-family:'Segoe UI'; font-size:12px; }
-    QFrame#topHeader { background:#E5E9ED; border-bottom:1px solid #D0D7DF; }
-    QFrame#quickActions { background:#F6F8FA; border-bottom:1px solid #CED6DE; }
-    QFrame#leftPanel,QFrame#rightPanel { background:#DEE5E9; border:0; }
-    QFrame#canvasPanel { background:#C6CFD7; border:0; }
+    QWidget#alencarRoot { background:#DFE6EB; color:#253342; font-family:'Segoe UI'; font-size:12px; }
+    QFrame#topHeader { background:#D6E0E6; border-bottom:1px solid #C2CDD5; }
+    QFrame#quickActions { background:#E3E9ED; border-bottom:1px solid #CED6DE; }
+    QFrame#quickActions QPushButton { padding:4px 7px; min-height:22px; font-size:11px; }
+    QFrame#leftPanel,QFrame#rightPanel { background:#CED7DE; border:0; }
+    QFrame#canvasPanel { background:#B6C1CA; border:0; }
     QFrame#bottomStatus,QFrame#layerPaletteBar { background:#F6F8FA; border-top:1px solid #D0D8DF; }
     QMenuBar#webInspiredMenu { background:#DFE7EE; color:#23394F; padding:3px 10px; }
     QMenuBar#webInspiredMenu::item:selected { background:#FFDFC1; }
     QLabel { color:#253342; background:transparent; }
-    QLabel#brandName { color:#CC6A15; font-weight:800; font-size:19px; }
+    QLabel#brandName { color:#CC6A15; font-weight:800; font-size:17px; }
     QLabel#brandSub { color:#67798B; font-size:11px; }
     QLabel#sectionTitle { color:#AB5B17; font-size:11px; font-weight:bold; padding:4px 1px; }
     QLabel#machineState { color:#985000; background:#FFF0D9; border:1px solid #E7BE84; border-radius:6px; padding:6px 10px; }
@@ -1278,7 +1310,7 @@ public:
     QPushButton { background:#E9EFF3; color:#253442; border:1px solid #C7D1DC; border-radius:6px; padding:7px 11px; font-weight:500; }
     QPushButton:hover { background:#FFF0DF; border-color:#E7832C; }
     QPushButton:disabled { background:#EBEFF2; border-color:#D9DFE5; color:#8B99A5; }
-    QPushButton[compact="true"] { padding:5px 3px; min-height:28px; font-size:11px; }
+    QPushButton[compact="true"] { padding:3px 2px; min-height:25px; font-size:10px; }
     QTabWidget::pane { border:0; }
     QTabBar::tab { background:#E0E6EA; padding:6px; color:#445666; }
     QTabBar::tab:selected { background:#DFE6EA; color:#BA611A; }
@@ -1291,7 +1323,7 @@ public:
     QGraphicsView#drawingCanvas { border:1px solid #CDD5DE; border-radius:4px; }
     QSplitter::handle { background:#C9D4DF; width:3px; }
    )QSS");
-   view.setBackgroundBrush(QColor("#B8C2CC"));view.setWorkspaceTheme(false);
+   view.setBackgroundBrush(QColor("#9FADB9"));view.setWorkspaceTheme(false);
   }
   view.viewport()->update();
  }
@@ -1305,7 +1337,7 @@ public:
   resize(1390,870);setMinimumSize(950,620);
   auto* layout=new QVBoxLayout(this);layout->setContentsMargins(0,0,0,0);layout->setSpacing(0);
   auto* header=new QFrame;header->setObjectName("topHeader");
-  auto* headerRow=new QHBoxLayout(header);headerRow->setContentsMargins(18,8,18,8);
+  auto* headerRow=new QHBoxLayout(header);headerRow->setContentsMargins(11,4,11,4);
   auto* identity=new QVBoxLayout;identity->setSpacing(1);
   auto* brand=new QLabel("ALENCAR LASER");brand->setObjectName("brandName");identity->addWidget(brand);
   auto* subtitle=new QLabel("Estúdio Qt 6  •  TESTE_19.8  •  Persistência + recuperação + ícones");subtitle->setObjectName("brandSub");identity->addWidget(subtitle);
@@ -1326,7 +1358,7 @@ public:
   };
   auto titleLabel=[&](const QString& label){auto* l=new QLabel(label);l->setObjectName("sectionTitle");return l;};
   auto* quick=new QFrame;quick->setObjectName("quickActions");
-  auto* quickRow=new QHBoxLayout(quick);quickRow->setContentsMargins(12,7,12,7);quickRow->setSpacing(7);
+  auto* quickRow=new QHBoxLayout(quick);quickRow->setContentsMargins(7,3,7,3);quickRow->setSpacing(5);
   add(quickRow,"open","Abrir",[this]{open();});
   add(quickRow,"open_other","Abrir outro...",[this]{openOther();});
   add(quickRow,"save","Salvar",[this]{save();});
@@ -1375,7 +1407,7 @@ public:
   persistentSplitter_=splitter;
   splitter->setChildrenCollapsible(false);splitter->setHandleWidth(3);
   auto* left=new QFrame;left->setObjectName("leftPanel");
-  left->setMinimumWidth(132);left->setMaximumWidth(200);
+  left->setMinimumWidth(52);left->setMaximumWidth(64);
   auto* leftOuter=new QVBoxLayout(left);leftOuter->setContentsMargins(4,5,4,5);
   auto* toolScroll=new QScrollArea;toolScroll->setWidgetResizable(true);
   toolScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -1389,60 +1421,61 @@ public:
     b->setAccessibleName(title);
     b->setIcon(alaser::toolGlyph(id));
     b->setText(QString());
-    b->setIconSize(QSize(23,23));
-    b->setMinimumHeight(39);
-    b->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
+    b->setIconSize(QSize(20,20));
+    b->setFixedSize(QSize(38,36));
+    b->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Fixed);
     b->setToolTip(title+" — "+tooltip);b->setFocusPolicy(Qt::NoFocus);
     buttons[id]=b;grid->addWidget(b,row,col);
     b->setCheckable(true);toolGroup->addButton(b);
     connect(b,&QPushButton::clicked,this,[this,action]{run(action);});return b;
   };
-  auto newGrid=[&](){auto* g=new QGridLayout;g->setSpacing(3);tools->addLayout(g);return g;};
-  tools->addWidget(titleLabel("EDITAR"));
+  auto newGrid=[&](){auto* g=new QGridLayout;g->setSpacing(3);g->setAlignment(Qt::AlignHCenter);tools->addLayout(g);return g;};
+  tools->addSpacing(4); // Barra compacta: ferramentas de edicao
   auto* editorGrid=newGrid();
   compact(editorGrid,0,0,"select","↖ Seleção","Selecionar (Alt alterna contornos sobrepostos)",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Select);});
-  compact(editorGrid,0,1,"nodes","✎ Nós","Editar nós das polilinhas",
+  compact(editorGrid,1,0,"nodes","✎ Nós","Editar nós das polilinhas",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Nodes);});
-  [[maybe_unused]] auto* bezier=compact(editorGrid,1,0,"bezier","⌁ Bézier","Editar âncoras e alças Bézier nativas",
+  [[maybe_unused]] auto* bezier=compact(editorGrid,2,0,"bezier","⌁ Bézier","Editar âncoras e alças Bézier nativas",
    [this]{if(!curves){status->setText("Abra um projeto com curvas v5.");return;}
      bezierToolActive_=true;view.enableNative(true);
      status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
-  compact(editorGrid,1,1,"scissors","✂ Tesoura","Cortar polilinha no segmento (K). Curvas Bezier nao sao alteradas.",
+  compact(editorGrid,3,0,"scissors","✂ Tesoura","Remover aresta clicada (K); desfazer com Ctrl+Z. Curvas Bezier nao sao alteradas.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
-     status->setText("Tesoura: clique numa linha; Ctrl+Z desfaz. Para curvas nativas, use Bézier.");});
-  tools->addWidget(titleLabel("DESENHO"));
+     status->setText("Tesoura: clique na aresta para remove-la; Ctrl+Z desfaz.");});
+  tools->addSpacing(5); // Ferramentas de desenho
   auto* shapeGrid=newGrid();
   compact(shapeGrid,0,0,"line","╱ Linha","Desenhar linha",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Line);});
-  compact(shapeGrid,0,1,"rectangle","▭ Retâng.","Desenhar retângulo",
+  compact(shapeGrid,1,0,"rectangle","▭ Retâng.","Desenhar retângulo",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Rectangle);});
-  compact(shapeGrid,1,0,"ellipse","◯ Elipse","Desenhar elipse",
+  compact(shapeGrid,2,0,"ellipse","◯ Elipse","Desenhar elipse",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Ellipse);});
-  compact(shapeGrid,1,1,"polygon","⬡ Políg.","Desenhar polígono",
+  compact(shapeGrid,3,0,"polygon","⬡ Políg.","Desenhar polígono",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Polygon);});
   buttons.at("select")->setChecked(true);
   auto future=[&](const QString& name,const QString& tip){
-    auto* b=new QPushButton(name);b->setProperty("compact",true);
+    auto* b=new QPushButton(name.left(1));b->setProperty("compact",true);
+    b->setFixedSize(QSize(38,32));b->setAccessibleName(name);
     b->setEnabled(false);b->setToolTip(tip+" — em desenvolvimento; função desativada");
     b->setFocusPolicy(Qt::NoFocus);return b;
   };
-  tools->addWidget(titleLabel("VETOR  ·  FUTURO"));
+  tools->addSpacing(6); // Ferramentas futuras desativadas
   auto* vectorGrid=newGrid();
   for(const auto& data:std::vector<std::tuple<QString,QString>>{
    {"T  Texto","Texto vetorial"},{"◎ Offset","Contorno interno/externo"},
    {"⊕ União","Soldar vetores"},{"⊖ Subtr.","Subtrair formas"},
    {"⊞ Alinhar","Alinhamento e distribuição"},{"⌗ Medir","Ferramenta de medição"}}){
-    const int index=vectorGrid->count();vectorGrid->addWidget(future(std::get<0>(data),std::get<1>(data)),index/2,index%2);
+    const int index=vectorGrid->count();vectorGrid->addWidget(future(std::get<0>(data),std::get<1>(data)),index,0);
   }
-  tools->addWidget(titleLabel("ARQUIVOS  ·  FUTURO"));
+  tools->addSpacing(5); // Importadores futuros desativados
   auto* fileGrid=newGrid();
   for(const auto& data:std::vector<QString>{"SVG", "DXF", "Imagem", "LightBurn"}){
-   const int index=fileGrid->count();fileGrid->addWidget(future(data,"Importação de "+data),index/2,index%2);
+   const int index=fileGrid->count();fileGrid->addWidget(future(data,"Importação de "+data),index,0);
   }
   tools->addStretch();
   auto* tip=new QLabel("Arraste: mover forma\nDelete: excluir forma\nCtrl+arraste: mover curva Bézier\nScroll: zoom no cursor\nBotão central: mover tela\nCtrl+Z/Y: histórico");
-  tip->setObjectName("brandSub");tip->setWordWrap(true);tools->addWidget(tip);
+  tip->setObjectName("brandSub");tip->setWordWrap(true);tip->hide();tools->addWidget(tip);
   toolScroll->setWidget(leftContent);leftOuter->addWidget(toolScroll);
   splitter->addWidget(left);
 
@@ -1885,8 +1918,11 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     const QString color=shades.at(id%shades.size());
     b->setStyleSheet(QString("QPushButton { background:%1; color:white; border:1px solid #69717B; border-radius:4px; padding:1px; font-size:10px;} "
       "QPushButton:checked {border:3px solid #FFFFFF;} QPushButton:disabled {background:#41454D; color:#797D82;}").arg(color));
-    b->setToolTip(QString("Clique: ativar camada %1 | Shift+clique: enviar seleção para camada (editavel)").arg(id));
+    b->setToolTip(QString("Clique: ativar ou criar camada %1 | Shift+clique: criar se necessario e enviar selecao").arg(id));
     connect(b,&QPushButton::clicked,this,[this,id]{
+     if(layers->findData(id)<0){
+      run([this,id]{view.editor.addLayer(id,"Camada "+std::to_string(id));});
+     }
      const int ix=layers->findData(id);
      if(ix<0)return;
      if(QApplication::keyboardModifiers().testFlag(Qt::ShiftModifier)){
@@ -1937,6 +1973,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   shortcut("Esc",[this]{view.cancelCurrentGesture();buttons.at("select")->click();});
   shortcut("V",[this]{buttons.at("select")->click();});
   shortcut("K",[this]{buttons.at("scissors")->click();});
+  shortcut("Ctrl+R",[this]{buttons.at("rectangle")->click();});
+  shortcut("Ctrl+E",[this]{buttons.at("ellipse")->click();});
   shortcut("Ctrl+L",[this]{buttons.at("move_layer")->click();});
   shortcut("Ctrl+D",[this]{buttons.at("duplicate_obj")->click();});
   shortcut("Ctrl+0",[fit]{fit->click();});
@@ -1970,7 +2008,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   int current=layers->currentData().toInt();refreshing=true;layers->clear();for(const auto& [id,l]:view.editor.state().layers)layers->addItem(QString::fromStdString(l.name),id);
   int ix=layers->findData(current);layers->setCurrentIndex(ix<0?0:ix);refreshing=false;refreshFlags();
   for(size_t i=0;i<layerPalette_.size();++i){
-   auto* b=layerPalette_[i];b->setEnabled(layers->findData(int(i))>=0);
+   auto* b=layerPalette_[i];b->setEnabled(true);
    b->setChecked(int(i)==layers->currentData().toInt());
   }
   const int curveCount=curves?int(curves->committed().contours.size()):0;
@@ -2413,9 +2451,32 @@ static QJsonObject editTools197Test(const QString& directory){
  v.activate({line,0});w.layers->setCurrentIndex(w.layers->findData(1));
  pressKey(w,Qt::Key_L,Qt::ControlModifier);
  check(v.editor.state().objects.at(line).layer==0,"locked layer transfer accepted");
+ // Regressao visual 19.8: Ctrl+R, Ctrl+E e Shift preservam proporcoes.
+ w.layers->setCurrentIndex(w.layers->findData(0));
+ auto shiftedShape=[&](Qt::Key shortcut,QtEditorLab::Tool expected,QPointF first,QPointF second){
+  pressKey(w,shortcut,Qt::ControlModifier);
+  check(v.tool==expected,"Ctrl+R/E nao ativou ferramenta");
+  const auto p1=v.mapFromScene(first),p2=v.mapFromScene(second);
+  QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::ShiftModifier,p1);
+  QTest::mouseMove(v.viewport(),p2);QApplication::processEvents();
+  QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::ShiftModifier,p2);
+  QApplication::processEvents();
+  const int id=v.lastCreated();
+  check(id>0&&v.editor.state().objects.count(id),"forma proporcional nao criada");
+  auto [lo,hi]=boundsOf(v.editor.state().doc,{id});
+  check(std::abs((hi.x-lo.x)-(hi.y-lo.y))<1e-6,"Shift nao preservou dimensoes iguais");
+ };
+ shiftedShape(Qt::Key_R,QtEditorLab::Tool::Rectangle,{180,112},{201,123});
+ shiftedShape(Qt::Key_E,QtEditorLab::Tool::Ellipse,{180,143},{208,155});
+ auto* layer6=w.findChild<QPushButton*>("layer_swatch_6");
+ check(layer6!=nullptr,"paleta de camadas incompleta");
+ layer6->click();
+ check(w.layers->findData(6)>=0&&w.layers->currentData().toInt()==6,"camada nao criada por clique");
+ w.layers->setCurrentIndex(w.layers->findData(0));
  w.grab().save(directory+"/TESTE_19_7_FERRAMENTAS.png");
  return {{"status","PASS"},{"selection_esc",true},{"selection_v",true},
    {"scissors_k",true},{"scissors_mouse",true},{"undo_scissors",true},
+   {"ctrl_r_rectangle",true},{"ctrl_e_ellipse",true},{"shift_square_circle",true},{"create_layer_by_palette",true},
    {"move_layer_ctrl_l",true},{"layer_lock_rejected",true},
    {"document_before_lock_attempt",QString::number(before.size())},
    {"hardware_commands_sent",false}};

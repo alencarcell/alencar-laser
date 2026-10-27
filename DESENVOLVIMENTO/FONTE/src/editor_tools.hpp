@@ -169,6 +169,56 @@ public:
   });
   return newObject;
  }
+ // Tesoura de remocao: apaga a aresta clicada em vez de apenas abrir sua costura.
+ // Um contorno fechado vira caminho aberto sem a aresta selecionada.
+ // Um caminho aberto separa os trechos restantes, descartando subcaminhos
+ // com menos de dois nos. Uma transacao/undo, respeitando camada e grupos.
+ // Retorna 0 se o objeto foi completamente removido.
+ int removePolylineEdge(Key key,int edge){
+  const Contour* source=get(current.doc,key);
+  if(!source)throw std::runtime_error("contorno inexistente");
+  if(!editable(current,key.object))throw std::runtime_error("camada invisivel ou bloqueada");
+  if(current.objects.at(key.object).group>0)throw std::runtime_error("desagrupe antes de usar tesoura");
+  const int n=int(source->nodes.size());
+  if(n<2||edge<0||edge>=n-(source->closed?0:1))throw std::runtime_error("segmento invalido");
+  const int newObject=nextObjectId(current.doc);
+  int result=key.object;
+  change([&](EditorState& state){
+   Contour* original=get(state.doc,key);
+   if(!original)throw std::runtime_error("contorno removido");
+   const auto nodes=original->nodes;
+   if(original->closed){
+    std::vector<Node> opened;
+    opened.reserve(size_t(n));
+    for(int i=0;i<n;i++)opened.push_back(nodes[size_t((edge+1+i)%n)]);
+    original->nodes=std::move(opened);
+    original->closed=false;
+    return;
+   }
+   std::vector<Node> left(nodes.begin(),nodes.begin()+edge+1);
+   std::vector<Node> right(nodes.begin()+edge+1,nodes.end());
+   const bool leftValid=left.size()>=2,rightValid=right.size()>=2;
+   if(leftValid&&rightValid){
+    original->nodes=std::move(left);
+    state.doc.contours.push_back({{newObject,0},std::move(right),false});
+    auto meta=state.objects.at(key.object);meta.group=0;
+    state.objects.emplace(newObject,meta);
+    result=newObject;
+   }else if(leftValid){
+    original->nodes=std::move(left);
+   }else if(rightValid){
+    original->nodes=std::move(right);
+   }else{
+    state.doc.contours.erase(std::remove_if(state.doc.contours.begin(),state.doc.contours.end(),
+     [&](const Contour& c){return c.key==key;}),state.doc.contours.end());
+    bool remains=false;
+    for(const auto& c:state.doc.contours)if(c.key.object==key.object){remains=true;break;}
+    if(!remains)state.objects.erase(key.object);
+    result=0;
+   }
+  });
+  return result;
+ }
  void rotateObjects(std::vector<int> ids,Pt pivot,double angle){change([&](EditorState& s){apply(s,ids,[&](Pt p){return rotateAround(p,pivot,angle);});});}
  void scaleObjects(std::vector<int> ids,Pt pivot,double sx,double sy){if(!std::isfinite(sx)||!std::isfinite(sy)||sx==0||sy==0)throw std::runtime_error("invalid scale");change([&](EditorState& s){apply(s,ids,[&](Pt p){return Pt{pivot.x+(p.x-pivot.x)*sx,pivot.y+(p.y-pivot.y)*sy};});});}
  void mirrorX(std::vector<int> ids,double axisX){change([&](EditorState& s){apply(s,ids,[&](Pt p){return Pt{2*axisX-p.x,p.y};});});}
