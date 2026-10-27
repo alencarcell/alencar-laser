@@ -31,6 +31,21 @@ function Checar-Saida([string]$etapa) {
         throw "$etapa falhou (codigo $LASTEXITCODE). Veja $relatorio"
     }
 }
+# Os executaveis GUI escrevem a causa real em JSON, inclusive ao retornar codigo 1.
+# Exibir o relatorio no proprio terminal evita outro ciclo de compilacao as cegas.
+function Checar-ResultadoQt([string]$etapa, [string]$arquivo) {
+    $codigo = $LASTEXITCODE
+    if ($codigo -ne 0) {
+        Write-Host "FALHA NA ETAPA: $etapa (codigo $codigo)" -ForegroundColor Red
+        if (Test-Path -LiteralPath $arquivo -PathType Leaf) {
+            Write-Host "Detalhes do teste (JSON):" -ForegroundColor Yellow
+            Write-Host ([System.IO.File]::ReadAllText($arquivo))
+        } else {
+            Write-Host "O executavel nao produziu JSON: $arquivo" -ForegroundColor Yellow
+        }
+        throw "$etapa falhou (codigo $codigo). Consulte o JSON acima."
+    }
+}
 
 try {
     Start-Transcript -Path $relatorio -Force | Out-Null
@@ -76,10 +91,12 @@ try {
     }
 
     # Ambos sao testes em ambiente local sem maquina fisica.
-    & $app --edit-tools-19-7-test $fixture (Join-Path $destino 'ferramentas')
-    Checar-Saida 'Regressao GUI das ferramentas'
-    & $app --recovery-19-8-test $fixture (Join-Path $destino 'recuperacao')
-    Checar-Saida 'Recuperacao .alaser v5'
+    $dirFerramentas = Join-Path $destino 'ferramentas'
+    $dirRecuperacao = Join-Path $destino 'recuperacao'
+    & $app --edit-tools-19-7-test $fixture $dirFerramentas
+    Checar-ResultadoQt 'Regressao GUI das ferramentas' (Join-Path $dirFerramentas 'RESULTADO_TESTE_19_7_GUI.json')
+    & $app --recovery-19-8-test $fixture $dirRecuperacao
+    Checar-ResultadoQt 'Recuperacao persistente GUI 19.8' (Join-Path $dirRecuperacao 'RESULTADO_RECUPERACAO_19_8.json')
 
     Write-Host 'BUILD E REGRESSOES AUTOMATIZADAS PASSARAM. AVALIACAO VISUAL AINDA NECESSARIA.' -ForegroundColor Green
     if ($Abrir) {
