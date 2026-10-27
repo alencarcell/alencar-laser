@@ -36,6 +36,38 @@ int main(){
   require(e.redo()&&get(e.state().doc,{second,0}),"redo nao restaurou segunda peca");
   validate(e.state());
 
+  // Regressao real do GUI 19.8: cruzamentos nas arestas verticais de
+  // retangulo e clique na aresta superior, antes do PRIMEIRO cruzamento
+  // na sequencia circular dos nos (intervalo que cruza a origem).
+  Editor wrap(Document{});
+  const int box=wrap.rectangle({100,100},20,20);
+  const int divider=wrap.line({90,110},{130,110});
+  const Document wrapBefore=wrap.state().doc;
+  planner.reset(wrap.state().doc);
+  auto top=planner.candidate(wrap.state().doc,{{box,0},0,0,{110,100}});
+  require(bool(top),"arco anterior ao primeiro cruzamento ficou sem destaque");
+  close(top->from,-0.5);close(top->to,1.5);
+  require(top->preview.size()==4,"preview circular superior fragmentado");
+  close(top->preview.front().y,110);close(top->preview.back().y,110);
+  const int wrapResult=wrap.removeScissorSpan(*top);
+  require(wrapResult==box,"recorte de arco fechado mudou id original");
+  const auto* remainBox=get(wrap.state().doc,{box,0});
+  require(remainBox&&!remainBox->closed&&remainBox->nodes.size()==4,
+          "recorte circular deixou arco antigo por tras");
+  require(get(wrap.state().doc,{divider,0})!=nullptr,
+          "recorte de arco removeu limite usado como referencia");
+  require(wrap.undo()&&sameDoc(wrapBefore,wrap.state().doc),
+          "desfazer recorte que cruza origem nao restaurou contorno");
+
+  // Outro lado da costura: cursor apos ultimo cruzamento deve enxergar
+  // o mesmo intervalo circular, sem avancar duas voltas.
+  planner.reset(wrap.state().doc);
+  auto beforeOrigin=planner.candidate(wrap.state().doc,{{box,0},3,0,{100,105}});
+  require(bool(beforeOrigin),"arco apos ultimo cruzamento sem destaque");
+  close(beforeOrigin->from,3.5);close(beforeOrigin->to,5.5);
+  require(beforeOrigin->preview.size()==4,
+          "arco de retorno recebeu limite incorreto");
+
   Editor ring(Document{});
   const int circle=ring.ellipse({0,0},10,10,64);
   const int knife=ring.line({-20,2},{20,2});
@@ -108,7 +140,7 @@ int main(){
           "objeto vazio deixou geometria fantasma");
   validate(lock.state());
 
-  std::cout<<"PASS: trechos densos, elipse 64, autocruzamentos, invisibilidade, previas, undo/redo, guardas\n";
+  std::cout<<"PASS: trechos densos, origem circular, elipse 64, autocruzamentos, invisibilidade, previas, undo/redo, guardas\n";
   return 0;
  }catch(const std::exception& ex){
   std::cerr<<"FAIL: "<<ex.what()<<"\n";return 1;
