@@ -493,7 +493,7 @@ protected:
     painter->drawLine(QPointF(clipped.left(),y),QPointF(clipped.right(),y));
   }
   painter->setPen(QPen(QColor(90,135,165,190),0));
-  painter->drawRect(drawing);
+  if(workspace_.showDrawingFrame)painter->drawRect(drawing);
   if(workspace_.showMachineFrame){
    QPen edge(QColor(242,145,47,210),0);edge.setStyle(Qt::DashLine);
    painter->setPen(edge);painter->drawRect(bed);
@@ -1162,6 +1162,7 @@ public:
   workspaceCfg_.machineHeight=read("workspace/machineHeight",400);
   workspaceCfg_.showGrid=settings.value("workspace/grid",true).toBool();
   workspaceCfg_.gridToBed=settings.value("workspace/gridToBed",true).toBool();
+  workspaceCfg_.showDrawingFrame=settings.value("workspace/drawingFrame",true).toBool();
   workspaceCfg_.showMachineFrame=settings.value("workspace/machineFrame",true).toBool();
   workspaceCfg_.showOrigin=settings.value("workspace/origin",true).toBool();
   const QString profile=settings.value("workspace/profile","AlgoLaser Alpha Mk2 20W").toString();
@@ -1176,6 +1177,7 @@ public:
   settings.setValue("workspace/machineHeight",workspaceCfg_.machineHeight);
   settings.setValue("workspace/grid",workspaceCfg_.showGrid);
   settings.setValue("workspace/gridToBed",workspaceCfg_.gridToBed);
+  settings.setValue("workspace/drawingFrame",workspaceCfg_.showDrawingFrame);
   settings.setValue("workspace/machineFrame",workspaceCfg_.showMachineFrame);
   settings.setValue("workspace/origin",workspaceCfg_.showOrigin);
   settings.setValue("workspace/profile",QString::fromStdString(workspaceCfg_.profile));
@@ -1218,8 +1220,9 @@ public:
   auto* gridToBed=new QCheckBox("Grade segue a mesa configurada (em vez do desenho)");
   gridToBed->setChecked(workspaceCfg_.gridToBed);
   auto* frame=new QCheckBox("Mostrar contorno da mesa");frame->setChecked(workspaceCfg_.showMachineFrame);
+  auto* drawFrame=new QCheckBox("Mostrar limite da area de desenho");drawFrame->setChecked(workspaceCfg_.showDrawingFrame);
   auto* origin=new QCheckBox("Mostrar origem (0,0)");origin->setChecked(workspaceCfg_.showOrigin);
-  vertical->addWidget(grid);vertical->addWidget(gridToBed);vertical->addWidget(frame);vertical->addWidget(origin);
+  vertical->addWidget(grid);vertical->addWidget(gridToBed);vertical->addWidget(drawFrame);vertical->addWidget(frame);vertical->addWidget(origin);
   auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
   connect(buttons,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);
   connect(buttons,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);vertical->addWidget(buttons);
@@ -1228,7 +1231,7 @@ public:
   next.drawingWidth=drawingW->value();next.drawingHeight=drawingH->value();
   next.machineWidth=machineW->value();next.machineHeight=machineH->value();
   next.showGrid=grid->isChecked();next.gridToBed=gridToBed->isChecked();
-  next.showMachineFrame=frame->isChecked();next.showOrigin=origin->isChecked();
+  next.showMachineFrame=frame->isChecked();next.showDrawingFrame=drawFrame->isChecked();next.showOrigin=origin->isChecked();
   next.validate();workspaceCfg_=next;
   view.setWorkspace(workspaceCfg_,isInteractive());persistWorkspaceSettings();refreshWorkspaceLabels();
   view.setFocus();
@@ -1258,7 +1261,7 @@ public:
     QPushButton { background:#303944; color:#F1F5F8; border:1px solid #4B5662; border-radius:6px; padding:7px 11px; font-weight:500; }
     QPushButton:hover { background:#3C4854; border-color:#EF8A2C; }
     QPushButton:disabled { background:#222930; border-color:#333B43; color:#77838E; }
-    QPushButton[compact="true"] { padding:5px 3px; min-height:28px; font-size:11px; }
+    QPushButton[compact="true"] { padding:3px 2px; min-height:25px; font-size:10px; }
     QTabWidget::pane { border:0; }
     QTabBar::tab { background:#262F38; padding:6px; color:#C4D0D9; }
     QTabBar::tab:selected { background:#3B4752; color:#FFA247; }
@@ -1278,11 +1281,11 @@ public:
    view.setBackgroundBrush(QColor("#111922"));view.setWorkspaceTheme(true);
   } else {
    setStyleSheet(R"QSS(
-    QWidget#alencarRoot { background:#F3F5F7; color:#253342; font-family:'Segoe UI'; font-size:12px; }
-    QFrame#topHeader { background:#E5E9ED; border-bottom:1px solid #D0D7DF; }
-    QFrame#quickActions { background:#F6F8FA; border-bottom:1px solid #CED6DE; }
-    QFrame#leftPanel,QFrame#rightPanel { background:#DEE5E9; border:0; }
-    QFrame#canvasPanel { background:#C6CFD7; border:0; }
+    QWidget#alencarRoot { background:#DFE6EB; color:#253342; font-family:'Segoe UI'; font-size:12px; }
+    QFrame#topHeader { background:#D6E0E6; border-bottom:1px solid #C2CDD5; }
+    QFrame#quickActions { background:#E3E9ED; border-bottom:1px solid #CED6DE; }
+    QFrame#leftPanel,QFrame#rightPanel { background:#CED7DE; border:0; }
+    QFrame#canvasPanel { background:#B6C1CA; border:0; }
     QFrame#bottomStatus,QFrame#layerPaletteBar { background:#F6F8FA; border-top:1px solid #D0D8DF; }
     QMenuBar#webInspiredMenu { background:#DFE7EE; color:#23394F; padding:3px 10px; }
     QMenuBar#webInspiredMenu::item:selected { background:#FFDFC1; }
@@ -1296,7 +1299,7 @@ public:
     QPushButton { background:#E9EFF3; color:#253442; border:1px solid #C7D1DC; border-radius:6px; padding:7px 11px; font-weight:500; }
     QPushButton:hover { background:#FFF0DF; border-color:#E7832C; }
     QPushButton:disabled { background:#EBEFF2; border-color:#D9DFE5; color:#8B99A5; }
-    QPushButton[compact="true"] { padding:5px 3px; min-height:28px; font-size:11px; }
+    QPushButton[compact="true"] { padding:3px 2px; min-height:25px; font-size:10px; }
     QTabWidget::pane { border:0; }
     QTabBar::tab { background:#E0E6EA; padding:6px; color:#445666; }
     QTabBar::tab:selected { background:#DFE6EA; color:#BA611A; }
@@ -1309,7 +1312,7 @@ public:
     QGraphicsView#drawingCanvas { border:1px solid #CDD5DE; border-radius:4px; }
     QSplitter::handle { background:#C9D4DF; width:3px; }
    )QSS");
-   view.setBackgroundBrush(QColor("#B8C2CC"));view.setWorkspaceTheme(false);
+   view.setBackgroundBrush(QColor("#9FADB9"));view.setWorkspaceTheme(false);
   }
   view.viewport()->update();
  }
@@ -1323,7 +1326,7 @@ public:
   resize(1390,870);setMinimumSize(950,620);
   auto* layout=new QVBoxLayout(this);layout->setContentsMargins(0,0,0,0);layout->setSpacing(0);
   auto* header=new QFrame;header->setObjectName("topHeader");
-  auto* headerRow=new QHBoxLayout(header);headerRow->setContentsMargins(18,8,18,8);
+  auto* headerRow=new QHBoxLayout(header);headerRow->setContentsMargins(11,4,11,4);
   auto* identity=new QVBoxLayout;identity->setSpacing(1);
   auto* brand=new QLabel("ALENCAR LASER");brand->setObjectName("brandName");identity->addWidget(brand);
   auto* subtitle=new QLabel("Estúdio Qt 6  •  TESTE_19.8  •  Persistência + recuperação + ícones");subtitle->setObjectName("brandSub");identity->addWidget(subtitle);
@@ -1344,7 +1347,7 @@ public:
   };
   auto titleLabel=[&](const QString& label){auto* l=new QLabel(label);l->setObjectName("sectionTitle");return l;};
   auto* quick=new QFrame;quick->setObjectName("quickActions");
-  auto* quickRow=new QHBoxLayout(quick);quickRow->setContentsMargins(12,7,12,7);quickRow->setSpacing(7);
+  auto* quickRow=new QHBoxLayout(quick);quickRow->setContentsMargins(7,3,7,3);quickRow->setSpacing(5);
   add(quickRow,"open","Abrir",[this]{open();});
   add(quickRow,"open_other","Abrir outro...",[this]{openOther();});
   add(quickRow,"save","Salvar",[this]{save();});
