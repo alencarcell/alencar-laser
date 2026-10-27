@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura)
+param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -60,6 +60,19 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteImportacao) {
+        Write-Host 'VALIDACAO FOCADA: importacao segura LightBurn .lbrn2.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt de importacao'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\importacao'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --lbrn2-import-test $fixture $destino
+        Checar-ResultadoQt 'Importacao LBRN2' (Join-Path $destino 'RESULTADO_IMPORTACAO_LBRN2.json')
+        Write-Host 'Teste de importacao passou. Teste completo ainda necessario.' -ForegroundColor Green
+        return
+    }
     if ($SomenteTesoura) {
         Write-Host 'DIAGNOSTICO FOCADO: compila apenas Qt e executa teste da Tesoura.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test7_qt6
@@ -111,6 +124,9 @@ try {
     Checar-ResultadoQt 'Regressao GUI das ferramentas' (Join-Path $dirFerramentas 'RESULTADO_TESTE_19_7_GUI.json')
     & $app --recovery-19-8-test $fixture $dirRecuperacao
     Checar-ResultadoQt 'Recuperacao persistente GUI 19.8' (Join-Path $dirRecuperacao 'RESULTADO_RECUPERACAO_19_8.json')
+    $dirImportacao = Join-Path $destino 'importacao'
+    & $app --lbrn2-import-test $fixture $dirImportacao
+    Checar-ResultadoQt 'Importacao geometrica LBRN2' (Join-Path $dirImportacao 'RESULTADO_IMPORTACAO_LBRN2.json')
 
     Write-Host 'BUILD E REGRESSOES AUTOMATIZADAS PASSARAM. AVALIACAO VISUAL AINDA NECESSARIA.' -ForegroundColor Green
     if ($Abrir) {
