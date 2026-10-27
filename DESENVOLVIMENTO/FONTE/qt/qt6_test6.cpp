@@ -1253,6 +1253,7 @@ public:
     QWidget#alencarRoot { background:#121519; color:#E6ECF3; font-family:'Segoe UI'; font-size:12px; }
     QFrame#topHeader { background:#161B21; border-bottom:1px solid #303740; }
     QFrame#quickActions { background:#1A2027; border-bottom:1px solid #2D343D; }
+    QFrame#quickActions QPushButton { padding:4px 7px; min-height:22px; font-size:11px; }
     QFrame#leftPanel,QFrame#rightPanel { background:#192027; border:0; }
     QFrame#canvasPanel { background:#101419; border:0; }
     QFrame#bottomStatus,QFrame#layerPaletteBar { background:#1A2027; border-top:1px solid #333B45; }
@@ -1261,7 +1262,7 @@ public:
     QMenu { background:#1C2833; color:#ECF1F8; border:1px solid #526273; }
     QMenu::item:selected { background:#A96323; }
     QLabel { color:#DDE5EB; background:transparent; }
-    QLabel#brandName { color:#FA932C; font-weight:800; font-size:19px; }
+    QLabel#brandName { color:#FA932C; font-weight:800; font-size:17px; }
     QLabel#brandSub { color:#9CA9B6; font-size:11px; }
     QLabel#sectionTitle { color:#FF9B3C; font-size:11px; font-weight:bold; padding:4px 1px; }
     QLabel#machineState { color:#F0BB80; background:#342515; border:1px solid #624323; border-radius:6px; padding:6px 10px; }
@@ -1293,13 +1294,14 @@ public:
     QWidget#alencarRoot { background:#DFE6EB; color:#253342; font-family:'Segoe UI'; font-size:12px; }
     QFrame#topHeader { background:#D6E0E6; border-bottom:1px solid #C2CDD5; }
     QFrame#quickActions { background:#E3E9ED; border-bottom:1px solid #CED6DE; }
+    QFrame#quickActions QPushButton { padding:4px 7px; min-height:22px; font-size:11px; }
     QFrame#leftPanel,QFrame#rightPanel { background:#CED7DE; border:0; }
     QFrame#canvasPanel { background:#B6C1CA; border:0; }
     QFrame#bottomStatus,QFrame#layerPaletteBar { background:#F6F8FA; border-top:1px solid #D0D8DF; }
     QMenuBar#webInspiredMenu { background:#DFE7EE; color:#23394F; padding:3px 10px; }
     QMenuBar#webInspiredMenu::item:selected { background:#FFDFC1; }
     QLabel { color:#253342; background:transparent; }
-    QLabel#brandName { color:#CC6A15; font-weight:800; font-size:19px; }
+    QLabel#brandName { color:#CC6A15; font-weight:800; font-size:17px; }
     QLabel#brandSub { color:#67798B; font-size:11px; }
     QLabel#sectionTitle { color:#AB5B17; font-size:11px; font-weight:bold; padding:4px 1px; }
     QLabel#machineState { color:#985000; background:#FFF0D9; border:1px solid #E7BE84; border-radius:6px; padding:6px 10px; }
