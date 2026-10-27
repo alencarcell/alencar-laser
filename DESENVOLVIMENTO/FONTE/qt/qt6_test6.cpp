@@ -190,6 +190,10 @@ class QtEditorLab final:public QGraphicsView{
  bool nativeContourPressing_=false;
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
  QGraphicsPathItem* pendingPreview_=nullptr;
+ ScissorSpanPlanner scissorPlanner_;
+ uint64_t scissorIndexVersion_=std::numeric_limits<uint64_t>::max();
+ std::optional<ScissorSpan> scissorHover_;
+ QGraphicsPathItem* scissorPreview_=nullptr;
  // TESTE_12: caminho continuo e o modo seguro padrao.
  // Blocos sao EXCLUSIVAMENTE experimentais (ALENCAR_LAB_CHUNKS_EXPERIMENTAL=1).
  bool continuousPreview_=false;
@@ -548,7 +552,7 @@ public:
  size_t directQueries()const{return picker_.directQueries();}
  void invalidateSelectionCache(){picker_.invalidate();}
  void rebuild(){
-  clearShapePreview();endChunkPreview();
+  clearScissorHover();clearShapePreview();endChunkPreview();
   scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
    auto* o=scene_.addPath(pathOf(c),QPen(layerColor(editor.state().objects.at(c.key.object).layer),0));o->setZValue(1);
@@ -583,7 +587,49 @@ public:
  }
  QGraphicsPathItem* pathItem(Key k){return objects_.at(k);}
  std::optional<Key> active()const{return active_;}
- void setTool(Tool t){if(!busy()){nativeMode_=false;tool=t;viewport()->setCursor(t==Tool::Scissors?QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4):QCursor(Qt::ArrowCursor));viewport()->update();}}
+ std::optional<ScissorSpan> scissorPreview()const{return scissorHover_;}
+ void clearScissorHover(){
+  scissorHover_.reset();
+  if(scissorPreview_){scene_.removeItem(scissorPreview_);delete scissorPreview_;scissorPreview_=nullptr;}
+  viewport()->setCursor(Qt::ArrowCursor);
+ }
+ void updateScissorHover(QPoint where){
+  if(tool!=Tool::Scissors||nativeMode_||busy()){clearScissorHover();return;}
+  if(scissorIndexVersion_!=editor.geometryGeneration){
+   clearScissorHover();
+   scissorPlanner_.reset(editor.state().doc);
+   scissorIndexVersion_=editor.geometryGeneration;
+  }
+  std::optional<ScissorSpan> next;
+  const auto& state=editor.state();
+  for(const Hit& hit:clickHits(where)){
+   const auto meta=state.objects.find(hit.key.object);
+   if(meta==state.objects.end()||meta->second.group>0||!editable(state,hit.key.object))continue;
+   next=scissorPlanner_.candidate(state.doc,hit);
+   if(next)break;
+  }
+  if(!next){if(scissorHover_)clearScissorHover();return;}
+  if(scissorHover_&&scissorHover_->key==next->key&&
+     std::abs(scissorHover_->from-next->from)<1e-8&&
+     std::abs(scissorHover_->to-next->to)<1e-8)return;
+  clearScissorHover();
+  scissorHover_=std::move(next);
+  QPainterPath colored;
+  colored.moveTo(toQt(scissorHover_->preview.front()));
+  for(size_t i=1;i<scissorHover_->preview.size();i++)
+   colored.lineTo(toQt(scissorHover_->preview[i]));
+  QPen highlight(QColor(255,160,37),3);
+  highlight.setCosmetic(true);
+  highlight.setCapStyle(Qt::RoundCap);
+  highlight.setJoinStyle(Qt::RoundJoin);
+  scissorPreview_=scene_.addPath(colored,highlight);
+  scissorPreview_->setZValue(45);
+  scissorPreview_->setAcceptedMouseButtons(Qt::NoButton);
+  viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+ }
+ void setTool(Tool t){if(!busy()){
+  clearScissorHover();nativeMode_=false;tool=t;viewport()->setCursor(Qt::ArrowCursor);viewport()->update();
+ }}
  QPointF constrainedCorner(QPointF first,QPointF last,bool shift)const{
   if(!shift||(tool!=Tool::Rectangle&&tool!=Tool::Ellipse))return last;
   const double dx=last.x()-first.x(),dy=last.y()-first.y();
@@ -725,15 +771,22 @@ void mousePressEvent(QMouseEvent* e)override{
    e->accept();return;
   }
   if(tool==Tool::Scissors){
-   auto hits=clickHits(e->position().toPoint());
-   if(hits.empty()){if(toolWarning)toolWarning("Tesoura: clique sobre um segmento de polilinha.");e->accept();return;}
+   updateScissorHover(e->position().toPoint());
+   if(!scissorHover_){
+    if(toolWarning)toolWarning("Tesoura: aproxime do trecho entre cruzamentos ate a linha ficar laranja.");
+    e->accept();return;
+   }
    try{
-    const auto& hit=hits.front();
-    const int obj=editor.removePolylineEdge(hit.key,hit.segment);
+    const ScissorSpan cutting=*scissorHover_;
+    clearScissorHover();
+    const int obj=editor.removeScissorSpan(cutting);
     selected.clear();rebuild();if(obj>0)activate({obj,0});
-    if(diagnosticEvent)diagnosticEvent("polyline_scissor_edge_removed",1);
+    if(diagnosticEvent)diagnosticEvent("scissor_continuous_span_removed",1);
     if(stateChanged)stateChanged();
-   }catch(const std::exception& ex){if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));}
+   }catch(const std::exception& ex){
+    clearScissorHover();
+    if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));
+   }
    e->accept();return;
   }
   if(tool==Tool::Nodes&&active_&&editable(editor.state(),active_->object)){
@@ -814,6 +867,7 @@ void mouseMoveEvent(QMouseEvent* e)override{
    frameUpdates++;e->accept();return;
   }
   if(strokeDrawing_){drawCurrent_=e->position();pendingPreview_->setPath(temporaryShape());frameUpdates++;e->accept();return;}
+  if(tool==Tool::Scissors){updateScissorHover(e->position().toPoint());e->accept();return;}
   QGraphicsView::mouseMoveEvent(e);
  }
 void mouseReleaseEvent(QMouseEvent* e)override{
@@ -1440,9 +1494,9 @@ public:
    [this]{if(!curves){status->setText("Abra um projeto com curvas v5.");return;}
      bezierToolActive_=true;view.enableNative(true);
      status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
-  compact(editorGrid,3,0,"scissors","✂ Tesoura","Remover aresta clicada (K); desfazer com Ctrl+Z. Curvas Bezier nao sao alteradas.",
+  compact(editorGrid,3,0,"scissors","✂ Tesoura","Ao aproximar, marca em laranja o trecho entre cruzamentos; clique remove tudo (K). Bézier nativa indisponivel.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
-     status->setText("Tesoura: clique na aresta para remove-la; Ctrl+Z desfaz.");});
+     status->setText("Tesoura: passe o mouse sobre um trecho; destaque laranja = corte completo. Ctrl+Z desfaz.");});
   tools->addSpacing(5); // Ferramentas de desenho
   auto* shapeGrid=newGrid();
   compact(shapeGrid,0,0,"line","╱ Linha","Desenhar linha",
