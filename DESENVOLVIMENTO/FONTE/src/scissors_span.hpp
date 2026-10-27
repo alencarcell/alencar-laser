@@ -121,7 +121,16 @@ public:
   auto it=cache_.find(hit.key);
   if(it==cache_.end())it=cache_.emplace(hit.key,compute(*c)).first;
   const auto& bs=it->second;
-  if(c->closed&&bs.crossings.size()<2)return {};
+  // LightBurn Trim Shapes: sem nenhum cruzamento, a forma INTEIRA
+  // (inclusive circulo/retangulo recem-criado) e o candidato a exclusao.
+  // Exatamente um cruzamento no contorno fechado continua ambiguo.
+  if(c->closed&&bs.crossings.size()==1)return {};
+  if(bs.crossings.empty()){
+   // Sobreposicoes e tangencias nao resolvidas precisam ser recusadas.
+   if(!bs.unsafe.empty())return {};
+   return ScissorSpan{hit.key,0.,double(m),c->closed,
+                      spanPoints(*c,0.,double(m))};
+  }
   std::vector<double> edges=bs.crossings;
   if(!c->closed){edges.insert(edges.begin(),0.);edges.push_back(double(m));}
   const auto next=std::upper_bound(edges.begin(),edges.end(),pos+1e-8);
