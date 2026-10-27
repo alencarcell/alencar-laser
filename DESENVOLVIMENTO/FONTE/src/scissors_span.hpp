@@ -24,16 +24,22 @@ inline Pt pointAt(const Contour& c,double u){
  double t=std::clamp(v-edge,0.,1.);
  return c.nodes[size_t(edge)].p+(c.nodes[size_t(edge+1)%n].p-c.nodes[size_t(edge)].p)*t;
 }
+inline double wrapScissorParam(double u,int edges){
+ if(edges<=0)throw std::runtime_error("caminho sem arestas");
+ double w=std::fmod(u,double(edges));
+ if(w<0)w+=edges;
+ return w;
+}
 inline std::vector<Pt> spanPoints(const Contour& c,double a,double b){
  const int m=int(c.nodes.size())-(c.closed?0:1);
  if(m<1||b<=a||b-a>m+1e-7)throw std::runtime_error("intervalo de tesoura invalido");
- std::vector<Pt> p{pointAt(c,std::fmod(a,double(m)))};
+ std::vector<Pt> p{pointAt(c,c.closed?wrapScissorParam(a,m):a)};
  // Indices internos de arestas, incluindo a costura do contorno fechado.
  for(int j=int(std::floor(a))+1;double(j)<b-1e-8;j++){
-  const Pt at=c.nodes[size_t(c.closed?j%int(c.nodes.size()):j)].p;
+  const Pt at=c.nodes[size_t(c.closed?((j%int(c.nodes.size())+int(c.nodes.size()))%int(c.nodes.size())):j)].p;
   if(dist(p.back(),at)>1e-10)p.push_back(at);
  }
- const Pt end=pointAt(c,c.closed?std::fmod(b,double(m)):b);
+ const Pt end=pointAt(c,c.closed?wrapScissorParam(b,m):b);
  if(dist(p.back(),end)>1e-10)p.push_back(end);
  return p;
 }
