@@ -112,8 +112,20 @@ int main(){
    auto meta=st.objects.find(key.object);
    return meta!=st.objects.end()&&st.layers.at(meta->second.layer).visible;
   });
-  require(!planner.candidate(st.doc,{{face,0},0,0,{5,0}}),
-          "contorno invisivel gerou limite de Tesoura");
+  // O corte oculto nao pode criar duas fronteiras; como nao ha mais
+  // cruzamentos visiveis, Trim Shapes deve destacar a forma INTEIRA.
+  const Document invisBefore=invis.state().doc;
+  auto isolated=planner.candidate(st.doc,{{face,0},0,0,{5,0}});
+  require(bool(isolated)&&isolated->closed&&isolated->preview.size()==5,
+          "camada oculta criou fronteira fantasma ou bloqueou forma inteira");
+  require(invis.removeScissorSpan(*isolated)==0,
+          "Tesoura nao removeu forma isolada diante de camada invisivel");
+  require(!get(invis.state().doc,{face,0})&&get(invis.state().doc,{helper,0}),
+          "Tesoura apagou tambem o contorno oculto ou deixou restos do alvo");
+  require(invis.undo()&&sameDoc(invis.state().doc,invisBefore),
+          "Undo com camada oculta nao restaurou o documento");
+  require(!invis.state().layers.at(4).visible,
+          "Undo da Tesoura tornou visivel a camada oculta");
   Editor noCross(Document{});
   int plain=noCross.ellipse({0,0},10,10,64);
   planner.reset(noCross.state().doc);
