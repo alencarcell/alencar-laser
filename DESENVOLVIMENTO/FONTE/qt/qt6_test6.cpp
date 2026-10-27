@@ -2677,9 +2677,44 @@ static QJsonObject editTools197Test(const QString& directory){
  layer6->click();
  check(w.layers->findData(6)>=0&&w.layers->currentData().toInt()==6,"camada nao criada por clique");
  w.layers->setCurrentIndex(w.layers->findData(0));
+ // Tesoura igual ao Trim Shapes: formas novas isoladas ficam 100% laranja,
+ // e desaparecem inteiras ao clicar, sem exigir cruzamento.
+ LabWindow shapes(Document{});shapes.show();QApplication::processEvents();
+ auto& sv=shapes.view;
+ sv.setTransform(QTransform::fromScale(8.,8.));
+ const int circleId=sv.editor.ellipse({120,100},10,10,64);
+ const int rectId=sv.editor.rectangle({145,90},18,18);
+ sv.rebuild();sv.centerOn(QPointF(135,100));QApplication::processEvents();
+ clickButton(shapes,"scissors");
+ auto pointHover=[&](QPointF p){
+  const QPoint at=sv.mapFromScene(p);
+  const uint64_t count=sv.scissorHoverEventCount();
+  QTest::mouseMove(sv.viewport(),at);QApplication::processEvents();
+  if(sv.scissorHoverEventCount()==count){
+   const QPointF local(at),global(sv.viewport()->mapToGlobal(at));
+   QMouseEvent move(QEvent::MouseMove,local,global,Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+   QApplication::sendEvent(sv.viewport(),&move);QApplication::processEvents();
+  }
+  check(sv.scissorHoverEventCount()>count,"hover isolado nao recebido");
+ };
+ pointHover({130,100});
+ auto circleSpan=sv.scissorPreview();
+ check(bool(circleSpan)&&circleSpan->preview.size()>=64,
+       "Tesoura nao destacou circulo novo completo");
+ const int beforeIsolated=int(sv.editor.state().doc.contours.size());
+ clickScene(shapes,{130,100});
+ check(sv.editor.state().doc.contours.size()==size_t(beforeIsolated-1)&&
+       sv.editor.state().objects.count(circleId)==0,"Circulo isolado nao excluido");
+ pointHover({154,90});
+ auto rectSpan=sv.scissorPreview();
+ check(bool(rectSpan)&&rectSpan->preview.size()==5,
+       "Tesoura nao destacou retangulo novo completo");
+ clickScene(shapes,{154,90});
+ check(sv.editor.state().doc.contours.empty()&&sv.editor.state().objects.count(rectId)==0,
+       "Retangulo isolado nao excluido");
  w.grab().save(directory+"/TESTE_19_7_FERRAMENTAS.png");
  return {{"status","PASS"},{"selection_esc",true},{"selection_v",true},
-   {"scissors_k",true},{"scissors_mouse",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"undo_scissors",true},
+   {"scissors_k",true},{"scissors_mouse",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"scissors_isolated_circle",true},{"scissors_isolated_rectangle",true},{"undo_scissors",true},
    {"hover_delivery",usedViewportEventFallback?"viewport_synthetic_mouse_move":"qtest_mouse_move"},
    {"hardware_hover_verified",false},
    {"ctrl_r_rectangle",true},{"ctrl_e_ellipse",true},{"shift_square_circle",true},{"create_layer_by_palette",true},
