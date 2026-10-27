@@ -712,7 +712,10 @@ public:
   auto m=viewportTransform();double sx=std::hypot(m.m11(),m.m12()),sy=std::hypot(m.m21(),m.m22());
   // Qt fornece unidades da viewport em pixels logicos; passamos o DPR separadamente.
   const double pxPerMm=std::max(1e-8,std::min(sx,sy));
-  auto hs=picker_.query(editor,fromQt(mapToScene(viewportPoint)),6.,pxPerMm,viewport()->devicePixelRatioF());
+  // Tolerancia maior apenas para localizar linhas finas com a Tesoura.
+  const double tolerancePx=(tool==Tool::Scissors?9.:6.);
+  auto hs=picker_.query(editor,fromQt(mapToScene(viewportPoint)),
+                        tolerancePx,pxPerMm,viewport()->devicePixelRatioF());
   sample(hitTestMs,profiler.nsecsElapsed()/1e6);return hs;
  }
  int lastCreated()const{return lastCreated_;}
