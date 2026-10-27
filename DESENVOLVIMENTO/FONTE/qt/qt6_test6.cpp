@@ -1609,6 +1609,10 @@ public:
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Ellipse);});
   compact(shapeGrid,3,0,"polygon","⬡ Políg.","Desenhar polígono",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Polygon);});
+  compact(shapeGrid,4,0,"pencil","✏ Lápis","Traço livre (P), arraste o mouse; uma acao de desfazer",
+    [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Pencil);});
+  compact(shapeGrid,5,0,"text","T Texto","Texto vetorial (T), clique na mesa, escolha fonte e altura",
+    [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Text);});
   buttons.at("select")->setChecked(true);
   auto future=[&](const QString& name,const QString& tip){
     auto* b=new QPushButton(name.left(1));b->setProperty("compact",true);
@@ -1619,7 +1623,7 @@ public:
   tools->addSpacing(6); // Ferramentas futuras desativadas
   auto* vectorGrid=newGrid();
   for(const auto& data:std::vector<std::tuple<QString,QString>>{
-   {"T  Texto","Texto vetorial"},{"◎ Offset","Contorno interno/externo"},
+   {"◎ Offset","Contorno interno/externo"},
    {"⊕ União","Soldar vetores"},{"⊖ Subtr.","Subtrair formas"},
    {"⊞ Alinhar","Alinhamento e distribuição"},{"⌗ Medir","Ferramenta de medição"}}){
     const int index=vectorGrid->count();vectorGrid->addWidget(future(std::get<0>(data),std::get<1>(data)),index,0);
@@ -2113,6 +2117,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   view.stateChanged=[this]{if(uiPersistenceEnabled_)recoveryPolicy_.edited();refresh();};
   view.diagnosticEvent=[this](const QString& code,int count){captureEvent(code,count);};
   view.drawingLayer=[this]{return layers->currentData().toInt();};
+  view.requestTextAt=[this](Pt at){run([this,at]{insertVectorText(at);});};
   auto shortcut=[this](const QString& sequence,std::function<void()> fn){auto* sc=new QShortcut(QKeySequence(sequence),this);connect(sc,&QShortcut::activated,this,[this,fn]{run(fn);});};
   shortcut("Ctrl+Z",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(false);}else view.history(false);});
   shortcut("Ctrl+Y",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(true);}else view.history(true);});
@@ -2131,6 +2136,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   shortcut("K",[this]{buttons.at("scissors")->click();});
   shortcut("Ctrl+K",[this]{buttons.at("scissors")->click();});
   shortcut("Ctrl+R",[this]{buttons.at("rectangle")->click();});
+  shortcut("P",[this]{buttons.at("pencil")->click();});
+  shortcut("T",[this]{buttons.at("text")->click();});
   shortcut("Ctrl+E",[this]{buttons.at("ellipse")->click();});
   shortcut("Ctrl+L",[this]{buttons.at("move_layer")->click();});
   shortcut("Ctrl+D",[this]{buttons.at("duplicate_obj")->click();});
@@ -2220,6 +2227,50 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(chosen.isEmpty())return;
   const QString previous=projectPath;projectPath=chosen;
   try{save();}catch(...){projectPath=previous;throw;}
+ }
+ void insertVectorText(Pt at){
+  bool ok=false;
+  const QString message=QInputDialog::getText(this,"Texto vetorial","Digite o texto:",
+       QLineEdit::Normal,QString(),&ok);
+  if(!ok||message.trimmed().isEmpty())return;
+  if(message.size()>100)throw std::runtime_error("Texto limitado a 100 caracteres nesta candidata");
+  const double height=QInputDialog::getDouble(this,"Altura do texto",
+      "Altura dos contornos (mm):",12.,1.,150.,1,&ok);
+  if(!ok)return;
+  const QFont selected=QFontDialog::getFont(&ok,QFont("Arial",12),this,"Fonte do texto");
+  if(!ok)return;
+  QFont font=selected;font.setPixelSize(180);
+  QPainterPath outline;
+  outline.addText(QPointF(0,0),font,message);
+  if(outline.isEmpty())throw std::runtime_error("Fonte nao produziu contornos vetoriais");
+  const QRectF rect=outline.boundingRect();
+  if(rect.height()<1e-6)throw std::runtime_error("Altura invalida do texto");
+  const double scale=height/rect.height();
+  QTransform transform;transform.translate(at.x,at.y);
+  transform.scale(scale,scale);
+  transform.translate(-rect.left(),-rect.top());
+  // Contornos aproximados de cada subcaminho; cada letra pode ter aneis
+  // internos separados. Sao vetores editaveis, nao texto editavel.
+  const auto polygons=outline.toSubpathPolygons(transform);
+  std::vector<std::vector<Pt>> shapes;
+  for(const QPolygonF& polygon:polygons){
+   std::vector<Pt> points;
+   points.reserve(size_t(polygon.size()));
+   for(const QPointF& q:polygon){
+    const Pt p{q.x(),q.y()};
+    if(points.empty()||dist(points.back(),p)>1e-5)points.push_back(p);
+   }
+   if(points.size()>1&&dist(points.front(),points.back())<1e-5)points.pop_back();
+   if(points.size()>=3)shapes.push_back(std::move(points));
+  }
+  if(shapes.empty())throw std::runtime_error("Fonte sem contornos fechados");
+  const auto ids=view.editor.addContours(std::move(shapes),true,layers->currentData().toInt());
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  view.activate({ids.front(),0});
+  recoveryPolicy_.edited();
+  captureEvent("vector_text_created");
+  status->setText(QString("Texto convertido em %1 contornos; Ctrl+Z desfaz em uma acao.")
+     .arg(ids.size()));
  }
  void openOther(){
   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
