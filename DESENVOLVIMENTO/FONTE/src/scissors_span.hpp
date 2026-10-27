@@ -3,6 +3,7 @@
 // Intervalos sobre uma unica polilinha, delimitados por cruzamentos reais.
 #include "geometry.hpp"
 #include <map>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -61,7 +62,12 @@ class ScissorSpanPlanner {
                                                    std::max(a.x,b.x),std::max(a.y,b.y));
    for(int id:candidates){
     const auto& s=segments_[size_t(id)];
-    if(s.key==c.key)continue; // cruzamento consigo mesmo requer regra adicional
+    if(s.key==c.key){
+     // Arestas vizinhas partilham vertices por definicao. Cruzamentos com
+     // outras arestas do mesmo contorno tambem delimitam o recorte.
+     const int delta=std::abs(s.idx-i);
+     if(delta<=1||(c.closed&&delta==edges-1))continue;
+    }
     Pt q=s.a,t=s.b-s.a;const double tt=norm2(t);
     if(tt<=1e-18)continue;
     const double d=cross2(r,t);
@@ -89,8 +95,10 @@ class ScissorSpanPlanner {
   return out;
  }
 public:
- void reset(const Document& d){
+ void reset(const Document& d,const std::function<bool(Key)>& isVisible={}){
   segments_=alaser::segments(d);
+  if(isVisible)segments_.erase(std::remove_if(segments_.begin(),segments_.end(),
+    [&](const Segment& s){return !isVisible(s.key);}),segments_.end());
   index_=std::make_unique<SegmentBVH>(segments_);
   cache_.clear();
  }
