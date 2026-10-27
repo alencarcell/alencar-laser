@@ -119,8 +119,24 @@ int main(){
   planner.reset(noCross.state().doc);
   const auto* nc=get(noCross.state().doc,{plain,0});
   Pt p=(nc->nodes[10].p+nc->nodes[11].p)*0.5;
-  require(!planner.candidate(noCross.state().doc,{{plain,0},10,0,p}),
-    "Tesoura destrutiva aceita sem limites em contorno fechado");
+  auto entireCircle=planner.candidate(noCross.state().doc,{{plain,0},10,0,p});
+  require(bool(entireCircle)&&entireCircle->preview.size()>=64,
+          "Tesoura nao destaca circulo sem cruzamentos por inteiro");
+  const auto circleBefore=noCross.state().doc;
+  require(noCross.removeScissorSpan(*entireCircle)==0,
+          "Tesoura nao excluiu circulo completo");
+  require(noCross.state().doc.contours.empty(),
+          "Tesoura deixou restos de circulo");
+  require(noCross.undo()&&sameDoc(circleBefore,noCross.state().doc),
+          "Undo do circulo isolado falhou");
+  Editor soloRect(Document{});
+  const int idRect=soloRect.rectangle({2,3},20,10);
+  planner.reset(soloRect.state().doc);
+  auto rect=planner.candidate(soloRect.state().doc,{{idRect,0},0,0,{12,3}});
+  require(bool(rect)&&rect->preview.size()==5,
+          "Retangulo novo nao recebe destaque integral");
+  require(soloRect.removeScissorSpan(*rect)==0&&soloRect.state().doc.contours.empty(),
+          "Retangulo novo nao foi excluido por inteiro");
 
   Editor lock(Document{});
   const int locked=lock.line({0,0},{10,0});
@@ -140,7 +156,7 @@ int main(){
           "objeto vazio deixou geometria fantasma");
   validate(lock.state());
 
-  std::cout<<"PASS: trechos densos, origem circular, elipse 64, autocruzamentos, invisibilidade, previas, undo/redo, guardas\n";
+  std::cout<<"PASS: circulo/retangulo isolados, trechos densos, origem circular, elipse 64, autocruzamentos, invisibilidade, previas, undo/redo, guardas\n";
   return 0;
  }catch(const std::exception& ex){
   std::cerr<<"FAIL: "<<ex.what()<<"\n";return 1;
