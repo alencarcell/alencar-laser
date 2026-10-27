@@ -2718,6 +2718,64 @@ static QJsonObject recovery198Test(const QString& directory){
  return {{"status","PASS"},{"snapshot_v5",true},{"original_untouched_until_save",true},
          {"successful_save_discarded_snapshot",true},{"no_hardware_access",true}};
 }
+// TESTE_19.8 importacao: XMLs sinteticos representam formas garantidas.
+// Testes sem abrir dialogos, sem salvar ou conectar a maquina.
+static QJsonObject lightburnImport198Test(const QString& directory){
+ QTemporaryDir temp(QDir(directory).filePath("lbrn2_XXXXXX"));
+ check(temp.isValid(),"nao criou pasta temporaria de importacao");
+ const QString filename=temp.filePath("formas.lbrn2");
+ const QByteArray xml=R"XML(<?xml version="1.0" encoding="UTF-8"?>
+<LightBurnProject AppVersion="1.7" FormatVersion="1" MirrorX="False" MirrorY="False">
+ <CutSetting type="Cut"><index Value="1"/><speed Value="1000"/><maxPower Value="100"/></CutSetting>
+ <Shape Type="Rect" CutIndex="1" W="20" H="10" Cr="0">
+  <XForm>1 0 0 1 50 70</XForm>
+ </Shape>
+ <Shape Type="Group" CutIndex="0">
+  <XForm>1 0 0 1 100 200</XForm>
+  <Children>
+   <Shape Type="Rect" CutIndex="2" W="10" H="10" Cr="0"><XForm>1 0 0 1 5 7</XForm></Shape>
+  </Children>
+ </Shape>
+ <Shape Type="Ellipse" CutIndex="3" W="30" H="20"><XForm>1 0 0 1 0 0</XForm></Shape>
+</LightBurnProject>)XML";
+ QFile f(filename);check(f.open(QIODevice::WriteOnly),"falhou fixture LightBurn");
+ check(f.write(xml)==xml.size(),"fixture LightBurn truncada");f.close();
+ auto imported=lightburn::readGeometry(filename);
+ check(imported.shapeCount==3&&imported.state.doc.contours.size()==3,"3 formas nao foram reconhecidas");
+ check(imported.state.layers.size()==4,"camadas do XML nao foram mapeadas");
+ check(imported.state.objects.at(1).layer==1&&imported.state.objects.at(2).layer==2,
+       "indices de camada foram perdidos");
+ const auto& first=imported.state.doc.contours.at(0);
+ check(first.nodes.size()==4&&std::abs(first.nodes[0].p.x-40.)<1e-8&&
+       std::abs(first.nodes[0].p.y-65.)<1e-8,"retangulo e XForm incorretos");
+ const auto& nested=imported.state.doc.contours.at(1);
+ check(std::abs(nested.nodes[0].p.x-100.)<1e-8&&
+       std::abs(nested.nodes[0].p.y-202.)<1e-8,"transformacao de grupo incorreta");
+ const auto& ellipse=imported.state.doc.contours.at(2);
+ check(ellipse.nodes.size()==96,"elipse nao foi convertida para pontos");
+ validate(imported.state);
+
+ // Projetos mistos sao RECUSADOS, nunca importados parcialmente.
+ const QString invalid=temp.filePath("incompativel.lbrn2");
+ QFile bad(invalid);check(bad.open(QIODevice::WriteOnly),"fixture incompleta nao criada");
+ bad.write(R"XML(<?xml version="1.0"?><LightBurnProject>
+ <Shape Type="Rect" W="10" H="10"/>
+ <Shape Type="Path" CutIndex="0"><VertList>V0 0</VertList></Shape>
+ </LightBurnProject>)XML");bad.close();
+ bool rejected=false;
+ try{(void)lightburn::readGeometry(invalid);}catch(const std::runtime_error&){rejected=true;}
+ check(rejected,"importador aceitou perda silenciosa de Path");
+
+ LabWindow w(Document{});
+ QMimeData mime;mime.setUrls({QUrl::fromLocalFile(filename)});
+ QDragEnterEvent drag(QPoint(20,20),Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);
+ QApplication::sendEvent(&w,&drag);
+ check(drag.isAccepted(),"janela nao aceita arrastar .lbrn2");
+ return {{"status","PASS"},{"rect_transform",true},{"group_transform",true},
+         {"ellipse_96_segments",true},{"layers",true},{"unsupported_path_rejected",true},
+         {"drag_enter_lbrn2",true},{"hardware_commands_sent",false}};
+}
+
 int main(int argc,char** argv){
  QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";if(mode=="--recovery-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
@@ -2729,6 +2787,12 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--lbrn2-import-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=lightburnImport198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_IMPORTACAO_LBRN2.json");if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--shape-operations-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=shapeOperationsTest(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
