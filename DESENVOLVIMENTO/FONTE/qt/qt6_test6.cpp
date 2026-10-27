@@ -2905,6 +2905,51 @@ static QJsonObject recovery198Test(const QString& directory){
 }
 // TESTE_19.8 importacao: XMLs sinteticos representam formas garantidas.
 // Testes sem abrir dialogos, sem salvar ou conectar a maquina.
+static QJsonObject newDrawingTools198Test(const QString& directory){
+ // Somente interface de edicao: sem dialogos de texto, sem hardware.
+ Editor editor(Document{});
+ const auto start=editor.undoCount();
+ const std::vector<std::vector<Pt>> outlines={
+  {{1,1},{4,1},{4,5},{1,5}},
+  {{8,1},{12,1},{12,5},{8,5}}
+ };
+ const auto ids=editor.addContours(outlines,true,0);
+ check(ids.size()==2&&editor.undoCount()==start+1,"texto nao gerou contornos atomicos");
+ const Document textDoc=editor.state().doc;
+ check(editor.undo()&&editor.state().doc.contours.empty(),"desfazer texto nao retirou todos os glifos");
+ check(editor.redo()&&sameDoc(textDoc,editor.state().doc),"refazer texto corrompeu contornos");
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ clickButton(w,"pencil");
+ check(w.view.tool==QtEditorLab::Tool::Pencil,"botao Lapis nao foi ativado");
+ auto& v=w.view;
+ const QPoint a=v.mapFromScene(QPointF(20,20));
+ const QPoint b=v.mapFromScene(QPointF(30,25));
+ const QPoint c=v.mapFromScene(QPointF(40,30));
+ QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,a);
+ QApplication::processEvents();
+ auto moved=[&](const QPoint& pt){
+  const QPointF local(pt),global(v.viewport()->mapToGlobal(pt));
+  QMouseEvent ev(QEvent::MouseMove,local,global,Qt::NoButton,Qt::LeftButton,Qt::NoModifier);
+  QApplication::sendEvent(v.viewport(),&ev);
+  QApplication::processEvents();
+ };
+ moved(b);moved(c);
+ QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,c);
+ QApplication::processEvents();
+ check(v.editor.state().doc.contours.size()==1,"Lapis nao gerou forma editavel");
+ check(v.editor.state().doc.contours.front().nodes.size()>=2,
+       "Lapis perdeu pontos do tracado");
+ check(!v.editor.state().doc.contours.front().closed,"Lapis gerou forma fechada por engano");
+ check(v.editor.undoCount()==1,"Lapis gerou multiplos passos de undo");
+ check(v.editor.undo()&&v.editor.state().doc.contours.empty(),
+       "Undo do Lapis nao voltou ao documento vazio");
+ clickButton(w,"text");
+ check(v.tool==QtEditorLab::Tool::Text,"botao Texto nao foi ativado");
+ w.grab().save(directory+"/TESTE_19_8_TEXTO_LAPIS.png");
+ return {{"status","PASS"},{"pencil_drawn",true},{"pencil_undo",true},
+         {"vector_text_atomic",true},{"vector_text_undo_redo",true},
+         {"text_tool_enabled",true},{"hardware_commands_sent",false}};
+}
 static QJsonObject lightburnImport198Test(const QString& directory){
  QTemporaryDir temp(QDir(directory).filePath("lbrn2_XXXXXX"));
  check(temp.isValid(),"nao criou pasta temporaria de importacao");
@@ -2987,6 +3032,12 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--drawing-tools-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=newDrawingTools198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_TEXTO_LAPIS_19_8.json");if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--lbrn2-import-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=lightburnImport198Test(out);}
