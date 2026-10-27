@@ -172,3 +172,11 @@ Registrar mudanças, testes e pendências.
 - Commit `4604ea6` registra `scissorLastHoverPosition_`, acrescenta `scissorHoverReceivedAt`, exige a coordenada correta antes de considerar evento Qt entregue, usa um evento sintético via `viewport` se a coordenada for outra, e inclui diagnóstico de `last_hover` e captura `FALHA_SAIDA_TESOURA.png` caso o hover continue preso.
 - **Isto corrige uma vulnerabilidade da simulação do teste, mas ainda NÃO está comprovado ser a causa da falha no Windows.** Se voltar a falhar, usar `last_hover`, `hits`, `candidate` e captura para distinguir erro real da GUI.
 - Main preservada, PR #2 em desenvolvimento, hardware bloqueado. Proxima acao `git pull --ff-only` e `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteTesoura`; apos PASS, executar `-Abrir` para suite completa e teste de arrastar/importar LBRN2.
+
+## PASS GUI focado — hover com coordenada correta — 27/10/2026
+- Usuario enviou captura do terminal apos compilar `alencar_test7_qt6.exe` e executar `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteTesoura`. Resultado verde: `Teste focado passou; validacao completa ainda obrigatoria.` PowerShell retornou normalmente.
+- Confirmacao limitada ao **teste automatizado focado Qt**. O teste anterior de nucleo `alencar_test19_8_scissors_span` tambem havia passado, incluindo circulos e retangulos isolados, cruzamentos, elipses e desfazer/refazer.
+- Warnings sem bloqueio observados: `-Wmisleading-indentation` em `lightburn_reference_inspector.hpp` e `qt6_test6.cpp`, e construtor `QDragEnterEvent` obsoleto num teste. Deixar limpeza posterior, sem misturar com validacao funcional.
+- Ainda SEM PASS da suite completa apos esse commit, SEM verificacao de mouse real, SEM confirmacao de arrastar soltar arquivo real e SEM compatibilidade LBRN2 em trabalho real.
+- Proxima execucao: `git pull --ff-only` seguido de `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`; testar Tesoura manualmente com laser desconectado. Se falhar importacao, priorizar JSON `RELATORIOS/AUDITORIAS/GITHUB_19_8/importacao/RESULTADO_IMPORTACAO_LBRN2.json`.
+- Branch `fix/scissors-continuous-span-19-8`, PR #2 ainda experimental; main intocada.
