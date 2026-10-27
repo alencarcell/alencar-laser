@@ -203,3 +203,11 @@ Registrar mudanças, testes e pendências.
 - Warnings de indentação enganosa e API depreciada `QDragEnterEvent` aparecem, sem bloquear compilação. Não considerar tais avisos erros fatais, mas programar limpeza.
 - Estado: **testes sintéticos Texto/Lápis PASS; logo instalada/com hash verificado. Ainda NÃO homologados com mouse físico/edição real, nem validado layout da logo, nem importador LBRN2 real.**
 - Próxima etapa no VS Code: `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`. Se os gates passarem, testar texto T (fonte e tamanho, vazados de letras), lápis P (arraste/undo), logo no cabeçalho, arraste/importação LBRN2 em cópia, mantendo laser desconectado.
+
+## 27/10/2026 — confirmação do teste focado Texto/Lápis e da instalação da logo
+- O usuário enviou captura do terminal VS Code, na branch `feat/texto-lapis-importacao-logo-19-8`.
+- A compilação Qt concluiu: `[2/2] Linking CXX executable alencar_test7_qt6.exe`, e o script `-SomenteFerramentas` terminou com `Texto/Lápis passaram nos testes sintéticos. Teste manual ainda necessário.` Voltou ao prompt sem erro.
+- O script `SCRIPTS/INSTALAR_LOGO_OFICIAL.ps1` confirmou `Logo oficial instalada com SHA-256 conferido: C:\\ProjetoAlencarLaser\\DADOS\\LOGO\\logo_alencar_laser.png`, seguido de orientação para reabrir o aplicativo. A imagem original já está no caminho definitivo: não pedir novamente download.
+- Permanecem avisos não fatais `-Wmisleading-indentation` e `QDragEnterEvent` obsoleto. Limpeza técnica separada, sem bloquear a rodada.
+- **Ainda pendente:** teste completo `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`; depois validar manualmente no aplicativo a logo, Lápis, Texto, Tesoura em contornos finos, e a leitura/arraste de `.lbrn2` real. Suporte LBRN2 continua parcial e não homologado; textos convertidos para contornos não são editáveis como palavras.
+- `main` preservada; sem confirmação de funcionamento real do mouse, emissão laser bloqueada, não fazer merge antes de homologar.
