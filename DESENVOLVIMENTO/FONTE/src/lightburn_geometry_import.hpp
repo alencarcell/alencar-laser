@@ -220,6 +220,14 @@ inline ImportResult readGeometry(const QString& path){
  QXmlStreamReader xml(&file);
  if(!xml.readNextStartElement()||xml.name()!=QLatin1String("LightBurnProject"))
   throw std::runtime_error("Formato nao e LightBurnProject XML");
+ // A convencao de espelhamento/origem depende do perfil LightBurn. Evitar
+ // converter silenciosamente coordenadas para outro quadrante da mesa.
+ const auto rootAttrs=xml.attributes();
+ for(const char* key:{"MirrorX","MirrorY"}){
+  const QString value=rootAttrs.value(QLatin1String(key)).toString();
+  if(value.compare("True",Qt::CaseInsensitive)==0||value=="1")
+   throw std::runtime_error("Projeto LightBurn com MirrorX/MirrorY ativo: orientacao pendente de homologacao");
+ }
  std::vector<ParseNode> roots;
  int seen=0;
  while(xml.readNextStartElement()){
