@@ -69,7 +69,7 @@ int main(){
   Editor split(Document{});
   const int o=split.addContour({{0,0},{10,0},{20,0},{30,0}},false);
   split.addLayer(7,"Teste camada");split.moveToLayer(o,7);
-  const auto openBefore=snapshot(split), undoBefore=split.undoCount();
+  const auto openBefore=snapshot(split); const auto undoBefore=split.undoCount();
   const int remaining=split.removePolylineEdge({o,0},1);
   need(remaining!=0&&remaining!=o,"open edge did not create independent contour");
   auto* l=get(split.state().doc,{o,0});
