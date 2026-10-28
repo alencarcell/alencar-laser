@@ -2886,6 +2886,53 @@ static QJsonObject shapeOperationsTest(const QString& directory){
   {"delete_and_undo",true},{"opt_in_collection",true},{"stopped_collection",true},
   {"events",total}};
 }
+// Qt 19.8 - polilinha, selecao por area e atalhos; sem hardware.
+static QJsonObject gestures198Test(const QString& directory){
+ QDir().mkpath(directory);
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ auto& v=w.view;v.setTransform(QTransform::fromScale(8.,8.));
+ v.centerOn(QPointF(45,30));QApplication::processEvents();
+ clickButton(w,"line");
+ const size_t undoBefore=v.editor.undoCount();
+ clickScene(w,{10,10});clickScene(w,{20,10});clickScene(w,{20,20});
+ check(v.editor.state().doc.contours.empty(),"polilinha foi fragmentada antes de concluir");
+ QTest::mouseClick(v.viewport(),Qt::RightButton,Qt::NoModifier,v.mapFromScene({20,20}));
+ QApplication::processEvents();
+ check(v.editor.state().doc.contours.size()==1,"botao direito nao concluiu linha");
+ const auto* open=get(v.editor.state().doc,{v.lastCreated(),0});
+ check(open&&!open->closed&&open->nodes.size()==3,"contorno aberto incorreto");
+ check(v.editor.undoCount()==undoBefore+1,"polilinha nao criou undo unico");
+ clickScene(w,{30,10});clickScene(w,{40,10});clickScene(w,{40,20});clickScene(w,{30,10});
+ check(v.editor.state().doc.contours.size()==2,"clique no ponto inicial nao fechou linha");
+ const auto* closed=get(v.editor.state().doc,{v.lastCreated(),0});
+ check(closed&&closed->closed&&closed->nodes.size()==3,"contorno fechado incorreto");
+ pressKey(w,Qt::Key_Z,Qt::ControlModifier);
+ check(v.editor.state().doc.contours.size()==1,"undo afetou contornos anteriores");
+ pressKey(w,Qt::Key_Y,Qt::ControlModifier);
+ check(v.editor.state().doc.contours.size()==2,"redo perdeu contorno fechado");
+ int a=v.editor.rectangle({50,10},10,10);
+ int b=v.editor.rectangle({70,10},10,10);
+ v.rebuild();clickButton(w,"select");QApplication::processEvents();
+ auto selectRegion=[&](QPointF start,QPointF end,Qt::KeyboardModifiers mods=Qt::NoModifier){
+  QPoint pa=v.mapFromScene(start),pb=v.mapFromScene(end);
+  QTest::mousePress(v.viewport(),Qt::LeftButton,mods,pa);
+  QTest::mouseMove(v.viewport(),pb);QApplication::processEvents();
+  QTest::mouseRelease(v.viewport(),Qt::LeftButton,mods,pb);
+  QApplication::processEvents();
+ };
+ selectRegion({48,8},{63,23});
+ check(v.selected==std::set<int>{a},"selecao por inclusao incorreta");
+ selectRegion({75,18},{58,5});
+ check(v.selected==std::set<int>{a,b},"selecao cruzada incorreta");
+ selectRegion({48,8},{63,23},Qt::ControlModifier|Qt::ShiftModifier);
+ check(v.selected==std::set<int>{b},"Ctrl+Shift nao removeu da selecao");
+ pressKey(w,Qt::Key_A,Qt::ControlModifier);
+ check(v.selected.size()==4,"Ctrl+A nao selecionou todos os contornos");
+ w.grab().save(directory+"/GESTOS_EDITOR_19_8.png");
+ return {{"status","PASS"},{"open_polyline",true},{"closed_polyline",true},
+         {"single_undo",true},{"enclosing",true},{"crossing",true},
+         {"selection_modifiers",true},{"select_all",true},{"hardware_commands_sent",false}};
+}
 // TESTE_19.7: teclado, corte via clique e envio para camada no Qt real.
 static QJsonObject editTools197Test(const QString& directory){
  QDir().mkpath(directory);
@@ -3206,6 +3253,12 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--gestures-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=gestures198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_GESTOS_19_8.json");if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--drawing-tools-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=newDrawingTools198Test(out);}
