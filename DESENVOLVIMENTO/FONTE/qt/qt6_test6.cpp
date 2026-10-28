@@ -2534,7 +2534,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* clearBtn=new QPushButton("Limpar dados coletados");
   clearBtn->setObjectName("diagnostics_clear");
   connect(clearBtn,&QPushButton::clicked,this,[this]{
-   collector_.clear();collectorLog_->clear();updateCaptureSummary();
+   collector_.clear();scissorAttempts_=QJsonArray();collectorLog_->clear();updateCaptureSummary();
   });collectionLayout->addWidget(clearBtn);
   inspectorTabs->addTab(collectionTab,"Diagnósticos");updateCaptureSummary();
 
