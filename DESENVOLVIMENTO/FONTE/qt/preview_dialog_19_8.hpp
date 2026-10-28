@@ -3,6 +3,7 @@
 // Motion estimate is approximate: simplified axes + stop/start at angular runs.
 #include "preview_sim_19_8.hpp"
 #include "preview_motion_19_8.hpp"
+#include "preview_raster_19_8.hpp"
 #include <QDialog>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -12,6 +13,8 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
+#include <QComboBox>
+#include <QRectF>
 #include <QCheckBox>
 #include <QPushButton>
 #include <QImage>
@@ -31,7 +34,9 @@
 
 namespace alaser::sim198 {
 inline void showPreviewDialog(QWidget* parent,const EditorState& source,
-                               double drawingWidthMm,double drawingHeightMm){
+                               double drawingWidthMm,double drawingHeightMm,
+                               const QImage& sourceImage=QImage(),
+                               const QRectF& imageBounds=QRectF()){
  const Plan sourcePlan=build(source);
  Plan shown=sourcePlan;
  motion::Settings settings;
@@ -41,10 +46,10 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  dialog.resize(880,800);
  auto* column=new QVBoxLayout(&dialog);
  auto* note=new QLabel(
-   "PREVIA EXPERIMENTAL: apenas linhas vetoriais. Sem envio, G-code ou comandos fisicos. "
-   "Perfil simplificado X/Y com parada em mudancas de direcao. Nao replica a "
-   "cinematica GRBL, interpolacao, otimizacao ou preenchimento do LightBurn. "
-   "Todos os valores abaixo sao HIPOTETICOS ate serem aferidos.");
+   "PREVIA EXPERIMENTAL OFFLINE: contornos Line, Fill vetorial e bitmap P&B "
+   "com trajetorias de varredura simplificadas; overscan apenas visual. "
+   "Nao replica o planejador GRBL/LightBurn, nem calibra potencia ou movimento fisico. "
+   "Sem envio de G-code, rede ou comandos ao laser.");
  note->setWordWrap(true);column->addWidget(note);
  auto* settingsGrid=new QGridLayout;
  auto* cut=new QDoubleSpinBox;cut->setRange(10,100000);cut->setValue(3000);
@@ -71,6 +76,39 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  place(3,0,"Aceleracao viagem X",rapidAx);place(3,1,"Aceleracao viagem Y",rapidAy);
  place(4,0,"Passagens (plano inteiro)",passes);
  column->addLayout(settingsGrid);
+ // Roteiros de Fill/Imagem sao virtuais; sourceImage nunca e modificada.
+ auto* rasterControls=new QGridLayout;
+ auto* enableFill=new QCheckBox("Simular Fill vetorial (contornos fechados)");
+ enableFill->setChecked(true);
+ auto* enableImage=new QCheckBox("Simular imagem importada P&B");
+ const bool imagePresent=!sourceImage.isNull()&&imageBounds.isValid()&&
+                         imageBounds.width()>0&&imageBounds.height()>0;
+ enableImage->setChecked(imagePresent);enableImage->setEnabled(imagePresent);
+ enableImage->setToolTip(imagePresent?
+    "Imagem original intacta; simula limiar/dither sem aplicar vetorizacao":
+    "Nenhuma imagem importada na mesa");
+ auto* interval=new QDoubleSpinBox;interval->setRange(.05,5.0);
+ interval->setDecimals(2);interval->setSingleStep(.05);
+ interval->setValue(.20);interval->setSuffix(" mm");
+ auto* overscan=new QDoubleSpinBox;overscan->setRange(0,20.0);
+ overscan->setDecimals(1);overscan->setSingleStep(.5);
+ overscan->setValue(1.0);overscan->setSuffix(" mm");
+ auto* bidirectional=new QCheckBox("Varredura bidirecional");
+ bidirectional->setChecked(true);
+ auto* bitmapMode=new QComboBox;
+ bitmapMode->addItem("Limiar P&B",0);bitmapMode->addItem("Pontilhamento ordenado (Bayer)",1);
+ auto* bitmapThreshold=new QSpinBox;bitmapThreshold->setRange(1,254);
+ bitmapThreshold->setValue(128);
+ rasterControls->addWidget(enableFill,0,0,1,2);
+ rasterControls->addWidget(enableImage,0,2,1,2);
+ rasterControls->addWidget(new QLabel("Intervalo:"),1,0);
+ rasterControls->addWidget(interval,1,1);
+ rasterControls->addWidget(new QLabel("Overscan virtual:"),1,2);
+ rasterControls->addWidget(overscan,1,3);
+ rasterControls->addWidget(bidirectional,2,0,1,2);
+ rasterControls->addWidget(bitmapMode,2,2);
+ rasterControls->addWidget(bitmapThreshold,2,3);
+ column->addLayout(rasterControls);
  auto* stats=new QLabel;stats->setWordWrap(true);column->addWidget(stats);
  auto* canvas=new QLabel;canvas->setMinimumHeight(280);
  canvas->setAlignment(Qt::AlignCenter);column->addWidget(canvas,1);
@@ -116,7 +154,9 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    completed=std::size_t(std::lower_bound(timeline.endSeconds.begin(),
                       timeline.endSeconds.end(),now)-timeline.endSeconds.begin());
   }
-  for(std::size_t i=0;i<completed;++i){
+  // Limite visual para manter o slider responsivo com imagens densas.
+  const std::size_t stride=std::max<std::size_t>(1,shown.moves.size()/25000);
+  for(std::size_t i=0;i<completed;i+=stride){
    const auto& move=shown.moves[i];
    if(!move.laser&&!showTravel->isChecked())continue;
    painter.setPen(QPen(move.laser?QColor("#E8ECEC"):QColor("#F26969"),move.laser?1.3:1.0));
@@ -143,13 +183,43 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    settings.maxXmmMin=maxX->value();settings.maxYmmMin=maxY->value();
    settings.cutAccelX=accelX->value();settings.cutAccelY=accelY->value();
    settings.rapidAccelX=rapidAx->value();settings.rapidAccelY=rapidAy->value();
-   shown=repeated(sourcePlan,passes->value());
+   raster::Settings scan;
+   scan.intervalMm=interval->value();
+   scan.overscanMm=overscan->value();
+   scan.bidirectional=bidirectional->isChecked();
+   Plan combined=sourcePlan;
+   if(enableFill->isChecked()){
+    raster::appendFill(combined,source,scan);
+    combined.ignoredFill=0; // Fill vetorial incluido; contornos abertos nao geram hatch.
+   }
+   if(enableImage->isChecked()&&imagePresent){
+    // Amostragem de preview intencionalmente limitada. Sem guardar bitmap.
+    const QImage image=sourceImage.scaled(320,320,Qt::KeepAspectRatio,
+                                        Qt::SmoothTransformation).convertToFormat(QImage::Format_ARGB32);
+    raster::Mask mask;
+    mask.width=image.width();mask.height=image.height();
+    mask.black.resize(std::size_t(mask.width)*std::size_t(mask.height));
+    static constexpr int bayer[4][4]={
+     {0,8,2,10},{12,4,14,6},{3,11,1,9},{15,7,13,5}};
+    for(int y=0;y<mask.height;++y)for(int x=0;x<mask.width;++x){
+     const QRgb px=image.pixel(x,y);
+     const int alpha=qAlpha(px),luma=qGray(px);
+     const int value=(alpha*luma+(255-alpha)*255)/255;
+     const int bias=bitmapMode->currentIndex()==1?
+       (bayer[y%4][x%4]*16-120):0;
+     mask.black[std::size_t(y)*mask.width+x]=
+       (value<std::clamp(bitmapThreshold->value()+bias,1,254))?1:0;
+    }
+    raster::appendMask(combined,mask,{imageBounds.x(),imageBounds.y(),
+                       imageBounds.width(),imageBounds.height()},scan);
+   }
+   shown=repeated(combined,passes->value());
    timeline=motion::estimate(shown,settings);
    const double nominal=minutes(shown,settings.cutMmMin,settings.rapidMmMin)*60.0;
-   stats->setText(QString("Linha %1 mm | viagem %2 mm | tempo nominal %3 s | "
-     "tempo c/ aceleracao %4 s | grupos de movimento %5 | "
-     "ignorados: Fill %6, Saida off %7, guias T1/T2 %8. "
-     "Passagens repetem o plano inteiro, sem ordenacao do LightBurn.")
+   stats->setText(QString("Movimento virtual ativo %1 mm | viagem %2 mm | tempo nominal %3 s | "
+     "tempo c/ aceleracao %4 s | grupos %5 | "
+     "Fill omitido %6, Saida off %7, T1/T2 %8. "
+     "Fill P&B e imagem apenas demonstrativos; sem potencia nem G-code.")
      .arg(shown.cutMm,0,'f',1).arg(shown.travelMm,0,'f',1)
      .arg(nominal,0,'f',1).arg(timeline.totalSeconds,0,'f',1)
      .arg(qulonglong(timeline.runs)).arg(qulonglong(shown.ignoredFill))
@@ -172,8 +242,15 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"schema","alencar-laser-simulation-report-19.8"},
    {"experimental",true},{"machine_commands_sent",false},
    {"model","kinematic-start-stop-angular-runs-12deg"},
-   {"notes","Line only; passes repeat full plan; no Fill/Image/GRBL optimization"},
+   {"notes","Experimental Line, vector Fill, binary image. Simplified scan, no GRBL/LightBurn equivalence"},
    {"passes",passes->value()},
+   {"fill_simulation_enabled",enableFill->isChecked()},
+   {"image_simulation_enabled",enableImage->isChecked()&&imagePresent},
+   {"scan_line_interval_mm",interval->value()},
+   {"virtual_overscan_mm",overscan->value()},
+   {"bidirectional_scan",bidirectional->isChecked()},
+   {"image_mode",bitmapMode->currentIndex()==1?"ordered_dither":"threshold"},
+   {"image_threshold",bitmapThreshold->value()},
    {"cut_distance_mm",shown.cutMm},{"travel_distance_mm",shown.travelMm},
    {"nominal_seconds",minutes(shown,settings.cutMmMin,settings.rapidMmMin)*60.0},
    {"accel_estimated_seconds",timeline.totalSeconds},
@@ -201,6 +278,15 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
   QObject::connect(box,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
                    &dialog,[&](double){recalculate();});
  QObject::connect(passes,QOverload<int>::of(&QSpinBox::valueChanged),
+                  &dialog,[&](int){recalculate();});
+ for(auto* box:{interval,overscan})
+  QObject::connect(box,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                   &dialog,[&](double){recalculate();});
+ for(auto* checkbox:{enableFill,enableImage,bidirectional})
+  QObject::connect(checkbox,&QCheckBox::toggled,&dialog,[&](bool){recalculate();});
+ QObject::connect(bitmapMode,QOverload<int>::of(&QComboBox::currentIndexChanged),
+                  &dialog,[&](int){recalculate();});
+ QObject::connect(bitmapThreshold,QOverload<int>::of(&QSpinBox::valueChanged),
                   &dialog,[&](int){recalculate();});
  QObject::connect(showTravel,&QCheckBox::toggled,&dialog,[&](bool){render();});
  QObject::connect(play,&QPushButton::clicked,&dialog,[&](){
