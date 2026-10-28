@@ -2817,6 +2817,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
        view.editor.moveSelectionToLayer(ids,id);view.rebuild();
        captureEvent("objects_layer_changed",int(ids.size()));
        layers->setCurrentIndex(layers->findData(id));
+       status->setText(QString("%1 forma(s) movidas diretamente para camada %2.")
+        .arg(ids.size()).arg(id));
       });
      }else layers->setCurrentIndex(ix);
     });
