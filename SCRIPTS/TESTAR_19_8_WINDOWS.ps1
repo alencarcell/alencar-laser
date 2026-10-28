@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteSimulacao, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -90,6 +90,24 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteSimulacao) {
+        Write-Host 'PREVIA OFFLINE: teste C++20 independente + Qt com relatorio JSON.' -ForegroundColor Cyan
+        $source = Join-Path $fontes 'tests\preview_motion_19_8_standalone.cpp'
+        $standalone = Join-Path $build 'preview_motion_19_8_standalone.exe'
+        & $gpp -std=c++20 -Wall -Wextra -Werror -O2 $source -o $standalone
+        Checar-Saida 'Compilacao do simulador C++ independente'
+        & $standalone
+        Checar-Saida 'Teste C++ de movimento'
+        Compilar-QtComDiagnostico
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\simulacao'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --simulation-motion-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Previa virtual cinemática' (Join-Path $destino 'RESULTADO_PREVIA_MOVIMENTO_19_8.json')
+        Write-Host 'SIMULACAO PASS sintético; sem habilitar G-code ou controle fisico.' -ForegroundColor Green
+        return
+    }
     if ($SomenteRefino) {
         Write-Host 'REFINO: curvas de texto R/O, raster P&B e diagnosticos da Tesoura.' -ForegroundColor Cyan
         Compilar-QtComDiagnostico
@@ -257,6 +275,10 @@ try {
     & $app --editor-multitool-19-8-test $fixture $dirEditor
     Checar-ResultadoQt 'Editor: linha continua e selecao por area' (Join-Path $dirEditor 'RESULTADO_EDITOR_MULTIFERRAMENTAS_19_8.json')
 
+    $dirSim = Join-Path $destino 'simulacao'
+    New-Item -ItemType Directory -Path $dirSim -Force | Out-Null
+    & $app --simulation-motion-19-8-test $fixture $dirSim
+    Checar-ResultadoQt 'Simulacao cinemática 19.8' (Join-Path $dirSim 'RESULTADO_PREVIA_MOVIMENTO_19_8.json')
     $dirInteracao = Join-Path $destino 'interacao'
     New-Item -ItemType Directory -Path $dirInteracao -Force | Out-Null
     & $app --inline-transforms-19-8-test $fixture $dirInteracao
