@@ -4096,6 +4096,12 @@ static QJsonObject inlineTransforms198Test(const QString& directory){
                      "line","rectangle","ellipse","polygon","pencil","text","open_image_for_trace"}){
   auto* button=textWindow.findChild<QPushButton*>(id);
   check(button&&!button->icon().isNull(),std::string("Icone ausente: ")+id);
+  // QIcon pode conter uma imagem inteiramente transparente mesmo sem ser null.
+  const QImage iconPixels=button->icon().pixmap(20,20).toImage().convertToFormat(QImage::Format_ARGB32);
+  bool drawn=false;
+  for(int y=0;y<iconPixels.height()&&!drawn;++y)
+   for(int x=0;x<iconPixels.width();++x)if(qAlpha(iconPixels.pixel(x,y))>0){drawn=true;break;}
+  check(drawn,std::string("Glifo vazio: ")+id);
   const QRect inViewport(button->mapTo(toolScroll->viewport(),QPoint{}),button->size());
   check(inViewport.left()>=0&&inViewport.right()<toolScroll->viewport()->width(),
         std::string("Ferramenta recortada: ")+id);
