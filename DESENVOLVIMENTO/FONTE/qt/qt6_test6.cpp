@@ -624,6 +624,8 @@ class QtEditorLab final:public QGraphicsView{
     rasterRect_.width()/rasterSource_.width(),rasterRect_.height()/rasterSource_.height()));
   rasterOverlay_->setOpacity(.72);
  }
+public:
+ // API de imagem da mesa: acessível ao diálogo LabWindow; armazenamento continua privado.
  void setRasterWidthMm(double width){
   if(rasterSource_.isNull()||width<=0)return;
   rasterRect_.setSize(QSizeF(width,width*rasterSource_.height()/rasterSource_.width()));
@@ -647,6 +649,8 @@ class QtEditorLab final:public QGraphicsView{
   if(rasterOverlay_){scene_.removeItem(rasterOverlay_);delete rasterOverlay_;rasterOverlay_=nullptr;}
   viewport()->update();
  }
+private:
+ // Rotinas internas de atualização dos objetos nativos permanecem encapsuladas.
  void clearNativeItems(){
   nativeContourPressing_=false;
   for(auto& entry:nativeItems_){scene_.removeItem(entry.second);delete entry.second;}
