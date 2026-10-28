@@ -494,6 +494,7 @@ public:
  std::function<void(const QString&)> toolWarning;
  std::function<void(Pt)> requestTextAt;
  std::function<void()> requestSelectTool;
+ std::function<void(Tool)> requestToolChange;
  std::function<void(const QString&,int)> diagnosticEvent;
  std::function<void(double)> zoomChanged;
  double currentZoom()const{return std::hypot(transform().m11(),transform().m21());}
@@ -1207,6 +1208,66 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    viewport()->update();if(stateChanged)stateChanged();e->accept();return;
   }
   QGraphicsView::mouseReleaseEvent(e);
+ }
+ void contextMenuEvent(QContextMenuEvent* e)override{
+  if(tool==Tool::Line||nativeMode_||busy()){e->accept();return;}
+  QMenu menu(this);
+  QAction* all=menu.addAction("Selecionar tudo (Ctrl+A)");
+  QAction* invert=menu.addAction("Inverter seleção (Ctrl+Shift+I)");
+  QAction* clear=menu.addAction("Limpar seleção");
+  menu.addSeparator();
+  QAction* duplicate=menu.addAction("Duplicar forma (+3 mm)");
+  QAction* group=menu.addAction("Agrupar seleção");
+  QAction* ungroup=menu.addAction("Desagrupar seleção");
+  QAction* remove=menu.addAction("Excluir selecionados (Delete)");
+  duplicate->setEnabled(selected.size()==1);
+  group->setEnabled(selected.size()>=2);
+  bool grouped=false;
+  for(int id:selected){
+   auto it=editor.state().objects.find(id);
+   if(it!=editor.state().objects.end()&&it->second.group>0)grouped=true;
+  }
+  ungroup->setEnabled(grouped);
+  remove->setEnabled(!selected.empty());
+  menu.addSeparator();
+  QAction* undo=menu.addAction("Desfazer (Ctrl+Z)");
+  QAction* redo=menu.addAction("Refazer (Ctrl+Y)");
+  menu.addSeparator();
+  auto* tools=menu.addMenu("Ferramentas");
+  QAction* select=tools->addAction("Selecionar (V)");
+  QAction* line=tools->addAction("Linha contínua");
+  QAction* scissors=tools->addAction("Tesoura (K)");
+  QAction* nodes=tools->addAction("Editar nós");
+  QAction* picked=menu.exec(e->globalPos());
+  if(!picked){e->accept();return;}
+  try{
+   if(picked==all)selectAllVisible();
+   else if(picked==invert)invertSelection();
+   else if(picked==clear)clearSelection();
+   else if(picked==remove)deleteSelectedShapes();
+   else if(picked==undo)history(false);
+   else if(picked==redo)history(true);
+   else if(picked==duplicate&&selected.size()==1){
+    const int id=editor.duplicate(*selected.begin(),{3,3});
+    selected.clear();active_.reset();rebuild();activate({id,0});
+   }else if(picked==group&&selected.size()>=2){
+    editor.group(std::vector<int>(selected.begin(),selected.end()));rebuild();
+   }else if(picked==ungroup&&grouped){
+    int groupId=0;
+    for(int id:selected){
+     auto it=editor.state().objects.find(id);
+     if(it!=editor.state().objects.end()&&it->second.group>0){groupId=it->second.group;break;}
+    }
+    if(groupId>0){editor.ungroup(groupId);rebuild();}
+   }else if(requestToolChange){
+    if(picked==select)requestToolChange(Tool::Select);
+    else if(picked==line)requestToolChange(Tool::Line);
+    else if(picked==scissors)requestToolChange(Tool::Scissors);
+    else if(picked==nodes)requestToolChange(Tool::Nodes);
+   }
+   if(stateChanged)stateChanged();
+  }catch(const std::exception& ex){if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));}
+  e->accept();
  }
  void keyReleaseEvent(QKeyEvent* e)override{
   if(e->key()==Qt::Key_Shift&&strokeDrawing_&&pendingPreview_){
@@ -2357,6 +2418,17 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
   shortcut("Ctrl+Delete",[this]{if(bezierToolActive_)view.nativeDeleteContour();});
   view.requestSelectTool=[this]{if(buttons.count("select"))buttons.at("select")->click();};
+  view.requestToolChange=[this](QtEditorLab::Tool t){
+   QString id;
+   switch(t){
+    case QtEditorLab::Tool::Select:id="select";break;
+    case QtEditorLab::Tool::Line:id="line";break;
+    case QtEditorLab::Tool::Scissors:id="scissors";break;
+    case QtEditorLab::Tool::Nodes:id="nodes";break;
+    default:break;
+   }
+   if(buttons.count(id))buttons.at(id)->click();
+  };
   view.toolWarning=[this](const QString& message){status->setText(message);};
   shortcut("Esc",[this]{view.cancelCurrentGesture();buttons.at("select")->click();});
   shortcut("V",[this]{buttons.at("select")->click();});
