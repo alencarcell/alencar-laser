@@ -4334,14 +4334,18 @@ static QJsonObject layerRoute198Test(){
  Layer edited=beforeLayer;
  edited.name="Linha laranja";
  edited.speedMmMin=5400.;edited.powerPercent=41.5;
- edited.passes=3;edited.powerMode="M3";
+ edited.passes=3;edited.powerMode="M3";edited.optimizeTravel=false;
  model.configureLayer(0,edited);
  check(model.undoCount()==beforeUndo+1,
        "Configuracoes da camada nao geraram unica transacao undo");
  const auto& saved=model.state().layers.at(0);
  check(saved.name=="Linha laranja"&&saved.powerMode=="M3"&&
-       saved.speedMmMin==5400.&&saved.passes==3&&saved.powerPercent==41.5,
+       saved.speedMmMin==5400.&&saved.passes==3&&saved.powerPercent==41.5&&
+       !saved.optimizeTravel,
        "Parametros de simulacao nao aplicados");
+ const auto preserveRoute=sim198::route::nearestNeighborLines(model.state());
+ check(std::abs(preserveRoute.travelMm-basic.travelMm)<1e-7,
+       "Camada com otimizacao OFF mudou ordem da rota");
  const auto repeatPlan=sim198::repeatedByLayer(sim198::build(model.state()),model.state(),2);
  check(std::abs(repeatPlan.cutMm-basic.cutMm*6)<1e-7,
        "Passes por camada multiplicados por passes globais incorretamente");
@@ -4357,17 +4361,20 @@ static QJsonObject layerRoute198Test(){
  const auto json=metadata(model.state());
  const auto revived=fromMetadata(model.state().doc,json);
  check(revived.layers.at(0).powerMode=="M3"&&
-       revived.layers.at(0).powerPercent==41.5&&revived.layers.at(0).passes==3,
+       revived.layers.at(0).powerPercent==41.5&&revived.layers.at(0).passes==3&&
+       !revived.layers.at(0).optimizeTravel,
        "Parametros M3, passes ou potencia perdidos no metadata roundtrip");
  auto legacy=json;
  for(auto& item:legacy["layers"].as_array()){
   auto& l=item.as_object();
   l.erase("speedMmMin");l.erase("powerPercent");l.erase("passes");l.erase("powerMode");
+  l.erase("optimizeTravel");
  }
  const auto readLegacy=fromMetadata(model.state().doc,legacy);
  check(readLegacy.layers.at(0).powerMode=="M4"&&
        readLegacy.layers.at(0).speedMmMin==3000.&&
-       readLegacy.layers.at(0).powerPercent==20.&&readLegacy.layers.at(0).passes==1,
+       readLegacy.layers.at(0).powerPercent==20.&&readLegacy.layers.at(0).passes==1&&
+       readLegacy.layers.at(0).optimizeTravel,
        "Projetos antigos nao receberam defaults M4 compativeis");
  const auto undone=model.undo();
  check(undone&&model.state().layers.at(0).powerMode=="M4"&&
@@ -4389,6 +4396,7 @@ static QJsonObject layerRoute198Test(){
  return {{"status","PASS"},{"nearest_neighbor_reduces_travel",true},
   {"route_is_non_destructive",true},{"layer_settings_one_undo",true},
   {"m3_m4_metadata_roundtrip",true},{"legacy_m4_default",true},
+  {"per_layer_route_toggle",true},
   {"tool_layers_no_output",true},{"invalid_power_rejected",true},
   {"hardware_commands_sent",false}};
 }
