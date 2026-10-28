@@ -284,3 +284,18 @@ Registrar mudanças, testes e pendências.
 - Hotfix aplicado na branch antiga: commit `4c1ef6011850d7a6aa7dd3c24ed05d11918ae407`, alinhando teste a 384. A branch atual `fix/lbrn2-real-shared-primitives-19-8` já possuía a asserção de 384 e suporte adicional real a PrimID/LineClosed.
 - Recomendação: com mudanças locais preservadas, `git fetch origin`; migrar para `fix/lbrn2-real-shared-primitives-19-8`, executar `-SomenteImportacao -ArquivoLbrn2 "<arquivo .lbrn2 do cliente>"`; só depois de PASS executar a suíte `-Abrir`.
 - **Correção no GitHub sem execução Windows nesta resposta**; não marcar homologada. Arquivo original e versão homologada preservados.
+
+
+## 28/10/2026 — refino visual e rastreio de bitmap (branch experimental; PR em rascunho)
+
+- Vídeo real `20261028_135547.mp4` (~50 s) confirma facetas acentuadas em curvas da letra R após zoom, melhorias de Tesoura, movimentação e uso da área de trabalho. O usuário pede uso da documentação LightBurn e das experiências Web v0.10.58.6/.7.
+- Nova branch isolada: `feat/refino-curvas-rastreio-diagnosticos-19-8`, base `fix/lbrn2-real-shared-primitives-19-8`. Web e `main`/candidata aprovada sem modificações.
+- Texto: vetorização da fonte com leitura dos elementos QPainterPath e subdivisão de Bézier cúbica em ~0,016 mm, substituindo `toSubpathPolygons`. Mantém subcaminhos/vazados; ainda é polilinha ao salvar, não texto semântico.
+- Bézier: novo botão `Nova curva` cria curva cúbica real com 2 âncoras e 2 alças, selecionada e editável na sessão nativa. Suporte a inserção de nós existente. Não converte polilinhas automaticamente.
+- Rastreio: motor `src/raster_trace_19_8.hpp`; importação de PNG/JPEG/BMP/WebP por barra/menu/arraste; bitmap temporário sobre a mesa; clique direito > Traçar imagem ou Alt+T abre prévia P&B com vetores roxos e ajustes de limiar Otsu, ilhas, otimização, suavização opcional e largura física. Salva vetores só após confirmar, agrupados em um único undo. Limites 960 px raster de trabalho, 500 mil arestas, **50 mil nós/1000 contornos**. Bitmap original não muda; overlay não persiste no .alaser.
+- Coleta da Tesoura: causa comprovada de eventos ausentes era a whitelist `DiagnosticsCollector` desatualizada. Agora aceita os eventos, anota até 100 tentativas com resultados categorizados, ID da forma, segmento, zoom e tempo, somente com coleta opt-in; não inclui coordenadas, arquivo, conteúdo.
+- Clique na paleta com seleção transferia camada já na branch anterior; agora exibe confirmação no status. Faixa da mesa mais estreita (margem, título e botões curtos).
+- Teste `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteRefino`, também no gate integral `-Abrir`, valida texto R/O, P&B e furo, ruído, Bézier nativa com undo/redo, eventos da Tesoura whitelist e clique de GUI sob coleta ativa.
+- **NÃO COMPILADO no Windows nesta branch; sem homologação.** Segurança: nenhuma emissão, movimento, G-code ou controle físico habilitado; manter máquina desconectada. Testes visual/Windows e desempenho em imagens reais necessários.
+- Documento: `DESENVOLVIMENTO/ESPECIFICACOES/REFINO_RASTREIO_BEZIER_DIAGNOSTICOS_19_8.md`.
+- Trabalhos ainda pendentes: curvas/arcos matematicamente nativos para TEXTO e LBRN2, Trace Image mais sofisticado (sketch/alpha/corner detection e texto pequeno), importação/exportação real de imagens persistentes, conversão de polilinha para Bézier com undo integrado e prefill de parâmetros fabris (ainda bloqueado).
