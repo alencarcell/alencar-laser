@@ -69,8 +69,8 @@ inline std::optional<Layer> edit(QWidget* parent,const Layer& original){
   const double pct=sim198::motion::virtualPowerPercent(
      power->value(),code,speed->value()/2.,speed->value());
   powerExample->setText(QString(
-    "Exemplo matematico apenas: a 50%% da velocidade definida, "
-    "potencia ilustrativa %1%% (nominal %2%%, modo %3). "
+    "Exemplo matematico apenas: a 50% da velocidade definida, "
+    "potencia ilustrativa %1% (nominal %2%, modo %3). "
     "Nao representa PWM, energia real nem perfuracao.")
     .arg(pct,0,'f',1).arg(power->value(),0,'f',1)
     .arg(QString::fromStdString(code)));
