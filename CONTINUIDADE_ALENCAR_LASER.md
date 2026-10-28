@@ -249,3 +249,16 @@ Registrar mudanças, testes e pendências.
 - Estado: **GitHub atualizado, verificação estrutural de delimitadores PASS, mas SEM compilação Windows / SEM mouse físico.** Não homologar até ambos testes focados, suíte integral e revisão com projetos reais.
 - Documentação: `DESENVOLVIMENTO/ESPECIFICACOES/CAMADAS_LINHA_FILL_DESAGRUPAR_19_8.md`.
 - Comandos sugeridos a partir da raiz após confirmar estado do Git: `git fetch origin`; `git switch --track origin/feat/camadas-preenchimento-desagrupar-19-8`; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteCamadas`, depois `-SomenteInteracao` e então `-Abrir` se ambos PASS. Em conflito de arquivos locais: preservar antes de atualizar.
+
+
+## 28/10/2026 — arquivo real TESOURA e gesto central — PR #8 em rascunho
+
+- O arquivo v5 real `TESTE TESOURA.alaser` enviado nesta etapa foi inspecionado localmente; SHA-256 `711c9cf4cf103611c9c208394a4b7ac33fe9a1a2ca1a05ca22286a844ba48026`. A arte original NÃO foi adicionada ao repositório.
+- Diagnóstico conclusivo de metadados: 575 contornos, 13.415 nós, nenhum objeto agrupado e nenhum Bézier; todos `closed=false`, apesar de **571** terem primeiro e último vértice exatamente iguais. Há outros 3 genuinamente abertos e 1 caminho com 2 nós a 0,002525 mm do primeiro.
+- Nova branch `fix/tesoura-fechos-lbrn2-selecao-19-8`, PR #8 draft, sobre `feat/camadas-preenchimento-desagrupar-19-8`. Ainda não houve compilação Qt Windows nesta branch. Não mesclar nem homologar.
+- Em `scissors_span.hpp`, reconhecer cópia virtual de anel fechado no hover sem tocar nos dados. No corte, `removeScissorSpan` usa a mesma cópia lógica somente no objeto clicado; undo exato. Tangências/colinearidades permanecem bloqueadas.
+- Qt: alça central da seleção agora arrasta e move toda a seleção, Shift limita a 45°, prévia transacional. Paleta de cores segue LightBurn: clique simples com seleção transfere camada; sem seleção ativa; Shift seleciona objetos da cor. Fill mostra só contornos por padrão, com checkbox para prévia translúcida (ainda não é gravação real).
+- LBRN2: importador permanece parcial, mas suporta `Rect` com cantos arredondados `Cr` e elipses com 384 amostras. **Nenhum .lbrn2 real foi anexado nesta mensagem**: necessita arquivo real recusado para ampliar cobertura de Text/Bitmap/paths complexos. Sem importação parcial silenciosa.
+- Novo teste Qt `--scissor-closures-19-8-test` + switch `-SomenteCasoReal` e inclusão no gate integral; casos de anel isolado e cruzamentos, hover não destrutivo, undo, centro, paleta e XML sintético de Rect Cr.
+- Validar no Windows primeiro `git status --short`, `git fetch origin` e (sem mudanças locais pendentes) `git switch --track origin/fix/tesoura-fechos-lbrn2-selecao-19-8`. Depois `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteCasoReal`. Com PASS, rodar `-SomenteCamadas`, `-SomenteImportacao`, `-Abrir`.
+- Testar mouse no `TESTE TESOURA.alaser` original aberto em cópia de trabalho e fazer Ctrl+Z; não conectar a máquina física. O relatório técnico está em `DESENVOLVIMENTO/ESPECIFICACOES/CASO_REAL_TESOURA_20261028.md`.
