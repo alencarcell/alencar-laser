@@ -4049,6 +4049,9 @@ static QJsonObject lightburnImport198Test(const QString& directory){
  check(sharedResult.state.objects.at(2).layer==1&&
        sharedResult.state.objects.at(3).layer==2,
    "Grupo aninhado perdeu camadas");
+ check(sharedResult.state.objects.at(2).group>0&&
+       sharedResult.state.objects.at(2).group==sharedResult.state.objects.at(4).group,
+   "Group nao sobreviveu como metadado editavel");
  // Referencia sem definicao nunca e importada parcialmente.
  const QString invalidShared=temp.filePath("prim_desconhecido.lbrn2");
  QFile missing(invalidShared);check(missing.open(QIODevice::WriteOnly),
@@ -4087,18 +4090,25 @@ static QJsonObject actualLightBurnFile198Test(const QString& input){
  int closed=0;
  for(const auto& c:imported.state.doc.contours)if(c.closed)closed++;
  const int nodes=int(countNodes(imported.state.doc));
+ std::set<int> groups;int groupedObjects=0;
+ for(const auto& [id,meta]:imported.state.objects)if(meta.group>0){
+  groups.insert(meta.group);groupedObjects++;
+ }
  const bool known=sha=="3336269e9bae2aa5cb2778123ff7ffea2ea1a8a515d2aca648fb44e22ebbad06";
  if(known){
   check(imported.shapeCount==17&&nodes==1331&&closed==13,
    "SUPORTE PRA ALEXA: importacao incompleta ou geometria diferente do arquivo real");
   check(imported.state.doc.contours.size()==17,
    "SUPORTE PRA ALEXA: 17 formas editaveis nao preservadas");
+  check(groups.size()==3&&groupedObjects==6,
+   "SUPORTE PRA ALEXA: grupos LightBurn nao foram preservados");
  }
  // Nao grava no arquivo origem; nenhum envio ao laser.
  return {{"status","PASS"},{"source_sha256",sha},
   {"identified_uploaded_fixture",known},{"shape_count",imported.shapeCount},
   {"node_count",nodes},{"closed_paths",closed},
   {"layers",int(imported.state.layers.size())},
+  {"groups",int(groups.size())},{"grouped_objects",groupedObjects},
   {"deterministic",true},{"hardware_commands_sent",false}};
 }
 
