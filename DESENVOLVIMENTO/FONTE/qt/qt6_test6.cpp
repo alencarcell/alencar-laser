@@ -890,7 +890,7 @@ public:
     const auto meta=editor.state().objects.at(c.key.object);
     const auto layer=editor.state().layers.at(meta.layer);
     auto* o=scene_.addPath(pathOf(c),QPen(layerColor(meta.layer),0));o->setZValue(1);
-    if(fillPreview_&&layer.mode=="Fill"&&c.closed){
+    if(fillPreview_&&layer.mode=="Fill"&&(c.closed||hasExactDuplicateClosure(c))){
      QColor translucent=layerColor(meta.layer);translucent.setAlpha(115);
      o->setBrush(QBrush(translucent));
     }
