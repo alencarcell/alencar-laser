@@ -64,3 +64,9 @@ Se passar, testar `-SomenteInteracao` e `-Abrir`, **sem máquina conectada**. Ao
 - O checkbox global de otimização da prévia precisa estar marcado para a heurística atuar. Se a camada desabilitar seu próprio checkbox, `preview_route_19_8.hpp` preserva a ordem e a direção originais dos contornos dessa camada, embora outras camadas possam ser reordenadas.
 - O teste `--layer-route-19-8-test` agora confere: OFF mantem distância de viagem original; ON reduz distância da fixture; JSON salva e reabre OFF; remover a chave em metadata legada restaura default ON.
 - Não equivale ao planejador completo do LightBurn; continuam pendentes otimização por contorno interno, agrupamentos e prioridades.
+
+## Visualização conceitual de M3/M4 no editor
+
+- `src/preview_motion_19_8.hpp::virtualPowerPercent` foi adicionado para **demonstração matemática**, não simulação fiel de PWM/GRBL: para M3 retorna potência nominal constante; para M4 calcula potência nominal × razão entre velocidade atual hipotética e solicitada, limitada a 0–100% do valor nominal. Em velocidade zero, M4 retorna zero e M3 mantém nominal na demonstração.
+- `qt/layer_settings_19_8.hpp` mostra em tempo real o exemplo de potência se a velocidade fosse 50% da programada. Isso esclarece M3 x M4, mas **não permite inferir potência física, foco, perfuração, tempo de permanência ou resultado de material**.
+- O harness C++20 `tests/preview_motion_19_8_standalone.cpp` ganhou verificações M3 a 50%, M4 a 50%, M4 em velocidade zero e M4 com velocidade acima da solicitada. Ainda não foram rodadas no Windows nesta rodada.
