@@ -3962,6 +3962,20 @@ static QJsonObject layersUngroup198Test(const QString& directory){
  clickButton(w,"move_layer");
  check(v.editor.state().objects.at(a).layer==2&&
        v.editor.state().objects.at(b).layer==2,"Botao enviar selecao nao moveu camadas");
+ // Novo gesto: selecionar objeto e mudar no combo transfere sem Enviar.
+ v.clearSelection();
+ w.layers->setCurrentIndex(w.layers->findData(0));
+ v.selected.insert(c);v.applySelectionStyles();
+ w.layers->setCurrentIndex(w.layers->findData(2));
+ QApplication::processEvents();
+ check(v.editor.state().objects.at(c).layer==2,
+  "Selecionar outra camada pelo painel nao transferiu objeto selecionado");
+ w.layers->setCurrentIndex(w.layers->findData(0));
+ QApplication::processEvents();
+ check(v.editor.state().objects.at(c).layer==0,
+  "Selecao nao retornou a camada original pelo painel");
+ v.clearSelection();
+ w.layers->setCurrentIndex(w.layers->findData(2));
  const auto geometryBefore=serialize(encode(v.editor.state().doc));
  check(w.layerMode_!=nullptr,"Seletor de modo de camada nao foi criado");
  w.layerMode_->setCurrentIndex(w.layerMode_->findData(QString("Fill")));
