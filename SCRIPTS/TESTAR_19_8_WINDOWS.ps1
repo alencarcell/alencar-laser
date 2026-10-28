@@ -98,6 +98,12 @@ try {
         Checar-Saida 'Compilacao do simulador C++ independente'
         & $standalone
         Checar-Saida 'Teste C++ de movimento'
+        $rasterSource = Join-Path $fontes 'tests\preview_raster_19_8_standalone.cpp'
+        $rasterStandalone = Join-Path $build 'preview_raster_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall $rasterSource -o $rasterStandalone
+        Checar-Saida 'Compilacao C++ do raster virtual'
+        & $rasterStandalone
+        Checar-Saida 'Teste C++ de Fill e bitmap'
         Compilar-QtComDiagnostico
         $app = Join-Path $build 'alencar_test7_qt6.exe'
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
