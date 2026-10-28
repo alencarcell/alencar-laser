@@ -15,6 +15,13 @@ int main(){
  assert(near(startStopSeconds(10,10,10),2));
  assert(near(startStopSeconds(100,10,10),11));
  assert(near(startStopSeconds(0,10,10),0));
+ // Exemplos matematicos, sem comando GRBL: M3 mantem nominal;
+ // M4 reduz proporcionalmente a velocidade e zera em velocidade zero.
+ assert(near(virtualPowerPercent(40.,"M3",500.,1000.),40.));
+ assert(near(virtualPowerPercent(40.,"M4",500.,1000.),20.));
+ assert(near(virtualPowerPercent(40.,"M4",0.,1000.),0.));
+ assert(near(virtualPowerPercent(40.,"M4",2000.,1000.),40.));
+
  Settings cfg;cfg.maxXmmMin=600;cfg.maxYmmMin=1200;
  assert(near(segmentSpeed(10,0,true,cfg),10));
  assert(near(segmentSpeed(0,10,true,cfg),20));
