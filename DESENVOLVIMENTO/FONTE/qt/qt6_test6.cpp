@@ -734,6 +734,7 @@ public:
  std::function<void()> requestSelectTool;
  std::function<void(Tool)> requestToolChange;
  std::function<void(const QString&,int)> diagnosticEvent;
+ std::function<void(const QString&,int,int)> scissorDetail;
  std::function<void(double)> zoomChanged;
  double currentZoom()const{return std::hypot(transform().m11(),transform().m21());}
  void reportZoom(){if(zoomChanged)zoomChanged(currentZoom());}
@@ -1240,6 +1241,7 @@ void mousePressEvent(QMouseEvent* e)override{
     if(hits.empty()){
      reason="Tesoura: nenhuma linha proxima (9 px). Amplie e posicione sobre o contorno.";
      if(diagnosticEvent)diagnosticEvent("scissor_no_hit",1);
+     if(scissorDetail)scissorDetail("miss",0,-1);
     }else{
      bool grouped=false,locked=false,hidden=false;
      for(const auto& hit:hits){
@@ -1255,6 +1257,8 @@ void mousePressEvent(QMouseEvent* e)override{
      else if(locked||hidden)reason="Tesoura: objeto em camada bloqueada ou oculta.";
      else reason="Tesoura: contorno encontrado, mas sem trecho seguro; verifique vertice, tangencia, sobreposicao ou geometria composta.";
      if(diagnosticEvent)diagnosticEvent("scissor_no_safe_span",1);
+     if(scissorDetail)scissorDetail(grouped?"grouped":(locked?"locked":(hidden?"hidden":"ambiguous")),
+       hits.front().key.object,hits.front().segment);
     }
     if(toolWarning)toolWarning(reason);
     e->accept();return;
@@ -1265,6 +1269,7 @@ void mousePressEvent(QMouseEvent* e)override{
     const int obj=editor.removeScissorSpan(cutting);
     selected.clear();rebuild();if(obj>0)activate({obj,0});
     if(diagnosticEvent)diagnosticEvent("scissor_continuous_span_removed",1);
+    if(scissorDetail)scissorDetail("cut",cutting.key.object,int(cutting.from));
     if(stateChanged)stateChanged();
    }catch(const std::exception& ex){
     clearScissorHover();
@@ -1764,6 +1769,7 @@ public:
  QLabel* machineHeaderStatus_=nullptr;
  QLabel* collectorSummary_=nullptr;
  QPlainTextEdit* collectorLog_=nullptr;
+ QJsonArray scissorAttempts_; // somente IDs internos, sem coordenadas ou caminhos
  // Diagnostics must NEVER let an exception cross a Qt event-loop callback.
  void captureEvent(const QString& code,int n=1) noexcept{
   try{
@@ -1837,6 +1843,13 @@ public:
   }
   QWidget::closeEvent(event);
  }
+ void recordScissorAttempt(const QString& result,int objectId,int segment){
+  if(!collector_.active())return;
+  if(scissorAttempts_.size()>=100)scissorAttempts_.removeAt(0);
+  scissorAttempts_.append(QJsonObject{{"result",result},{"object_id",objectId},
+   {"segment",segment},{"zoom",view.currentZoom()},
+   {"elapsed_ms",double(collector_.elapsedMs())}});
+ }
  void updateCaptureSummary(){
   if(!collectorSummary_)return;
   collectorSummary_->setText(QString("Estado: %1\nEventos: %2  •  limite: %3  •  descartados: %4\nTempo ativo da coleta: %5 s")
@@ -1848,7 +1861,9 @@ public:
   QJsonObject counters;for(const auto& [name,n]:collector_.counters())counters[QString::fromStdString(name)]=n;
   QJsonArray events;for(const auto& e:collector_.records())events.append(QJsonObject{
    {"event",QString::fromStdString(e.type)},{"objects",e.objects},{"elapsed_ms",double(e.elapsedMs)}});
-  return {{"schema","alencar-laser-diagnostics-3"},{"version","TESTE_19.8"},
+  return {{"schema","alencar-laser-diagnostics-4"},{"version","TESTE_19.8"},
+   {"scissor_attempts",scissorAttempts_},
+   {"scissor_hover_events",double(view.scissorHoverEventCount())},
    {"exported_utc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
    {"collection_active",collector_.active()},{"events_retained",int(collector_.records().size())},
    {"events_dropped",double(collector_.dropped())},{"elapsed_ms",double(collector_.elapsedMs())},
@@ -2823,6 +2838,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    });
   view.stateChanged=[this]{if(uiPersistenceEnabled_)recoveryPolicy_.edited();refresh();};
   view.diagnosticEvent=[this](const QString& code,int count){captureEvent(code,count);};
+  view.scissorDetail=[this](const QString& reason,int id,int segment){
+   recordScissorAttempt(reason,id,segment);
+  };
   view.drawingLayer=[this]{return layers->currentData().toInt();};
    view.requestTextAt=[this](Pt at){insertVectorText(at);};
    view.requestTraceImage=[this]{traceImageDialog();};
