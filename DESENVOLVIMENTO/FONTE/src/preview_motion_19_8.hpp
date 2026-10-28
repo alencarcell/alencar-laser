@@ -53,8 +53,8 @@ inline double startStopSeconds(double distance,double speed,double accel){
  if(distance<=rampDistance)return 2.0*std::sqrt(distance/accel);
  return 2.0*speed/accel+(distance-rampDistance)/speed;
 }
-template<typename Plan>
-Timeline estimate(const Plan& plan,const Settings& s){
+template<typename Plan,typename FeedForLayer>
+Timeline estimateWithFeeds(const Plan& plan,const Settings& s,FeedForLayer layerFeed){
  validate(s);
  Timeline timeline;
  timeline.endSeconds.resize(plan.moves.size());
@@ -85,7 +85,13 @@ Timeline estimate(const Plan& plan,const Settings& s){
   if(!std::isfinite(d))throw std::runtime_error("Coordenada nao finita no plano");
   if(d<=1e-12){flush();timeline.endSeconds[i]=timeline.totalSeconds;continue;}
   const double ux=dx/d,uy=dy/d;
-  const double speed=segmentSpeed(dx,dy,m.laser,s);
+  Settings active=s;
+  if(m.laser){
+   active.cutMmMin=layerFeed(m.layer);
+   if(!std::isfinite(active.cutMmMin)||active.cutMmMin<=0)
+    throw std::runtime_error("Velocidade virtual da camada invalida");
+  }
+  const double speed=segmentSpeed(dx,dy,m.laser,active);
   const double accel=segmentAccel(dx,dy,m.laser,s);
   if(!(speed>0)||!(accel>0))throw std::runtime_error("Perfil de movimento invalido");
   const bool contiguous=has&&std::hypot(m.from.x-plan.moves[i-1].to.x,
@@ -99,6 +105,10 @@ Timeline estimate(const Plan& plan,const Settings& s){
  }
  flush();
  return timeline;
+}
+template<typename Plan>
+Timeline estimate(const Plan& plan,const Settings& s){
+ return estimateWithFeeds(plan,s,[&](int){return s.cutMmMin;});
 }
 template<typename Plan>
 std::size_t moveIndexAt(const Plan& plan,const Timeline& time,double elapsed){
