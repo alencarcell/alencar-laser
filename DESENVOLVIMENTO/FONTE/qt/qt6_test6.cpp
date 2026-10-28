@@ -417,18 +417,19 @@ class QtEditorLab final:public QGraphicsView{
  std::optional<QRectF> selectedBounds()const{
   if(selected.empty()||tool!=Tool::Select||nativeMode_)return {};
   auto ids=expandedSelection();
-  QRectF bounds;bool has=false;
+  double minX=0.,minY=0.,maxX=0.,maxY=0.;bool has=false;
   for(const auto& c:editor.state().doc.contours){
    if(std::find(ids.begin(),ids.end(),c.key.object)==ids.end())continue;
    if(!editable(editor.state(),c.key.object))continue;
    for(const auto& node:c.nodes){
-    const QPointF p=toQt(node.p);
-    if(!has){bounds=QRectF(p,p);has=true;}
-    else bounds=bounds.united(QRectF(p,p));
+    const Pt p=node.p;
+    if(!has){minX=maxX=p.x;minY=maxY=p.y;has=true;}
+    else{minX=std::min(minX,p.x);minY=std::min(minY,p.y);
+         maxX=std::max(maxX,p.x);maxY=std::max(maxY,p.y);}
    }
   }
   if(!has)return {};
-  return bounds.normalized();
+  return QRectF(QPointF(minX,minY),QPointF(maxX,maxY));
  }
  std::array<QPointF,12> selectionHandles(const QRectF& bounds)const{
   const QPointF tl=viewportTransform().map(bounds.topLeft());
@@ -1409,7 +1410,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    if(QLineF(first,last).length()>1e-5&&(tool==Tool::Line||(b.x()>a.x()&&b.y()>a.y()))){
     if(tool==Tool::Rectangle)lastCreated_=editor.rectangle(fromQt(a),b.x()-a.x(),b.y()-a.y(),targetLayer());
     else if(tool==Tool::Line)lastCreated_=editor.line(fromQt(first),fromQt(last),targetLayer());
-    else if(tool==Tool::Ellipse)lastCreated_=editor.ellipse(fromQt((a+b)*.5),(b.x()-a.x())*.5,(b.y()-a.y())*.5,64,targetLayer());
+    else if(tool==Tool::Ellipse)lastCreated_=editor.ellipse(fromQt((a+b)*.5),(b.x()-a.x())*.5,(b.y()-a.y())*.5,512,targetLayer());
     else if(tool==Tool::Polygon){double r=std::min(b.x()-a.x(),b.y()-a.y())*.5;if(r>1e-5)lastCreated_=editor.regularPolygon(fromQt((a+b)*.5),r,6,targetLayer());}
     ++toolCreates;rebuild();activate({lastCreated_,0});
     if(diagnosticEvent)diagnosticEvent("shape_created",1);
@@ -2995,7 +2996,7 @@ static QJsonObject integratedTest(const QString& csv,const QString& output){
  clickScene(w,overlap,Qt::AltModifier);check(v.active()&&v.active()->object==b,"Alt click did not reach second identity");
  clickScene(w,overlap,Qt::AltModifier);check(v.active()&&v.active()->object==a,"overlap cycle did not wrap");
  auto nearPixel=v.mapFromScene(overlap);int outside=int(std::ceil(8/v.viewport()->devicePixelRatioF()));QTest::mouseClick(v.viewport(),Qt::LeftButton,Qt::NoModifier,nearPixel-QPoint(0,outside));QApplication::processEvents();check(!v.active(),"outside pixel radius selected a contour");stage("overlap_exact_identity_and_cycle");
- int ellipse=draw("ellipse",{-820,-920},{-790,-900},64),polygon=draw("polygon",{-770,-920},{-740,-890},6);
+ int ellipse=draw("ellipse",{-820,-920},{-790,-900},512),polygon=draw("polygon",{-770,-920},{-740,-890},6);
  draw("line",{-720,-920},{-690,-900},2);
  // GUI multi-selection, group, transform, layer controls, and metadata-aware history.
  clickButton(w,"select");v.centerOn(-780,-905);QApplication::processEvents();auto ellipsePoint=toQt(get(v.editor.state().doc,{ellipse,0})->nodes[0].p);auto polygonPoint=toQt(get(v.editor.state().doc,{polygon,0})->nodes[0].p);
