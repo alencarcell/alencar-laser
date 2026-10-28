@@ -4192,6 +4192,57 @@ static QJsonObject layersUngroup198Test(const QString& directory){
   {"fill_preview_closed",true},{"legacy_mode_default",true},
   {"alaser_roundtrip",true},{"hardware_commands_sent",false}};
 }
+static QJsonObject previewMotion198Test(){
+ // Sem inicializar janela ou transporte: apenas memoria e calculo.
+ Editor model(Document{});
+ const int id=model.rectangle({10,10},20,10);
+ const auto fingerprintBefore=stateText(model.state());
+ const auto base=sim198::build(model.state());
+ check(base.moves.size()==5&&std::abs(base.cutMm-60.)<.001,
+       "Plano base do retangulo nao e deterministico");
+ const auto doubled=sim198::repeated(base,2);
+ check(doubled.moves.size()==11&&std::abs(doubled.cutMm-120.)<.001,
+       "Multipasses nao incluiu retorno virtual entre planos");
+ sim198::motion::Settings limits;
+ const auto schedule=sim198::motion::estimate(doubled,limits);
+ check(schedule.totalSeconds>0&&schedule.runs>=8,
+       "Perfil de aceleracao nao reconheceu mudancas de direcao");
+ check(schedule.endSeconds.size()==doubled.moves.size()&&
+       std::abs(schedule.endSeconds.back()-schedule.totalSeconds)<1e-7,
+       "Cronograma cumulativo inconsistente");
+ check(schedule.totalSeconds>=
+       sim198::minutes(doubled,limits.cutMmMin,limits.rapidMmMin)*60.,
+       "Cronograma cinemático menor que o tempo nominal");
+ check(sim198::motion::moveIndexAt(doubled,schedule,0)==0&&
+       sim198::motion::moveIndexAt(doubled,schedule,schedule.totalSeconds+1)==doubled.moves.size()-1,
+       "Controle de tempo nao mapeou extremos");
+ check(std::abs(sim198::motion::startStopSeconds(10.,10.,10.)-2.)<1e-9,
+       "Perfil triangular incorreto");
+ check(std::abs(sim198::motion::startStopSeconds(100.,10.,10.)-11.)<1e-9,
+       "Perfil trapezoidal incorreto");
+ bool blocked=false;
+ try{(void)sim198::repeated(base,21);}
+ catch(const std::exception&){blocked=true;}
+ check(blocked,"Modelo aceitou 21 passagens");
+ model.setLayerPreviewFlags(0,false,false);
+ check(sim198::build(model.state()).moves.empty(),
+       "Output OFF ainda gerou percursos");
+ model.setLayerPreviewFlags(0,true,false);
+ model.addLayer(1001,"T1");
+ model.moveToLayer(id,1001);
+ check(sim198::build(model.state()).moves.empty(),
+       "Guia T1 participou indevidamente da simulacao");
+ const auto restored=fromMetadata(model.state().doc,metadata(model.state()));
+ check(!restored.layers.at(1001).output,
+       "Persistencia reativou saida T1");
+ // Comparar estado antes dos calculos, nao antes da mutacao intencional de flags.
+ check(fingerprintBefore!=stateText(model.state()),"Teste de flags nao alterou estado");
+ return {{"status","PASS"},{"line_plan",true},{"two_passes_and_return",true},
+         {"triangular_trapezoid",true},{"xy_acceleration",true},
+         {"timeline_cumulative",true},{"output_off_excluded",true},
+         {"tool_layer_t1_excluded",true},{"invalid_passes_rejected",true},
+         {"hardware_commands_sent",false}};
+}
 static QJsonObject inlineTransforms198Test(const QString& directory){
  QDir().mkpath(directory);
  // O simulador nao pode receber nem exibir geometrias de guias T1/T2.
@@ -4773,6 +4824,13 @@ int main(int argc,char** argv){
   try{report=layersUngroup198Test(out);}
   catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile f(out+"/RESULTADO_CAMADAS_19_8.json");if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--simulation-motion-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=previewMotion198Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_PREVIA_MOVIMENTO_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
   f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--inline-transforms-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
