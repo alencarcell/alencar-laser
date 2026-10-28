@@ -3594,7 +3594,19 @@ static QJsonObject layersUngroup198Test(const QString& directory){
        v.editor.state().objects.at(c).group==gb,"Desfazer nao restaurou agrupamento");
  check(v.editor.redo(),"Nao foi possivel refazer desagrupamento");
  check(v.editor.state().objects.at(a).group==0,"Refazer nao separou objetos");
- const auto actual=metadata(v.editor.state());
+ // Gesto real da interface: Ctrl+U deve desagrupar novamente pela selecao.
+ const int g3=v.editor.group({a,b});
+ v.rebuild();v.clearSelection();v.selected.insert(a);
+ clickButton(w,"select");
+ const auto undoBeforeShortcut=v.editor.undoCount();
+ pressKey(w,Qt::Key_U,Qt::ControlModifier);
+ check(v.editor.state().objects.at(a).group==0&&
+       v.editor.state().objects.at(b).group==0,
+       "Ctrl+U nao desagrupou o objeto selecionado");
+ check(v.editor.undoCount()==undoBeforeShortcut+1,
+       "Ctrl+U nao foi atomico");
+ (void)g3;
+ auto actual=metadata(v.editor.state());
  for(auto& layer:actual.at("layers").as_array()){
   auto& row=layer.as_object();row.erase("mode");
  }
