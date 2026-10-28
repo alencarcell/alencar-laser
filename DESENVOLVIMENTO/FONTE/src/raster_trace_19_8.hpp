@@ -205,8 +205,8 @@ inline Result trace(const QImage& input,Options opt){
   }
   for(auto& p:ring){p.x*=mm;p.y*=mm;}
   total+=ring.size();
-  if(total>80000||out.contours.size()>=3500)
-   throw std::runtime_error("Rastreio detalhado demais: ajuste tolerancia ou recorte a imagem");
+  if(total>50000||out.contours.size()>=1000)
+   throw std::runtime_error("Rastreio acima de 50 mil nos ou 1000 contornos: aumente otimizacao, corte a imagem ou reduza ruido");
   out.contours.push_back(std::move(ring));
  }
  if(out.contours.empty())throw std::runtime_error("Nenhum contorno reconhecido; ajuste limiar/contraste");
