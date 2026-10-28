@@ -3094,7 +3094,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     label->installEventFilter(this);
     label->setFlat(true);
     label->setText(label->fontMetrics().elidedText(
-      QString("%1 · %2").arg(fullName).arg(count.at(id)),Qt::ElideRight,132));
+      QString("%1 · %2").arg(fullName).arg(count[id]),Qt::ElideRight,132));
     label->setToolTip(fullName+" — duplo clique para velocidade, potencia e M3/M4");
     label->setFixedHeight(24);
     label->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
