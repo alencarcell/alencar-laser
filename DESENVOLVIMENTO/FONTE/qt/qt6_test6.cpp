@@ -4301,6 +4301,49 @@ static QJsonObject lightburnImport198Test(const QString& directory){
 }
 
 
+
+static QJsonObject refineCurvesTrace198Test(const QString& folder){
+ QDir().mkpath(folder);
+ // Reproduz facetas no R e verifica bezier cubic adaptativo em milimetros.
+ auto r=vectorTextOutlines("R",QFont("Arial"),12.,{10,10});
+ auto o=vectorTextOutlines("O",QFont("Arial"),12.,{10,10});
+ check(!r.empty()&&o.size()>=2,"Texto R/O perdeu contornos ou vazados");
+ size_t textNodes=0;for(const auto& c:r)textNodes+=c.size();
+ check(textNodes>=30&&textNodes<=80000,"R nao possui amostragem suficiente ou explodiu de nos");
+ // Texto pequeno e texto maior devem usar tolerancia real, sem triangulacao.
+ auto small=vectorTextOutlines("R",QFont("Arial"),3.,{0,0});
+ check(!small.empty(),"R pequeno nao gerou contorno");
+ QImage bitmap(80,80,QImage::Format_ARGB32);bitmap.fill(Qt::white);
+ {
+  QPainter p(&bitmap);p.fillRect(QRect(10,10,50,50),Qt::black);
+  p.fillRect(QRect(25,25,18,18),Qt::white);
+  p.fillRect(QRect(70,70,1,1),Qt::black);
+ }
+ trace198::Options opts;opts.threshold=127;opts.minPixels=3;
+ opts.optimizePx=.45;opts.widthMm=80;
+ auto traced=trace198::trace(bitmap,opts);
+ check(traced.contours.size()>=2,"Tracer nao preservou contorno exterior e vazado");
+ check(traced.discardedComponents>=1,"Ruido isolado nao foi removido");
+ check(traced.blackPixels==50*50-18*18,"Binario P&B nao preservou pixels esperados");
+ size_t nodes=0;
+ for(const auto& ring:traced.contours)nodes+=ring.size();
+ check(nodes>5&&nodes<80000,"Contagem de nos do rastreio invalida");
+ // A coleta da Tesoura nao deve ser descartada pela allowlist silenciosamente.
+ DiagnosticsCollector collector;collector.start();
+ for(const auto* name:{"tool_scissors_activated","scissor_no_hit",
+   "scissor_no_safe_span","scissor_continuous_span_removed",
+   "vector_text_created","image_trace_started","image_trace_created"}){
+  check(collector.record(name,1),"Evento esperado nao chegou ao coletor");
+ }
+ check(collector.records().size()==7,"Historico diagnostico incompleto");
+ check(collector.counters().at("scissor_no_safe_span")==1,"Motivo da Tesoura nao contabilizado");
+ traced.binary.save(folder+"/BINARIO_19_8.png");
+ return {{"status","PASS"},{"r_nodes",double(textNodes)},
+  {"hole_contours",int(o.size())},{"trace_contours",int(traced.contours.size())},
+  {"trace_nodes",double(nodes)},{"scissor_events",int(collector.records().size())},
+  {"hardware_commands_sent",false}};
+}
+
 static QJsonObject actualLightBurnFile198Test(const QString& input){
  QFile source(input);
  check(source.open(QIODevice::ReadOnly),"Arquivo LBRN2 real nao acessivel");
@@ -4348,6 +4391,13 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--refine-curves-trace-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=refineCurvesTrace198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_REFINO_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--lbrn2-file-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=actualLightBurnFile198Test(csv);}
