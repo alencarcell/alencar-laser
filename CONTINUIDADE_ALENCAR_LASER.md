@@ -299,3 +299,13 @@ Registrar mudanças, testes e pendências.
 - **NÃO COMPILADO no Windows nesta branch; sem homologação.** Segurança: nenhuma emissão, movimento, G-code ou controle físico habilitado; manter máquina desconectada. Testes visual/Windows e desempenho em imagens reais necessários.
 - Documento: `DESENVOLVIMENTO/ESPECIFICACOES/REFINO_RASTREIO_BEZIER_DIAGNOSTICOS_19_8.md`.
 - Trabalhos ainda pendentes: curvas/arcos matematicamente nativos para TEXTO e LBRN2, Trace Image mais sofisticado (sketch/alpha/corner detection e texto pequeno), importação/exportação real de imagens persistentes, conversão de polilinha para Bézier com undo integrado e prefill de parâmetros fabris (ainda bloqueado).
+
+
+## 28/10/2026 — Hotfix de compilação Qt TESTE_19.8 (PR #10)
+
+- Evidência da captura VS Code de 28/10: compilador reportou `QtEditorLab::rasterBounds() const` e `QtEditorLab::setRasterWidthMm(double)` **privados** quando usados por `LabWindow::traceImageDialog()`. O erro `ninja: build stopped: subcommand failed` e o PowerShell código 1 foram consequências desse erro C++, não problemas de LBRN2.
+- Correção aplicada diretamente na mesma branch experimental `feat/refino-curvas-rastreio-diagnosticos-19-8`, commit `3676dbe0b4c242e6e183200c939dc331742bef9d`: `public:` apenas em frente à API raster (`setRasterWidthMm, setRasterImage, rasterImage, rasterBounds, hasRasterImage, clearRasterImage`); `private:` restaurado antes de `clearNativeItems`. Os membros `rasterSource_, rasterRect_, rasterOverlay_` permanecem privados.
+- Foi conferido estaticamente no repositório que todas as seis APIs raster estão sob `public`, e os membros internos continuam privados.
+- **A recompilação Windows ainda não foi executada após o commit.** Não afirmar PASS/homologação.
+- No terminal Windows: `git status --short` e `git pull --ff-only origin feat/refino-curvas-rastreio-diagnosticos-19-8` (apenas se a árvore de trabalho estiver segura); depois `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteRefino`.
+- Não sobrescrever alterações locais; em caso de novo erro de compilação, usar relatório `RELATORIOS/COMPILACAO/BUILD_GITHUB_19_8.txt` e a primeira linha `error:` para corrigir a causa, sem trocar para `main`.
