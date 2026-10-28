@@ -2468,7 +2468,12 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    if(buttons.count(id))buttons.at(id)->click();
   };
   view.toolWarning=[this](const QString& message){status->setText(message);};
-  shortcut("Esc",[this]{view.cancelCurrentGesture();buttons.at("select")->click();});
+  // Atalho Esc nao pode depender de run(): run() rejeita comandos durante gestos ativos.
+  auto* cancelGesture=new QShortcut(QKeySequence("Esc"),this);
+  connect(cancelGesture,&QShortcut::activated,this,[this]{
+   view.cancelCurrentGesture();
+   if(buttons.count("select"))buttons.at("select")->click();
+  });
   shortcut("V",[this]{buttons.at("select")->click();});
   shortcut("K",[this]{buttons.at("scissors")->click();});
   shortcut("Ctrl+K",[this]{buttons.at("scissors")->click();});
@@ -3300,8 +3305,16 @@ static QJsonObject editorMultitool198Test(const QString& directory){
  check(legacy&&!legacy->closed&&legacy->nodes.size()==2,
        "Gesto antigo de arrastar uma linha deixou de funcionar");
  clickScene(w,{80,25});check(v.isPolylineActive(),"Linha nao iniciou para cancelar");
+ const auto beforeEsc=stateText(v.editor.state());
+ const auto undoBeforeEsc=v.editor.undoCount();
  pressKey(w,Qt::Key_Escape);
  check(!v.isPolylineActive(),"Esc nao cancelou a linha");
+ check(stateText(v.editor.state())==beforeEsc,
+       "Esc salvou ou alterou contorno ainda incompleto");
+ check(v.editor.undoCount()==undoBeforeEsc,
+       "Esc criou passo indevido no historico");
+ check(v.tool==QtEditorLab::Tool::Select,
+       "Esc nao restaurou ferramenta Selecao");
  // Caixa: direita contem; esquerda cruza, em cima de geometria real.
  LabWindow selection(Document{});selection.show();QApplication::processEvents();
  auto& sv=selection.view;
