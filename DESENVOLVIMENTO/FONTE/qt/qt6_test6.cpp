@@ -4342,6 +4342,18 @@ static QJsonObject layerRoute198Test(){
  check(saved.name=="Linha laranja"&&saved.powerMode=="M3"&&
        saved.speedMmMin==5400.&&saved.passes==3&&saved.powerPercent==41.5,
        "Parametros de simulacao nao aplicados");
+ const auto repeatPlan=sim198::repeatedByLayer(sim198::build(model.state()),model.state(),2);
+ check(std::abs(repeatPlan.cutMm-basic.cutMm*6)<1e-7,
+       "Passes por camada multiplicados por passes globais incorretamente");
+ sim198::Plan speedProbe;
+ speedProbe.moves.push_back({{0,0},{300,0},true,0});
+ sim198::motion::Settings virtualMotion;
+ virtualMotion.cutAccelX=virtualMotion.cutAccelY=1e6;
+ const auto defaultSpeed=sim198::motion::estimate(speedProbe,virtualMotion);
+ const auto layerSpeed=sim198::motion::estimateWithFeeds(speedProbe,virtualMotion,
+     [&](int){return saved.speedMmMin;});
+ check(layerSpeed.totalSeconds<defaultSpeed.totalSeconds,
+       "Velocidade da camada nao alterou a estimativa virtual");
  const auto json=metadata(model.state());
  const auto revived=fromMetadata(model.state().doc,json);
  check(revived.layers.at(0).powerMode=="M3"&&
