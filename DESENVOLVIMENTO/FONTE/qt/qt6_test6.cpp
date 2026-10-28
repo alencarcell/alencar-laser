@@ -4095,16 +4095,16 @@ static QJsonObject inlineTransforms198Test(const QString& directory){
  for(const char* id:{"select","nodes","bezier","scissors","new_bezier",
                      "line","rectangle","ellipse","polygon","pencil","text","open_image_for_trace"}){
   auto* button=textWindow.findChild<QPushButton*>(id);
-  check(button&&!button->icon().isNull(),std::string("Icone ausente: ")+id);
+  check(button&&!button->icon().isNull(),(std::string("Icone ausente: ")+id).c_str());
   // QIcon pode conter uma imagem inteiramente transparente mesmo sem ser null.
   const QImage iconPixels=button->icon().pixmap(20,20).toImage().convertToFormat(QImage::Format_ARGB32);
   bool drawn=false;
   for(int y=0;y<iconPixels.height()&&!drawn;++y)
    for(int x=0;x<iconPixels.width();++x)if(qAlpha(iconPixels.pixel(x,y))>0){drawn=true;break;}
-  check(drawn,std::string("Glifo vazio: ")+id);
+  check(drawn,(std::string("Glifo vazio: ")+id).c_str());
   const QRect inViewport(button->mapTo(toolScroll->viewport(),QPoint{}),button->size());
   check(inViewport.left()>=0&&inViewport.right()<toolScroll->viewport()->width(),
-        std::string("Ferramenta recortada: ")+id);
+        (std::string("Ferramenta recortada: ")+id).c_str());
  }
  textWindow.grab().save(directory+"/BARRA_LATERAL_19_8.png");
  auto& tv=textWindow.view;tv.setTransform(QTransform::fromScale(4.,4.));
