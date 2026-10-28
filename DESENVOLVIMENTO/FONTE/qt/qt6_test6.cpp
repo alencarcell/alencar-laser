@@ -3993,7 +3993,7 @@ static QJsonObject lightburnImport198Test(const QString& directory){
  check(std::abs(nested.nodes[0].p.x-100.)<1e-8&&
        std::abs(nested.nodes[0].p.y-202.)<1e-8,"transformacao de grupo incorreta");
  const auto& ellipse=imported.state.doc.contours.at(2);
- check(ellipse.nodes.size()==96,"elipse nao foi convertida para pontos");
+ check(ellipse.nodes.size()==384,"elipse nao foi convertida para 384 pontos");
  const auto& path=imported.state.doc.contours.at(3);
  check(!path.closed&&path.nodes.size()==3&&std::abs(path.nodes[0].p.x-8.)<1e-8,
        "Path com segmentos retos ou XForm incorreto");
@@ -4014,14 +4014,62 @@ static QJsonObject lightburnImport198Test(const QString& directory){
  try{(void)lightburn::readGeometry(invalid);}catch(const std::runtime_error&){rejected=true;}
  check(rejected,"importador aceitou perda silenciosa de Path");
 
+
+ // Casos reais LightBurn 2.1: LineClosed, LineOpen e reuso de PrimID/VertID.
+ const QString sharedFile=temp.filePath("compartilhadas.lbrn2");
+ QFile shared(sharedFile);
+ check(shared.open(QIODevice::WriteOnly),"fixture compartilhada nao criada");
+ const QByteArray sharedXml=R"XML(<?xml version="1.0"?>
+ <LightBurnProject MirrorX="False" MirrorY="False">
+  <Shape Type="Path" CutIndex="0" PrimID="5" VertID="21">
+   <VertList>V0 0c0x1c1x1V10 0c0x1c1x1V10 10c0x1c1x1V0 10c0x1c1x1</VertList>
+   <PrimList>LineClosed</PrimList>
+  </Shape>
+  <Shape Type="Group" CutIndex="0"><Children>
+   <Shape Type="Path" CutIndex="1" PrimID="5" VertID="22">
+    <VertList>V20 0c0x1c1x1V30 0c0x1c1x1V30 10c0x1c1x1V20 10c0x1c1x1</VertList>
+   </Shape>
+   <Shape Type="Path" CutIndex="2" PrimID="9" VertID="23">
+    <VertList>V40 0c0x1c1x1V50 0c0x1c1x1</VertList>
+    <PrimList>LineOpen</PrimList>
+   </Shape>
+   <Shape Type="Path" CutIndex="3" PrimID="9" VertID="23"/>
+  </Children></Shape>
+ </LightBurnProject>)XML";
+ shared.write(sharedXml);shared.close();
+ const auto sharedResult=lightburn::readGeometry(sharedFile);
+ check(sharedResult.shapeCount==4&&sharedResult.state.doc.contours.size()==4,
+   "LineClosed/LineOpen ou PrimID compartilhado falhou");
+ check(sharedResult.state.doc.contours[0].closed&&
+       sharedResult.state.doc.contours[1].closed&&
+       !sharedResult.state.doc.contours[2].closed,
+   "Listas compactas alteraram topologia");
+ check(sharedResult.state.doc.contours[3].nodes.size()==2,
+   "VertID e PrimID compartilhados nao foram resolvidos");
+ check(sharedResult.state.objects.at(2).layer==1&&
+       sharedResult.state.objects.at(3).layer==2,
+   "Grupo aninhado perdeu camadas");
+ // Referencia sem definicao nunca e importada parcialmente.
+ const QString invalidShared=temp.filePath("prim_desconhecido.lbrn2");
+ QFile missing(invalidShared);check(missing.open(QIODevice::WriteOnly),
+   "fixture PrimID ausente nao criada");
+ missing.write(R"XML(<?xml version="1.0"?>
+ <LightBurnProject><Shape Type="Path" PrimID="77">
+  <VertList>V0 0V10 0V10 10</VertList>
+ </Shape></LightBurnProject>)XML");
+ missing.close();
+ bool noDefinitionRejected=false;
+ try{(void)lightburn::readGeometry(invalidShared);}
+ catch(const std::exception&){noDefinitionRejected=true;}
+ check(noDefinitionRejected,"PrimID desconhecido foi aceito sem geometria");
  LabWindow w(Document{});w.show();QApplication::processEvents();
  QMimeData mime;mime.setUrls({QUrl::fromLocalFile(filename)});
  QDragEnterEvent drag(QPoint(20,20),Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);
  QApplication::sendEvent(&w,&drag);
  check(drag.isAccepted(),"janela nao aceita arrastar .lbrn2");
  return {{"status","PASS"},{"rect_transform",true},{"group_transform",true},
-         {"ellipse_96_segments",true},{"path_lines",true},{"path_bezier",true},{"layers",true},{"unsupported_path_rejected",true},
-         {"drag_enter_lbrn2",true},{"hardware_commands_sent",false}};
+         {"ellipse_384_segments",true},{"path_lines",true},{"path_bezier",true},{"layers",true},{"unsupported_path_rejected",true},
+         {"drag_enter_lbrn2",true},{"lineclosed_shared_primid",true},{"shared_verts",true},{"unknown_primid_rejected",true},{"hardware_commands_sent",false}};
 }
 
 int main(int argc,char** argv){
