@@ -81,7 +81,8 @@ inline std::vector<Pt> simplifyClosed(std::vector<Pt> pts,double eps){
    const auto& prev=pts[(i+pts.size()-1)%pts.size()];
    const auto& cur=pts[i];
    const auto& after=pts[(i+1)%pts.size()];
-   const double d=pointLineDistance(cur,prev,after);
+   // Explicit namespace avoids ADL collision with a same-named geometry helper.
+   const double d=::alaser::trace198::pointLineDistance(cur,prev,after);
    if(pts.size()-next.size()>3&&d<eps){
     const double vx=prev.x-cur.x,vy=prev.y-cur.y;
     const double wx=after.x-cur.x,wy=after.y-cur.y;
