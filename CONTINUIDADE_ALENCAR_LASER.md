@@ -274,3 +274,13 @@ Registrar mudanças, testes e pendências.
 - **Status: Código publicado, scanner estrutural PASS, leitura Python do arquivo real PASS; SEM compilação/teste Qt Windows nesta branch.** Não homologar, não fazer merge, não instalar antes de PASS.
 - Referência: `DESENVOLVIMENTO/ESPECIFICACOES/IMPORTACAO_REAL_SUPORTE_ALEXA_LBRN2_19_8.md`.
 - Comandos: conferir `git status --short`, `git fetch origin`, `git switch --track origin/fix/lbrn2-real-shared-primitives-19-8` (se não houver mudanças locais a preservar), depois `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteImportacao -ArquivoLbrn2 "CAMINHO_REAL_DO_ARQUIVO"`; se PASS, `-Abrir` com o mesmo parâmetro. Manter a máquina desconectada.
+
+
+## 28/10/2026 — Falha Windows de regressão LBRN2 por elipse 96 versus 384
+
+- Captura Windows mostrou build Qt e regressões de núcleo passando até `Importacao geometrica LBRN2 (codigo 1)`, JSON: `{"error":"elipse nao foi convertida para pontos","status":"FAIL"}`.
+- Branch executada no Windows na imagem: `fix/tesoura-fechos-lbrn2-selecao-19-8` (PR #8), **não** a branch mais nova de importação LBRN2 real.
+- Causa confirmada no GitHub: `src/lightburn_geometry_import.hpp` constrói elipses com **384** pontos, enquanto o teste em `qt/qt6_test6.cpp` ainda exigia **96**. NÃO era comprovação de erro geométrico do importador.
+- Hotfix aplicado na branch antiga: commit `4c1ef6011850d7a6aa7dd3c24ed05d11918ae407`, alinhando teste a 384. A branch atual `fix/lbrn2-real-shared-primitives-19-8` já possuía a asserção de 384 e suporte adicional real a PrimID/LineClosed.
+- Recomendação: com mudanças locais preservadas, `git fetch origin`; migrar para `fix/lbrn2-real-shared-primitives-19-8`, executar `-SomenteImportacao -ArquivoLbrn2 "<arquivo .lbrn2 do cliente>"`; só depois de PASS executar a suíte `-Abrir`.
+- **Correção no GitHub sem execução Windows nesta resposta**; não marcar homologada. Arquivo original e versão homologada preservados.
