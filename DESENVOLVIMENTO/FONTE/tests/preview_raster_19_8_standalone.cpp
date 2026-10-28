@@ -28,6 +28,10 @@ int main(){
  sim198::Plan off;sim198::raster::appendFill(off,scene.state(),cfg);
  assert(off.moves.empty());
  scene.setLayerPreviewFlags(0,true,false);
+ scene.setLayerFlags(0,false,false); // Show OFF must NOT disable Output
+ sim198::Plan hidden;sim198::raster::appendFill(hidden,scene.state(),cfg);
+ assert(std::abs(hidden.cutMm-84.)<1e-8);
+ scene.setLayerFlags(0,true,false);
  scene.addLayer(1001,"T1");
  scene.moveToLayer(outer,1001);
  sim198::Plan guide;sim198::raster::appendFill(guide,scene.state(),cfg);
