@@ -4473,6 +4473,25 @@ static QJsonObject inlineTransforms198Test(const QString& directory){
  check(timingEditor.state().doc.contours.size()==1,
        "O planejador modificou a geometria de origem");
 
+ // Controle de largura visivel da lista com camadas ocupadas.
+ {
+  LabWindow compactWindow(Document{});
+  compactWindow.show();QApplication::processEvents();
+  compactWindow.view.editor.rectangle({5,5},10,10);
+  compactWindow.view.rebuild();compactWindow.refresh();QApplication::processEvents();
+  auto* row=compactWindow.findChild<QWidget*>("layer_row_0");
+  auto* label=compactWindow.findChild<QPushButton*>("layer_select_0");
+  check(row&&row->height()<=26&&label&&
+        label->property("layer_config_id").toInt()==0,
+        "Lista de camadas ocupadas nao ficou compacta/duplo clique disponivel");
+  for(const char* code:{"S","V","A"}){
+   auto* cb=compactWindow.findChild<QCheckBox*>(
+      QString("layer_%1_0").arg(QString::fromLatin1(code)));
+   check(cb&&cb->width()<=22&&cb->height()<=22,
+      "Checkbox S/V/A ainda ocupa espaco excessivo");
+  }
+  compactWindow.close();
+ }
  LabWindow textWindow(Document{});textWindow.show();QApplication::processEvents();
  // Teste de viewport: barra lateral nao pode recortar icones horizontalmente.
  auto* toolScroll=textWindow.findChild<QScrollArea*>("toolScroll");
