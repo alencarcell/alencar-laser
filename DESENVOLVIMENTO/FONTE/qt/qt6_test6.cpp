@@ -201,6 +201,8 @@ class QtEditorLab final:public QGraphicsView{
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
  std::vector<Pt> pencilPoints_;
  bool polylineDrawing_=false;
+ bool polylineStartedOnPress_=false;
+ QPointF polylineDown_{};
  std::vector<Pt> polylinePoints_;
  QPointF polylineCursor_{};
  QGraphicsPathItem* polylinePreview_=nullptr;
@@ -347,7 +349,7 @@ class QtEditorLab final:public QGraphicsView{
   if(stateChanged)stateChanged();
  }
  void clearPolyline(){
-  polylineDrawing_=false;polylinePoints_.clear();
+  polylineDrawing_=false;polylineStartedOnPress_=false;polylinePoints_.clear();
   if(polylinePreview_){scene_.removeItem(polylinePreview_);delete polylinePreview_;polylinePreview_=nullptr;}
   viewport()->update();
  }
@@ -1014,11 +1016,13 @@ void mousePressEvent(QMouseEvent* e)override{
    Pt at=snapPolyline(fromQt(mapToScene(e->position().toPoint())),
                       e->modifiers().testFlag(Qt::ShiftModifier));
    if(!polylineDrawing_){
-    polylineDrawing_=true;polylinePoints_={at};polylineCursor_=toQt(at);
+    polylineDrawing_=true;polylineStartedOnPress_=true;polylineDown_=e->position();
+    polylinePoints_={at};polylineCursor_=toQt(at);
     QPen pen(QColor(25,156,225),1.5,Qt::DashLine);pen.setCosmetic(true);
     polylinePreview_=scene_.addPath(QPainterPath(),pen);
     polylinePreview_->setZValue(30);polylinePreview_->setAcceptedMouseButtons(Qt::NoButton);
    }else{
+    polylineStartedOnPress_=false;
     const QPointF firstPx=viewportTransform().map(toQt(polylinePoints_.front()));
     const bool close=polylinePoints_.size()>=3&&QLineF(firstPx,e->position()).length()<=10.;
     if(close){finishPolyline(true);e->accept();return;}
@@ -1154,6 +1158,18 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    e->accept();return;
   }
   if(marqueeActive_){finishMarquee(e->position(),e->modifiers());e->accept();return;}
+  if(tool==Tool::Line&&polylineDrawing_){
+   // Mantem gesto legada: arrastar logo no primeiro segmento cria uma linha.
+   if(polylineStartedOnPress_&&QLineF(polylineDown_,e->position()).length()>4.){
+    const Pt at=snapPolyline(fromQt(mapToScene(e->position().toPoint())),
+                             e->modifiers().testFlag(Qt::ShiftModifier));
+    if(dist(polylinePoints_.front(),at)>1e-6){
+     polylinePoints_.push_back(at);
+     finishPolyline(false);
+    }
+   }
+   polylineStartedOnPress_=false;e->accept();return;
+  }
   if(shapeDragging_){
    const QPointF delta=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
    clearShapePreview();
