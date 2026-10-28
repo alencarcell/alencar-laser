@@ -4072,6 +4072,36 @@ static QJsonObject lightburnImport198Test(const QString& directory){
          {"drag_enter_lbrn2",true},{"lineclosed_shared_primid",true},{"shared_verts",true},{"unknown_primid_rejected",true},{"hardware_commands_sent",false}};
 }
 
+
+static QJsonObject actualLightBurnFile198Test(const QString& input){
+ QFile source(input);
+ check(source.open(QIODevice::ReadOnly),"Arquivo LBRN2 real nao acessivel");
+ const QByteArray bytes=source.readAll();source.close();
+ const QString sha=QString::fromLatin1(QCryptographicHash::hash(
+  bytes,QCryptographicHash::Sha256).toHex());
+ const auto imported=lightburn::readGeometry(input);
+ validate(imported.state);
+ const auto rerun=lightburn::readGeometry(input);
+ check(serialize(encode(imported.state.doc))==serialize(encode(rerun.state.doc)),
+  "Importacao real nao deterministica");
+ int closed=0;
+ for(const auto& c:imported.state.doc.contours)if(c.closed)closed++;
+ const int nodes=int(countNodes(imported.state.doc));
+ const bool known=sha=="3336269e9bae2aa5cb2778123ff7ffea2ea1a8a515d2aca648fb44e22ebbad06";
+ if(known){
+  check(imported.shapeCount==17&&nodes==1331&&closed==13,
+   "SUPORTE PRA ALEXA: importacao incompleta ou geometria diferente do arquivo real");
+  check(imported.state.doc.contours.size()==17,
+   "SUPORTE PRA ALEXA: 17 formas editaveis nao preservadas");
+ }
+ // Nao grava no arquivo origem; nenhum envio ao laser.
+ return {{"status","PASS"},{"source_sha256",sha},
+  {"identified_uploaded_fixture",known},{"shape_count",imported.shapeCount},
+  {"node_count",nodes},{"closed_paths",closed},
+  {"layers",int(imported.state.layers.size())},
+  {"deterministic",true},{"hardware_commands_sent",false}};
+}
+
 int main(int argc,char** argv){
  QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";if(mode=="--recovery-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
@@ -4083,6 +4113,13 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--lbrn2-file-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=actualLightBurnFile198Test(csv);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_LBRN2_REAL_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--scissor-closures-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=scissorClosures198Test(out);}
