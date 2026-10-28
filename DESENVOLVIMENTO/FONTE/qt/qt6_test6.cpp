@@ -4305,6 +4305,71 @@ static QJsonObject previewRaster198Test(){
     {"size_limits_enforced",true},{"hardware_commands_sent",false}};
 }
 
+static QJsonObject layerRoute198Test(){
+ Editor model(Document{});
+ const int a=model.rectangle({10,10},2,2);
+ const int b=model.rectangle({250,10},2,2);
+ const int c=model.rectangle({18,10},2,2);
+ (void)a;(void)b;(void)c;
+ const auto before=stateText(model.state());
+ const auto basic=sim198::build(model.state());
+ const auto route=sim198::route::nearestNeighborLines(model.state());
+ check(route.travelMm+1e-5<basic.travelMm,
+       "Rota heuristica nao reduziu viagem na fixture ordenada mal");
+ check(std::abs(route.cutMm-basic.cutMm)<1e-8,
+       "Otimizacao modificou comprimento dos desenhos");
+ check(before==stateText(model.state()),"Rota modificou documento real");
+ const auto beforeUndo=model.undoCount();
+ const auto beforeLayer=model.state().layers.at(0);
+ Layer edited=beforeLayer;
+ edited.name="Linha laranja";
+ edited.speedMmMin=5400.;edited.powerPercent=41.5;
+ edited.passes=3;edited.powerMode="M3";
+ model.configureLayer(0,edited);
+ check(model.undoCount()==beforeUndo+1,
+       "Configuracoes da camada nao geraram unica transacao undo");
+ const auto& saved=model.state().layers.at(0);
+ check(saved.name=="Linha laranja"&&saved.powerMode=="M3"&&
+       saved.speedMmMin==5400.&&saved.passes==3&&saved.powerPercent==41.5,
+       "Parametros de simulacao nao aplicados");
+ const auto json=metadata(model.state());
+ const auto revived=fromMetadata(model.state().doc,json);
+ check(revived.layers.at(0).powerMode=="M3"&&
+       revived.layers.at(0).powerPercent==41.5&&revived.layers.at(0).passes==3,
+       "Parametros M3, passes ou potencia perdidos no metadata roundtrip");
+ auto legacy=json;
+ for(auto& item:legacy["layers"].as_array()){
+  auto& l=item.as_object();
+  l.erase("speedMmMin");l.erase("powerPercent");l.erase("passes");l.erase("powerMode");
+ }
+ const auto readLegacy=fromMetadata(model.state().doc,legacy);
+ check(readLegacy.layers.at(0).powerMode=="M4"&&
+       readLegacy.layers.at(0).speedMmMin==3000.&&
+       readLegacy.layers.at(0).powerPercent==20.&&readLegacy.layers.at(0).passes==1,
+       "Projetos antigos nao receberam defaults M4 compativeis");
+ const auto undone=model.undo();
+ check(undone&&model.state().layers.at(0).powerMode=="M4"&&
+       model.state().layers.at(0).passes==1,
+       "Undo nao restaurou configuracao antiga");
+ check(model.redo()&&model.state().layers.at(0).powerMode=="M3",
+       "Redo nao reaplicou M3");
+ bool denied=false;
+ try{auto impossible=edited;impossible.powerPercent=101;model.configureLayer(0,impossible);}
+ catch(const std::exception&){denied=true;}
+ check(denied,"Potencia fora de 0-100 foi aceita");
+ model.addLayer(1001,"T1");
+ denied=false;
+ try{model.configureLayer(1001,edited);}catch(const std::exception&){denied=true;}
+ check(denied,"Camada T1 aceitou potencia fisica");
+ model.moveToLayer(a,1001);
+ const auto toolSafe=sim198::route::nearestNeighborLines(model.state());
+ check(toolSafe.cutMm<route.cutMm,"T1 nao foi excluida da rota");
+ return {{"status","PASS"},{"nearest_neighbor_reduces_travel",true},
+  {"route_is_non_destructive",true},{"layer_settings_one_undo",true},
+  {"m3_m4_metadata_roundtrip",true},{"legacy_m4_default",true},
+  {"tool_layers_no_output",true},{"invalid_power_rejected",true},
+  {"hardware_commands_sent",false}};
+}
 static QJsonObject previewMotion198Test(){
  // Sem inicializar janela ou transporte: apenas memoria e calculo.
  Editor model(Document{});
@@ -4943,6 +5008,13 @@ int main(int argc,char** argv){
   try{report=previewRaster198Test();}
   catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile f(out+"/RESULTADO_PREVIA_RASTER_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--layer-route-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=layerRoute198Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_CAMADA_ROTA_19_8.json");
   if(!f.open(QIODevice::WriteOnly))return 2;
   f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--simulation-motion-19-8-test"){
