@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas)
+param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteGestos)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -60,6 +60,19 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteGestos) {
+        Write-Host 'TESTE FOCADO: linha continua, selecao por area e menu contextual.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt dos gestos'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\gestos'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --gestures-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Gestos de editor' (Join-Path $destino 'RESULTADO_GESTOS_19_8.json')
+        Write-Host 'Gestos Qt PASS. Teste visual manual ainda obrigatorio.' -ForegroundColor Green
+        return
+    }
     if ($SomenteFerramentas) {
         Write-Host 'TESTE FOCADO: Texto vetorial e Lapis experimental.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test7_qt6
@@ -145,6 +158,10 @@ try {
     & $app --drawing-tools-19-8-test $fixture $dirDesenho
     Checar-ResultadoQt 'Texto e Lapis Qt' (Join-Path $dirDesenho 'RESULTADO_TEXTO_LAPIS_19_8.json')
 
+    $dirGestos = Join-Path $destino 'gestos'
+    New-Item -ItemType Directory -Path $dirGestos -Force | Out-Null
+    & $app --gestures-19-8-test $fixture $dirGestos
+    Checar-ResultadoQt 'Gestos avancados Qt 19.8' (Join-Path $dirGestos 'RESULTADO_GESTOS_19_8.json')
     Write-Host 'BUILD E REGRESSOES AUTOMATIZADAS PASSARAM. AVALIACAO VISUAL AINDA NECESSARIA.' -ForegroundColor Green
     if ($Abrir) {
         Write-Host 'Abrindo editor em modo de desenvolvimento; mantenha o laser desconectado.' -ForegroundColor Yellow
