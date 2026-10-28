@@ -112,10 +112,17 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  column->addLayout(rasterControls);
  auto* optimizeTravel=new QCheckBox("Reduzir deslocamentos (heuristica local por camada)");
  optimizeTravel->setToolTip("Vizinho mais proximo; reordena apenas Line, nao garante a rota global mais curta. Sem modificar o projeto.");
+ auto* innerFirst=new QCheckBox("Contornos internos primeiro (corte virtual)");
+ innerFirst->setObjectName("preview_inner_first");
+ innerFirst->setChecked(true);
+ innerFirst->setEnabled(false);
+ innerFirst->setToolTip("Somente formas estritamente contidas por contornos fechados da mesma camada; pode aumentar deslocamentos.");
+ QObject::connect(optimizeTravel,&QCheckBox::toggled,innerFirst,&QWidget::setEnabled);
  auto* useLayerFeeds=new QCheckBox("Utilizar velocidades virtuais salvas por camada");
  useLayerFeeds->setChecked(true);
  useLayerFeeds->setToolTip("Velocidade e passes de cada camada influenciam a simulacao. Potencia/M3/M4 continuam apenas registrados.");
- column->addWidget(optimizeTravel);column->addWidget(useLayerFeeds);
+ column->addWidget(optimizeTravel);column->addWidget(innerFirst);
+ column->addWidget(useLayerFeeds);
  auto* stats=new QLabel;stats->setWordWrap(true);column->addWidget(stats);
  auto* canvas=new QLabel;canvas->setMinimumHeight(280);
  canvas->setAlignment(Qt::AlignCenter);column->addWidget(canvas,1);
@@ -141,6 +148,8 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  QTimer clock(&dialog);clock.setInterval(60);
  QElapsedTimer elapsedClock;
  double playbackTime=0;
+ std::size_t nestedPairs=0;
+ double optimizedLineTravelMm=sourcePlan.travelMm;
  auto stop=[&](){
   clock.stop();play->setText("▶ Reproduzir");
  };
@@ -194,9 +203,11 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    scan.intervalMm=interval->value();
    scan.overscanMm=overscan->value();
    scan.bidirectional=bidirectional->isChecked();
+   nestedPairs=0;
    Plan combined=optimizeTravel->isChecked()?
-      route::nearestNeighborLines(source):sourcePlan;
-   const double optimizedLineTravelMm=combined.travelMm;
+      route::nearestNeighborLines(source,300000,1500,innerFirst->isChecked(),&nestedPairs):
+      sourcePlan;
+   optimizedLineTravelMm=combined.travelMm;
    if(enableFill->isChecked()){
     raster::appendFill(combined,source,scan);
     combined.ignoredFill=0; // Fill vetorial incluido; contornos abertos nao geram hatch.
@@ -238,13 +249,15 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    stats->setText(QString("Movimento virtual ativo %1 mm | viagem %2 mm | tempo nominal %3 s | "
      "tempo c/ aceleracao %4 s | grupos %5 | "
      "Fill omitido %6, Saida off %7, T1/T2 %8. "
-     "Rota linha original %9 mm, otimizada %10 mm (heuristica). "
-     "Passes por camada e globais simulados. M3/M4 e potencia salvos, sem emissao.")
+     "Viagem original Line %9 mm; caminho escolhido %10 mm; "
+     "restricoes interno-antes-externo %11. "
+     "A precedencia pode aumentar a viagem. M3/M4 apenas referencia.")
      .arg(shown.cutMm,0,'f',1).arg(shown.travelMm,0,'f',1)
      .arg(nominal,0,'f',1).arg(timeline.totalSeconds,0,'f',1)
      .arg(qulonglong(timeline.runs)).arg(qulonglong(shown.ignoredFill))
      .arg(qulonglong(shown.ignoredDisabled)).arg(qulonglong(shown.ignoredTool))
-     .arg(sourcePlan.travelMm,0,'f',1).arg(optimizedLineTravelMm,0,'f',1));
+     .arg(sourcePlan.travelMm,0,'f',1).arg(optimizedLineTravelMm,0,'f',1)
+     .arg(qulonglong(nestedPairs)));
    play->setEnabled(!shown.moves.empty()&&timeline.totalSeconds>0);
    render();
   }catch(const std::exception& e){
@@ -267,9 +280,11 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"global_passes",passes->value()},
    {"layer_passes_applied",true},
    {"route_heuristic_enabled",optimizeTravel->isChecked()},
+   {"inner_first_enabled",optimizeTravel->isChecked()&&innerFirst->isChecked()},
+   {"strict_nesting_constraints",int(nestedPairs)},
+   {"inner_first_only_same_layer",true},
    {"line_travel_original_mm",sourcePlan.travelMm},
-   {"line_travel_optimized_mm",optimizeTravel->isChecked()?
-      route::nearestNeighborLines(source).travelMm:sourcePlan.travelMm},
+   {"line_travel_optimized_mm",optimizedLineTravelMm},
    {"layer_feed_enabled",useLayerFeeds->isChecked()},
    {"layer_parameters_are_not_machine_commands",true},
    {"fill_simulation_enabled",enableFill->isChecked()},
@@ -310,7 +325,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  for(auto* box:{interval,overscan})
   QObject::connect(box,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
                    &dialog,[&](double){recalculate();});
- for(auto* checkbox:{enableFill,enableImage,bidirectional,optimizeTravel,useLayerFeeds})
+ for(auto* checkbox:{enableFill,enableImage,bidirectional,optimizeTravel,innerFirst,useLayerFeeds})
   QObject::connect(checkbox,&QCheckBox::toggled,&dialog,[&](bool){recalculate();});
  QObject::connect(bitmapMode,QOverload<int>::of(&QComboBox::currentIndexChanged),
                   &dialog,[&](int){recalculate();});
