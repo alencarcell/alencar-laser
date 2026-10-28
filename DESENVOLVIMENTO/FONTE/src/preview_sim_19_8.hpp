@@ -83,6 +83,51 @@ inline Plan repeated(const Plan& single,int passes,size_t maxMoves=300000){
  }
  return output;
 }
+// Preview-only passes. Repeats each contiguous group of one layer according
+// to its saved pass count; then repeats the overall job by globalPasses.
+// This is a simple ordering approximation, NOT LightBurn sub-layer scheduling.
+inline Plan repeatedByLayer(const Plan& base,const EditorState& state,int globalPasses,
+                            std::size_t cap=300000){
+ if(globalPasses<1||globalPasses>20)
+  throw std::runtime_error("Passagens globais virtuais fora do limite");
+ Plan out;
+ out.ignoredFill=base.ignoredFill;out.ignoredDisabled=base.ignoredDisabled;
+ out.ignoredTool=base.ignoredTool;
+ auto append=[&](Pt next,bool laser,int layer){
+  const Pt from=out.moves.empty()?Pt{}:out.moves.back().to;
+  const double d=std::hypot(next.x-from.x,next.y-from.y);
+  if(!std::isfinite(d))throw std::runtime_error("Passagem virtual invalida");
+  if(d<1e-10)return;
+  if(out.moves.size()>=cap)throw std::runtime_error("Limite virtual de movimentos excedido");
+  out.moves.push_back({from,next,laser,layer});
+  if(laser)out.cutMm+=d;else out.travelMm+=d;
+ };
+ for(int global=0;global<globalPasses;++global){
+  for(std::size_t first=0;first<base.moves.size();){
+   const int layer=base.moves[first].layer;
+   std::size_t end=first+1;
+   while(end<base.moves.size()&&base.moves[end].layer==layer)++end;
+   int pass=1;
+   const auto it=state.layers.find(layer);
+   if(it!=state.layers.end())pass=it->second.passes;
+   if(pass<1||pass>20)throw std::runtime_error("Passagem de camada invalida");
+   for(int turn=0;turn<pass;++turn){
+    for(std::size_t i=first;i<end;++i){
+     const auto& m=base.moves[i];
+     const Pt current=out.moves.empty()?Pt{}:out.moves.back().to;
+     // At the start of a repeated group, avoid returning to the old
+     // group's travel origin: go directly to the first destination.
+     if(i==first&&!m.laser){append(m.to,false,layer);continue;}
+     if(std::hypot(current.x-m.from.x,current.y-m.from.y)>1e-9)
+      append(m.from,false,layer);
+     append(m.to,m.laser,layer);
+    }
+   }
+   first=end;
+  }
+ }
+ return out;
+}
 inline double minutes(const Plan& plan,double cutMmMin,double rapidMmMin){
  if(!std::isfinite(cutMmMin)||!std::isfinite(rapidMmMin)||cutMmMin<=0||rapidMmMin<=0)
   throw std::runtime_error("Velocidades virtuais invalidas");
