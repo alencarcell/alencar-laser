@@ -3026,6 +3026,91 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   field->show();field->raise();field->setFocus(Qt::MouseFocusReason);
    status->setText("Texto direto: digite no desenho; Enter/Esc conclui; trocar ferramenta cancela campo vazio.");
  }
+
+ void loadRasterFromFile(const QString& file){
+  QImage image(file);
+  if(image.isNull())throw std::runtime_error("Imagem nao suportada (PNG/JPG/BMP/WebP)");
+  view.setRasterImage(image);
+  status->setText("Imagem importada. Clique direito na mesa > Tracar imagem (Alt+T).");
+ }
+ void traceImageDialog(){
+  if(!view.hasRasterImage()){status->setText("Importe uma imagem primeiro.");return;}
+  if(view.busy()){status->setText("Conclua o gesto atual antes de rastrear.");return;}
+  captureEvent("image_trace_started");
+  QDialog dlg(this);dlg.setWindowTitle("Rastrear imagem — P&B / Alencar Laser 19.8");
+  dlg.resize(550,580);auto* layout=new QVBoxLayout(&dlg);
+  auto* form=new QFormLayout;layout->addLayout(form);
+  auto* threshold=new QSlider(Qt::Horizontal);threshold->setRange(1,254);
+  threshold->setValue(std::clamp(trace198::otsuThreshold(trace198::grayscale(
+   view.rasterImage().scaled(960,960,Qt::KeepAspectRatio,Qt::SmoothTransformation))),1,254));
+  auto* minPixels=new QSpinBox;minPixels->setRange(1,500);minPixels->setValue(5);
+  auto* optimize=new QDoubleSpinBox;optimize->setRange(0,2);optimize->setDecimals(2);optimize->setSingleStep(.1);optimize->setValue(.45);
+  auto* smooth=new QCheckBox("Arredondamento leve (pode deformar cantos)");
+  auto* width=new QDoubleSpinBox;width->setRange(1,400);width->setSuffix(" mm");width->setValue(view.rasterBounds().width());
+  form->addRow("Limiar P&B",threshold);form->addRow("Ignorar ilhas menores",minPixels);
+  form->addRow("Otimizar (px)",optimize);form->addRow("Suavizar",smooth);
+  form->addRow("Largura física",width);
+  auto* preview=new QLabel("Clique em Previsualizar para calcular os vetores");
+  preview->setObjectName("trace_preview");preview->setMinimumHeight(280);
+  preview->setAlignment(Qt::AlignCenter);
+  preview->setStyleSheet("background:#fff;color:#202020;border:1px solid #666;");
+  layout->addWidget(preview,1);
+  auto* information=new QLabel("Limite 80 mil nós. Arquivo de imagem original nunca é alterado.");
+  information->setWordWrap(true);layout->addWidget(information);
+  auto* previewButton=new QPushButton("Previsualizar vetores (roxo)");layout->addWidget(previewButton);
+  auto* actions=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
+  auto* okay=actions->button(QDialogButtonBox::Ok);okay->setText("Criar traçado");okay->setEnabled(false);
+  layout->addWidget(actions);
+  std::optional<trace198::Result> prepared;
+  auto stale=[&]{prepared.reset();okay->setEnabled(false);information->setText("Atualize a prévia após alterar parâmetros.");};
+  connect(threshold,&QSlider::valueChanged,&dlg,[&](int){stale();});
+  connect(minPixels,QOverload<int>::of(&QSpinBox::valueChanged),&dlg,[&](int){stale();});
+  connect(optimize,QOverload<double>::of(&QDoubleSpinBox::valueChanged),&dlg,[&](double){stale();});
+  connect(width,QOverload<double>::of(&QDoubleSpinBox::valueChanged),&dlg,[&](double){stale();});
+  connect(smooth,&QCheckBox::toggled,&dlg,[&](bool){stale();});
+  connect(previewButton,&QPushButton::clicked,&dlg,[&]{
+   try{
+    trace198::Options opts;opts.threshold=threshold->value();
+    opts.minPixels=minPixels->value();opts.optimizePx=optimize->value();
+    opts.smooth=smooth->isChecked();opts.widthMm=width->value();
+    prepared=trace198::trace(view.rasterImage(),opts);
+    const QSize target=prepared->binary.size().scaled(QSize(460,320),Qt::KeepAspectRatio);
+    QImage image=prepared->binary.scaled(target,Qt::IgnoreAspectRatio,Qt::FastTransformation)
+       .convertToFormat(QImage::Format_ARGB32);
+    QPainter painter(&image);painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(QColor("#A200E2"),1.2));painter.setBrush(Qt::NoBrush);
+    const double scale=target.width()/opts.widthMm;
+    size_t nodes=0;
+    for(const auto& path:prepared->contours){
+     if(path.empty())continue;nodes+=path.size();
+     QPainterPath vector;vector.moveTo(path.front().x*scale,path.front().y*scale);
+     for(size_t i=1;i<path.size();++i)
+      vector.lineTo(path[i].x*scale,path[i].y*scale);
+     vector.closeSubpath();painter.drawPath(vector);
+    }
+    painter.end();preview->setPixmap(QPixmap::fromImage(image));
+    information->setText(QString("%1 contornos, %2 nós; %3 pequenos componentes removidos. Revisar texto pequeno.")
+      .arg(prepared->contours.size()).arg(nodes).arg(prepared->discardedComponents));
+    okay->setEnabled(true);
+   }catch(const std::exception& e){
+    prepared.reset();okay->setEnabled(false);
+    information->setText(QString("Rastreio recusado: %1").arg(QString::fromUtf8(e.what())));
+   }
+  });
+  connect(actions,&QDialogButtonBox::accepted,&dlg,&QDialog::accept);
+  connect(actions,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
+  if(dlg.exec()!=QDialog::Accepted||!prepared){captureEvent("image_trace_cancelled");return;}
+  const QRectF anchor=view.rasterBounds();
+  auto contours=std::move(prepared->contours);
+  for(auto& poly:contours)for(auto& p:poly){p.x+=anchor.left();p.y+=anchor.top();}
+  const int count=int(contours.size());
+  view.editor.addContours(std::move(contours),true,layers->currentData().toInt());
+  view.setRasterWidthMm(width->value());
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  recoveryPolicy_.edited();captureEvent("image_trace_created",count);
+  refresh();
+  status->setText(QString("%1 contornos adicionados. Imagem original somente como referencia.").arg(count));
+ }
  void openOther(){
   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
    projectPath,"Projetos de desenho (*.alaser *.lbrn2);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2)");
