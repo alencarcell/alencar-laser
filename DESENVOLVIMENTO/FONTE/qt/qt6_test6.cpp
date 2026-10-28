@@ -16,6 +16,7 @@
 #include "integrated_project_edit.hpp"
 #include "bezier_interaction.hpp"
 #include "raster_trace_19_8.hpp"
+#include "preview_dialog_19_8.hpp"
 #include "render_chunks.hpp"
 #include <QApplication>
 #include <QGraphicsView>
@@ -2213,6 +2214,10 @@ public:
    if(bezierToolActive_&&curves){if(curves->dragging())return;view.nativeHistory(true);status->setText("Bézier: refeito");}
    else view.history(true);
   });
+  add(quickRow,"preview_virtual","Prévia virtual",[this]{
+   alaser::sim198::showPreviewDialog(this,view.editor.state(),
+       workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight);
+  })->setToolTip("Simular caminhos Line e tempo nominal. Nenhum envio físico.");
   quickRow->addStretch();
   // Referências em SOMENTE LEITURA: sem mutação no Editor, sem movimento e sem G-code.
   auto* referenceMenuButton=new QToolButton;
@@ -4163,6 +4168,25 @@ static QJsonObject layersUngroup198Test(const QString& directory){
 }
 static QJsonObject inlineTransforms198Test(const QString& directory){
  QDir().mkpath(directory);
+ // O simulador nao pode receber nem exibir geometrias de guias T1/T2.
+ Editor previewEditor(Document{});
+ const int previewId=previewEditor.rectangle({10,10},20,10);
+ auto plan=sim198::build(previewEditor.state());
+ check(plan.moves.size()==5&&std::abs(plan.cutMm-60.)<.01,
+       "Simulador Line: comprimento incorreto");
+ previewEditor.setLayerPreviewFlags(0,false,false);
+ check(sim198::build(previewEditor.state()).moves.empty(),
+       "Camada com Saida off entrou no plano");
+ previewEditor.setLayerPreviewFlags(0,true,true);
+ previewEditor.addLayer(1001,"T1");
+ previewEditor.setLayerPreviewFlags(1001,false,false);
+ previewEditor.moveToLayer(previewId,1001);
+ check(sim198::build(previewEditor.state()).moves.empty(),
+       "T1 indevidamente incluída no plano");
+ const auto reloaded=fromMetadata(previewEditor.state().doc,metadata(previewEditor.state()));
+ check(!reloaded.layers.at(1001).output&&reloaded.layers.at(0).air,
+       "Metadata Output/Air nao foi preservada");
+
  LabWindow textWindow(Document{});textWindow.show();QApplication::processEvents();
  // Teste de viewport: barra lateral nao pode recortar icones horizontalmente.
  auto* toolScroll=textWindow.findChild<QScrollArea*>("toolScroll");
