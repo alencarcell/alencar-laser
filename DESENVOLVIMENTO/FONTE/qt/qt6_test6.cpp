@@ -2734,6 +2734,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   };
   auto* fileMenu=mainMenu->addMenu("Arquivo");
   command(fileMenu,"Abrir projeto...","open");
+  connect(fileMenu->addAction("Importar imagem (PNG/JPG/BMP/WebP)…"),
+    &QAction::triggered,this,[this]{
+    if(auto* button=findChild<QPushButton*>("open_image_for_trace"))button->click();
+  });
   connect(fileMenu->addAction("Abrir último projeto (manual)"),&QAction::triggered,this,[this]{
    run([this]{
     const QString path=QSettings("AlencarLaser","DesktopBeta").value("files/lastProject").toString();
@@ -2894,6 +2898,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   shortcut("Ctrl+R",[this]{buttons.at("rectangle")->click();});
   shortcut("P",[this]{buttons.at("pencil")->click();});
   shortcut("T",[this]{buttons.at("text")->click();});
+  shortcut("Alt+T",[this]{traceImageDialog();});
   shortcut("Ctrl+E",[this]{buttons.at("ellipse")->click();});
   shortcut("Ctrl+L",[this]{buttons.at("move_layer")->click();});
    shortcut("Ctrl+D",[this]{buttons.at("duplicate_obj")->click();});
