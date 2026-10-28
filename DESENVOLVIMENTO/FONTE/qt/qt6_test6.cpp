@@ -4167,6 +4167,70 @@ static QJsonObject editorMultitool198Test(const QString& directory){
          {"marquee_enclosing_and_crossing",true},
          {"multi_selection_modifiers",true},{"hardware_commands_sent",false}};
 }
+// Testes Qt sem maquina: silhuetas, vazados, letras pequenas, preview,
+// grupo atomico, cabeçalho e evento especifico de clique da Tesoura.
+static QJsonObject traceEditor198Test(const QString& directory){
+ QDir().mkpath(directory);
+ QImage raster(80,62,QImage::Format_ARGB32);
+ raster.fill(Qt::white);
+ for(int y=10;y<45;++y)for(int x=10;x<55;++x)raster.setPixelColor(x,y,Qt::black);
+ for(int y=19;y<35;++y)for(int x=24;x<40;++x)raster.setPixelColor(x,y,Qt::white);
+ // Ruido isolado de um pixel: deve sumir.
+ raster.setPixelColor(1,1,Qt::black);
+ // Pequena haste e um ponto separado proximo = letra 'i'.
+ for(int y=16;y<=25;++y)raster.setPixelColor(65,y,Qt::black);
+ raster.setPixelColor(65,11,Qt::black);
+ rastertrace::Settings cfg;cfg.autoThreshold=true;cfg.minimumComponent=2;
+ cfg.protectSmallText=true;cfg.simplifyPx=0.35;
+ auto traced=rastertrace::trace(raster,{5,7},.2,cfg);
+ check(traced.loops.size()>=4,"Trace deixou de gerar contorno, vazado ou ponto do i");
+ check(traced.ignored>=1,"Trace nao eliminou ruído isolado");
+ check(traced.nodes>15&&traced.nodes<2000,"Trace gerou quantidade anormal de nos");
+ for(const auto& ring:traced.loops){
+  check(ring.size()>=3,"Trace gerou contorno degenerado");
+  for(const auto& p:ring)
+   check(p.x>=5&&p.x<=21&&p.y>=7&&p.y<=19.4,"Trace saiu da borda da imagem");
+ }
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ auto& v=w.view;
+ const auto old=stateText(v.editor.state());
+ v.setTraceRaster(raster,{5,7},.2);
+ check(v.hasTraceRaster(),"Overlay raster nao entrou na viewport");
+ v.rebuild();check(v.hasTraceRaster(),"Overlay raster sumiu durante rebuild");
+ check(stateText(v.editor.state())==old,"Raster temporario modificou documento");
+ const auto oldUndo=v.editor.undoCount();
+ auto added=v.editor.addContours(traced.loops,true,0,true);
+ check(added.size()==traced.loops.size(),"Contornos rastreados nao foram adicionados");
+ check(v.editor.undoCount()==oldUndo+1,"Trace nao gerou undo unico");
+ const int groupId=v.editor.state().objects.at(added[0]).group;
+ check(groupId>0,"Trace multiplo nao criou grupo");
+ for(int id:added)check(v.editor.state().objects.at(id).group==groupId,
+    "Trace nao preservou grupo completo");
+ v.clearTraceRaster();check(!v.hasTraceRaster(),"Overlay nao foi removido");
+ check(v.editor.undo()&&stateText(v.editor.state())==old,
+   "Undo de rastreamento nao restaurou geometria");
+ // Melhoria da letra R: vetor deve conter detalhamento alto, nao triangulos grosseiros.
+ const auto textR=vectorTextOutlines("R",QFont("Arial",12),12.,{20,20});
+ size_t textNodes=0;for(const auto& p:textR)textNodes+=p.size();
+ check(textNodes>40,"Curvas da letra R ainda tem poucos pontos");
+ // Diagnostico explicito da Tesoura, mesmo quando nao encontra nenhuma forma.
+ w.collector_.start();
+ clickButton(w,"scissors");
+ QTest::mouseClick(v.viewport(),Qt::LeftButton,Qt::NoModifier,QPoint(15,15));
+ QApplication::processEvents();
+ const auto diagnostics=w.captureDocument();
+ const auto& attempts=diagnostics.value("scissor_click_details").toArray();
+ check(!attempts.empty(),"Clique Tesoura nao foi registrado no relatorio");
+ check(attempts.first().toObject().contains("reason_code"),
+   "Relatorio da Tesoura nao guardou motivo de falha");
+ w.grab().save(directory+"/RASTREIO_EDITOR_19_8.png");
+ return {{"status","PASS"},{"loops",int(traced.loops.size())},
+  {"trace_nodes",traced.nodes},{"noise_ignored",traced.ignored},
+  {"text_R_nodes",int(textNodes)},{"trace_single_undo",true},
+  {"trace_grouped",true},{"scissors_details",int(attempts.size())},
+  {"hardware_commands_sent",false}};
+}
+
 static QJsonObject lightburnImport198Test(const QString& directory){
  QTemporaryDir temp(QDir(directory).filePath("lbrn2_XXXXXX"));
  check(temp.isValid(),"nao criou pasta temporaria de importacao");
@@ -4337,6 +4401,13 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--trace-editor-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=traceEditor198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_RASTREIO_EDITOR_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--lbrn2-file-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=actualLightBurnFile198Test(csv);}
