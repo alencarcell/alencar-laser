@@ -858,6 +858,10 @@ void mousePressEvent(QMouseEvent* e)override{
   }
   e->accept();return;
  }
+ if(e->button()==Qt::RightButton&&tool==Tool::Line){
+  if(polylineDrawing_)finishPolyline(false);
+  e->accept();return;
+ }
  if(e->button()!=Qt::LeftButton){QGraphicsView::mousePressEvent(e);return;}
   if(nativeMode_){nativeMousePress(e);return;}
   if(tool==Tool::Select){
@@ -906,6 +910,26 @@ void mousePressEvent(QMouseEvent* e)override{
   if(tool==Tool::Text){
    if(requestTextAt)requestTextAt(fromQt(mapToScene(e->position().toPoint())));
    e->accept();return;
+  }
+  if(tool==Tool::Line){
+   const auto& layer=editor.state().layers.at(targetLayer());
+   if(!layer.visible||layer.locked){e->accept();return;}
+   Pt at=snapPolyline(fromQt(mapToScene(e->position().toPoint())),
+                      e->modifiers().testFlag(Qt::ShiftModifier));
+   if(!polylineDrawing_){
+    polylineDrawing_=true;polylinePoints_={at};polylineCursor_=toQt(at);
+    QPen pen(QColor(25,156,225),1.5,Qt::DashLine);pen.setCosmetic(true);
+    polylinePreview_=scene_.addPath(QPainterPath(),pen);
+    polylinePreview_->setZValue(30);polylinePreview_->setAcceptedMouseButtons(Qt::NoButton);
+   }else{
+    const QPointF firstPx=viewportTransform().map(toQt(polylinePoints_.front()));
+    const bool close=polylinePoints_.size()>=3&&QLineF(firstPx,e->position()).length()<=10.;
+    if(close){finishPolyline(true);e->accept();return;}
+    if(polylinePoints_.size()<20000&&dist(polylinePoints_.back(),at)>1e-6)
+     polylinePoints_.push_back(at);
+    polylineCursor_=toQt(at);
+   }
+   redrawPolyline();e->accept();return;
   }
   if(tool==Tool::Pencil){
    const auto& layer=editor.state().layers.at(targetLayer());
@@ -987,6 +1011,12 @@ void mouseMoveEvent(QMouseEvent* e)override{
    const auto nextDisplay=viewportTransform().map(toQt(to));
    updateNodeMarkers(previousDisplay,nextDisplay);
    frameUpdates++;e->accept();return;
+  }
+  if(polylineDrawing_&&tool==Tool::Line){
+   Pt at=snapPolyline(fromQt(mapToScene(e->position().toPoint())),
+                      e->modifiers().testFlag(Qt::ShiftModifier));
+   polylineCursor_=toQt(at);redrawPolyline();++frameUpdates;
+   e->accept();return;
   }
   if(strokeDrawing_&&tool==Tool::Pencil){
    const Pt here=fromQt(mapToScene(e->position().toPoint()));
@@ -1116,6 +1146,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    pendingPreview_->setPath(temporaryShape());viewport()->update();
   }
   if(e->key()==Qt::Key_Escape){
+   if(polylineDrawing_){clearPolyline();e->accept();return;}
    if(!busy()){if(requestSelectTool)requestSelectTool();e->accept();return;}
    if(shapeDragging_){clearShapePreview();e->accept();return;}
    if(draggingNode_&&active_){
