@@ -2263,6 +2263,8 @@ public:
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
      captureEvent("tool_scissors_activated");
      status->setText("Tesoura: passe o mouse sobre um trecho; destaque laranja = corte completo. Ctrl+Z desfaz.");});
+  compact(editorGrid,4,0,"new_bezier","⌁ Nova curva","Cria Bézier cúbica editável; não converte nem altera polilinhas existentes",
+     [this]{createNativeBezier();});
   tools->addSpacing(5); // Ferramentas de desenho
   auto* shapeGrid=newGrid();
   compact(shapeGrid,0,0,"line","╱ Linha contínua","Clique cria nós, clique na origem fecha, botão direito termina, Esc cancela, Shift restringe a 45 graus",
@@ -3074,6 +3076,28 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    status->setText("Texto direto: digite no desenho; Enter/Esc conclui; trocar ferramenta cancela campo vazio.");
  }
 
+ void createNativeBezier(){
+  if(view.busy()||(curves&&curves->dragging()))
+   throw std::runtime_error("Conclua o gesto antes de criar curva");
+  int nextObject=1;
+  for(const auto& [id,meta]:view.editor.state().objects)nextObject=std::max(nextObject,id+1);
+  if(curves)for(const auto& contour:curves->committed().contours)
+   nextObject=std::max(nextObject,contour.key.object+1);
+  const QPointF center=view.mapToScene(view.viewport()->rect().center());
+  const double span=std::clamp(140./std::max(.01,view.currentZoom()),10.,65.);
+  const Pt a{center.x()-span*.5,center.y()};
+  const Pt b{center.x()+span*.5,center.y()};
+  const Pt out{a.x+span/3.,a.y-span*.5};
+  const Pt in{b.x-span/3.,b.y-span*.5};
+  view.attachNative(nullptr);
+  if(!curves)curves=std::make_unique<CurveDragSession>(CurveDocument{});
+  const Key key=curves->addEditableCubic(a,out,in,b,nextObject);
+  view.attachNative(curves.get());
+  bezierToolActive_=true;view.enableNative(true);
+  recoveryPolicy_.edited();captureEvent("bezier_curve_created");
+  view.setFocus();
+  status->setText(QString("Curva Bézier nativa %1 criada. Arraste os pontos azuis das alças e âncoras; Shift+clique insere nós; Ctrl+Z desfaz.").arg(key.object));
+ }
  void loadRasterFromFile(const QString& file){
   QImage image(file);
   if(image.isNull())throw std::runtime_error("Imagem nao suportada (PNG/JPG/BMP/WebP)");
