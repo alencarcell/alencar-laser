@@ -43,15 +43,22 @@ inline double distanceToSegment(Pt p,Pt a,Pt b){
 }
 inline void simplifyOpen(const std::vector<Pt>& pts,int first,int last,
                         double eps,std::vector<char>& keep){
- if(last<=first+1)return;
- double best=eps;int index=-1;
- for(int i=first+1;i<last;++i){
-  const double d=distanceToSegment(pts[size_t(i)],pts[size_t(first)],pts[size_t(last)]);
-  if(d>best){best=d;index=i;}
- }
- if(index>=0){keep[size_t(index)]=true;
-  simplifyOpen(pts,first,index,eps,keep);
-  simplifyOpen(pts,index,last,eps,keep);
+ // Pilha explicita evita stack overflow em silhuetas grandes e recortadas.
+ std::vector<std::pair<int,int>> pending{{first,last}};
+ size_t inspections=0;
+ while(!pending.empty()){
+  auto [a,b]=pending.back();pending.pop_back();
+  if(b<=a+1)continue;
+  double best=eps;int pivot=-1;
+  for(int i=a+1;i<b;++i){
+   if(++inspections>8000000)
+    throw std::runtime_error("Contorno excessivamente irregular. Reduza a imagem ou aumente a simplificacao.");
+   const double d=distanceToSegment(pts[size_t(i)],pts[size_t(a)],pts[size_t(b)]);
+   if(d>best){best=d;pivot=i;}
+  }
+  if(pivot>=0){keep[size_t(pivot)]=true;
+   pending.emplace_back(a,pivot);pending.emplace_back(pivot,b);
+  }
  }
 }
 inline std::vector<Pt> simplifyClosed(const std::vector<Pt>& original,double eps){
@@ -110,19 +117,20 @@ inline Result trace(const QImage& image,Pt origin,double mmPerPixel,Settings set
  // Inclusao inclusiva preserva pretos puros e traços pequenos.
  for(size_t i=0;i<gray.size();++i)mask[i]=gray[i]<=threshold;
  std::vector<char> marked(mask.size(),0);
+ struct Component{std::vector<int> pixels;int x0,y0,x1,y1;};
+ std::vector<Component> components;
  int ignored=0;
  const int minArea=std::clamp(settings.minimumComponent,1,500);
  for(int y=0;y<h;++y)for(int x=0;x<w;++x){
   const int start=y*w+x;
   if(!mask[size_t(start)]||marked[size_t(start)])continue;
   std::queue<int> queue;queue.push(start);marked[size_t(start)]=1;
-  std::vector<int> component;component.reserve(64);
-  int minX=x,maxX=x,minY=y,maxY=y;
+  Component component{{},x,y,x,y};
   while(!queue.empty()){
-   const int id=queue.front();queue.pop();component.push_back(id);
+   const int id=queue.front();queue.pop();component.pixels.push_back(id);
    const int cx=id%w,cy=id/w;
-   minX=std::min(minX,cx);maxX=std::max(maxX,cx);
-   minY=std::min(minY,cy);maxY=std::max(maxY,cy);
+   component.x0=std::min(component.x0,cx);component.x1=std::max(component.x1,cx);
+   component.y0=std::min(component.y0,cy);component.y1=std::max(component.y1,cy);
    const int dx[4]={1,-1,0,0},dy[4]={0,0,1,-1};
    for(int k=0;k<4;++k){
     const int xx=cx+dx[k],yy=cy+dy[k];
@@ -133,13 +141,25 @@ inline Result trace(const QImage& image,Pt origin,double mmPerPixel,Settings set
     }
    }
   }
-  // Isolar sujeiras sem apagar automaticamente hastes e pontos de letras.
-  const bool tinyText=(maxX-minX+1<=20&&maxY-minY+1<=20);
-  const int limit=settings.protectSmallText&&tinyText?1:minArea;
-  if(int(component.size())<limit){
-   for(int id:component)mask[size_t(id)]=0;
-   ++ignored;
+  components.push_back(std::move(component));
+  if(components.size()>20000)throw std::runtime_error("Ruido em excesso na imagem; ajuste limiar.");
+ }
+ // Proteger pontos de 'i', acentos e miolos de letras pequenos APENAS
+ // quando proximos de outros glifos, sem preservar poeira isolada.
+ for(size_t index=0;index<components.size();++index){
+  const auto& c=components[index];
+  if(int(c.pixels.size())>=minArea)continue;
+  bool nearText=false;
+  if(settings.protectSmallText&&c.x1-c.x0<=20&&c.y1-c.y0<=20){
+   const int padding=7;
+   for(size_t j=0;j<components.size();++j)if(j!=index){
+    const auto& n=components[j];
+    if(n.x1<c.x0-padding||n.x0>c.x1+padding||
+       n.y1<c.y0-padding||n.y0>c.y1+padding)continue;
+    if(n.pixels.size()>=size_t(minArea)){nearText=true;break;}
+   }
   }
+  if(!nearText){for(int id:c.pixels)mask[size_t(id)]=0;++ignored;}
  }
  std::vector<Edge> edges;edges.reserve(size_t(w)*h/2);
  QHash<quint64,QVector<int>> starts;
