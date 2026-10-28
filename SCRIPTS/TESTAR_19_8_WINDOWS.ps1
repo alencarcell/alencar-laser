@@ -31,6 +31,36 @@ function Checar-Saida([string]$etapa) {
         throw "$etapa falhou (codigo $LASTEXITCODE). Veja $relatorio"
     }
 }
+
+# Captura ambos os fluxos do processo nativo. Start-Transcript sozinho pode
+# nao registrar o stderr emitido pelo g++/ninja no Windows PowerShell 5.1.
+function Compilar-QtComDiagnostico {
+    $saidaPadrao = Join-Path $relatorios 'BUILD_QT_19_8_STDOUT.txt'
+    $saidaErros = Join-Path $relatorios 'BUILD_QT_19_8_STDERR.txt'
+    Write-Host 'Compilando Qt em modo diagnostico (1 processo); saida em arquivos separados...' -ForegroundColor Cyan
+    $processo = Start-Process -FilePath $cmake -ArgumentList @(
+        '--build', $build, '--parallel', '1', '--target', 'alencar_test7_qt6'
+    ) -WorkingDirectory $raiz -PassThru -Wait -NoNewWindow `
+      -RedirectStandardOutput $saidaPadrao -RedirectStandardError $saidaErros
+    if ($processo.ExitCode -ne 0) {
+        Write-Host "Compilacao Qt falhou (codigo $($processo.ExitCode)). PRIMEIROS ERROS REAIS:" -ForegroundColor Red
+        $ocorrencias = @(Select-String -Path @($saidaPadrao, $saidaErros) `
+            -Pattern 'error:', 'fatal error:', 'FAILED:', 'undefined reference', 'collect2:', 'killed', 'terminated' `
+            -Context 3,4 | Select-Object -First 12)
+        if ($ocorrencias.Count -gt 0) {
+            $ocorrencias | Out-String -Width 240 | Write-Host
+        } else {
+            Write-Host 'Nenhum marcador de erro encontrado; ultimas 70 linhas de cada fluxo:' -ForegroundColor Yellow
+            Get-Content -LiteralPath $saidaPadrao -Tail 70 | Out-Host
+            Get-Content -LiteralPath $saidaErros -Tail 70 | Out-Host
+        }
+        Write-Host "LOG STDOUT: $saidaPadrao" -ForegroundColor Yellow
+        Write-Host "LOG STDERR: $saidaErros" -ForegroundColor Yellow
+        throw "Compilacao Qt de refinamento falhou (codigo $($processo.ExitCode)). Erros exibidos acima."
+    }
+    Write-Host 'Compilacao Qt concluida. Iniciando testes de refino.' -ForegroundColor Green
+}
+
 # Os executaveis GUI escrevem a causa real em JSON, inclusive ao retornar codigo 1.
 # Exibir o relatorio no proprio terminal evita outro ciclo de compilacao as cegas.
 function Checar-ResultadoQt([string]$etapa, [string]$arquivo) {
@@ -62,8 +92,7 @@ try {
 
     if ($SomenteRefino) {
         Write-Host 'REFINO: curvas de texto R/O, raster P&B e diagnosticos da Tesoura.' -ForegroundColor Cyan
-        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
-        Checar-Saida 'Compilacao Qt de refinamento'
+        Compilar-QtComDiagnostico
         $app = Join-Path $build 'alencar_test7_qt6.exe'
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
         $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\refino'
