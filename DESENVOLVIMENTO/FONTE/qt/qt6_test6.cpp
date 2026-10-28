@@ -204,6 +204,9 @@ class QtEditorLab final:public QGraphicsView{
  std::vector<Pt> polylinePoints_;
  QPointF polylineCursor_{};
  QGraphicsPathItem* polylinePreview_=nullptr;
+ bool marqueeActive_=false;
+ QPointF marqueeStart_{};
+ QGraphicsRectItem* marqueeItem_=nullptr;
  QGraphicsPathItem* pendingPreview_=nullptr;
  ScissorSpanPlanner scissorPlanner_;
  uint64_t scissorIndexVersion_=std::numeric_limits<uint64_t>::max();
@@ -272,6 +275,76 @@ class QtEditorLab final:public QGraphicsView{
   QPainterPath path;path.moveTo(toQt(polylinePoints_.front()));
   for(size_t i=1;i<polylinePoints_.size();++i)path.lineTo(toQt(polylinePoints_[i]));
   path.lineTo(polylineCursor_);polylinePreview_->setPath(path);
+ }
+ void clearMarquee(){
+  marqueeActive_=false;
+  if(marqueeItem_){scene_.removeItem(marqueeItem_);delete marqueeItem_;marqueeItem_=nullptr;}
+ }
+ void showMarquee(QPointF pointer){
+  if(!marqueeActive_||QLineF(pointer,marqueeStart_).length()<3.)return;
+  QRectF area(mapToScene(marqueeStart_.toPoint()),mapToScene(pointer.toPoint()));
+  area=area.normalized();
+  const QColor color=pointer.x()<marqueeStart_.x()?QColor("#38BC70"):QColor("#E65B5B");
+  QPen pen(color,1.5,Qt::DashLine);pen.setCosmetic(true);
+  if(!marqueeItem_){
+   marqueeItem_=scene_.addRect(area,pen,QBrush(QColor(color.red(),color.green(),color.blue(),38)));
+   marqueeItem_->setZValue(49);marqueeItem_->setAcceptedMouseButtons(Qt::NoButton);
+  }else{
+   marqueeItem_->setRect(area);marqueeItem_->setPen(pen);
+   marqueeItem_->setBrush(QColor(color.red(),color.green(),color.blue(),38));
+  }
+ }
+ void finishMarquee(QPointF pointer,Qt::KeyboardModifiers mods){
+  if(!marqueeActive_)return;
+  const QPointF start=marqueeStart_;
+  clearMarquee();
+  if(QLineF(pointer,start).length()<3.){
+   if(!(mods&(Qt::ShiftModifier|Qt::ControlModifier)))clearSelection();
+   if(stateChanged)stateChanged();return;
+  }
+  const bool crossing=pointer.x()<start.x();
+  const QRectF area=QRectF(mapToScene(start.toPoint()),mapToScene(pointer.toPoint())).normalized();
+  std::set<int> found;
+  std::map<int,std::set<int>> groupMembers;
+  std::map<int,bool> groupInside,groupCross;
+  const auto& state=editor.state();
+  for(const auto& [id,meta]:state.objects){
+   if(!editable(state,id))continue;
+   auto items=itemsByObject_.find(id);
+   if(items==itemsByObject_.end())continue;
+   bool inside=true,cross=false,has=false;
+   for(auto* item:items->second){
+    if(!item->isVisible())continue;
+    has=true;
+    const QRectF bounds=item->sceneBoundingRect();
+    inside=inside&&area.contains(bounds);
+    if(area.intersects(bounds)){
+     const QPainterPath world=item->mapToScene(item->path());
+     if(world.intersects(area)||area.contains(bounds))cross=true;
+    }
+   }
+   if(!has)continue;
+   if(meta.group>0){
+    groupMembers[meta.group].insert(id);
+    if(!groupInside.count(meta.group))groupInside[meta.group]=true;
+    groupInside[meta.group]=groupInside[meta.group]&&inside;
+    groupCross[meta.group]=groupCross[meta.group]||cross;
+   }else if(crossing?cross:inside)found.insert(id);
+  }
+  for(const auto& [group,ids]:groupMembers)
+   if(crossing?groupCross[group]:groupInside[group])
+    found.insert(ids.begin(),ids.end());
+  const bool shift=mods.testFlag(Qt::ShiftModifier);
+  const bool ctrl=mods.testFlag(Qt::ControlModifier);
+  if(!shift&&!ctrl)selected=std::move(found);
+  else for(int id:found){
+   if(shift&&ctrl)selected.erase(id);
+   else if(ctrl){if(!selected.erase(id))selected.insert(id);}
+   else selected.insert(id);
+  }
+  active_.reset();applySelectionStyles();viewport()->update();
+  if(diagnosticEvent)diagnosticEvent("marquee_selected",int(selected.size()));
+  if(stateChanged)stateChanged();
  }
  void clearPolyline(){
   polylineDrawing_=false;polylinePoints_.clear();
@@ -427,7 +500,7 @@ public:
  void reportZoom(){if(zoomChanged)zoomChanged(currentZoom());}
  std::function<int()> drawingLayer;
  int targetLayer()const{return drawingLayer?drawingLayer():0;}
- bool busy()const{return draggingNode_.has_value()||shapeDragging_||strokeDrawing_||polylineDrawing_||nativePressing_||nativeContourPressing_;}
+ bool busy()const{return draggingNode_.has_value()||shapeDragging_||strokeDrawing_||polylineDrawing_||marqueeActive_||nativePressing_||nativeContourPressing_;}
  bool nativeMode()const{return nativeMode_;}
  bool hasNativeDocument()const{return nativeSession_&&!nativeSession_->committed().contours.empty();}
  std::optional<Key> nativeSelected()const{return nativeSession_?nativeSession_->selected():std::nullopt;}
@@ -607,7 +680,7 @@ public:
  void invalidateSelectionCache(){picker_.invalidate();}
  void rebuild(){
   clearScissorHover();clearShapePreview();endChunkPreview();
-  clearPolyline();scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
+  clearPolyline();clearMarquee();scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
    auto* o=scene_.addPath(pathOf(c),QPen(layerColor(editor.state().objects.at(c.key.object).layer),0));o->setZValue(1);
    auto m=editor.state().objects.at(c.key.object);auto layer=editor.state().layers.at(m.layer);
@@ -745,11 +818,32 @@ public:
   if(draggingNode_){endChunkPreview();draggingNode_.reset();viewport()->update();}
   if(strokeDrawing_){strokeDrawing_=false;pencilPoints_.clear();if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();}
   if(polylineDrawing_)clearPolyline();
+  if(marqueeActive_)clearMarquee();
  }
  void history(bool redo){if(busy())return;if(redo?editor.redo():editor.undo()){
   active_.reset();selected.clear();rebuild();if(diagnosticEvent)diagnosticEvent(redo?"redo":"undo",1);
  }}
  void clearSelection(){bool hadActive=active_.has_value();active_.reset();selected.clear();applySelectionStyles();if(hadActive)viewport()->update();}
+ void selectAllVisible(){
+  if(nativeMode_||busy())return;
+  selected.clear();active_.reset();
+  for(const auto& [id,meta]:editor.state().objects)
+   if(editable(editor.state(),id))selected.insert(id);
+  applySelectionStyles();viewport()->update();
+  if(stateChanged)stateChanged();
+ }
+ void invertSelection(){
+  if(nativeMode_||busy())return;
+  std::set<int> inverted;
+  for(const auto& [id,meta]:editor.state().objects)
+   if(editable(editor.state(),id)&&!selected.count(id))inverted.insert(id);
+  selected=std::move(inverted);active_.reset();applySelectionStyles();viewport()->update();
+  if(stateChanged)stateChanged();
+ }
+ bool isMarqueeActive()const{return marqueeActive_;}
+ bool isPolylineActive()const{return polylineDrawing_;}
+ size_t polylineVertexCount()const{return polylinePoints_.size();}
+
  std::vector<Hit> clickHits(QPoint viewportPoint){
   QElapsedTimer profiler;profiler.start();
   auto m=viewportTransform();double sx=std::hypot(m.m11(),m.m12()),sy=std::hypot(m.m21(),m.m22());
