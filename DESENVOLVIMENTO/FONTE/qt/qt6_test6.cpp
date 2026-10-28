@@ -3558,22 +3558,82 @@ static QJsonObject newDrawingTools198Test(const QString& directory){
 }
 
 // Qt GUI: texto direto na mesa, proporcao, escala livre e rotacao.
+// Qt 19.8: camadas persistentes, modo visual, grupos multiplos e Ctrl+U.
+static QJsonObject layersUngroup198Test(const QString& directory){
+ QDir().mkpath(directory);
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ auto& v=w.view;
+ const int a=v.editor.rectangle({20,20},15,15);
+ const int b=v.editor.rectangle({40,20},15,15);
+ const int c=v.editor.rectangle({70,20},15,15);
+ const int d=v.editor.rectangle({90,20},15,15);
+ v.editor.addLayer(2,"Gravacao");
+ v.editor.moveSelectionToLayer({a,b},2);
+ const auto geometryBefore=serialize(encode(v.editor.state().doc));
+ v.editor.setLayerMode(2,"Fill");
+ v.rebuild();
+ check(v.editor.state().layers.at(2).mode=="Fill","Modo Fill nao persistiu no Editor");
+ check(v.pathItem({a,0})->brush().style()!=Qt::NoBrush,"Forma fechada nao teve preenchimento");
+ check(v.pathItem({c,0})->brush().style()==Qt::NoBrush,"Modo Linha indevidamente preenchido");
+ const int ga=v.editor.group({a,b});
+ const int gb=v.editor.group({c,d});
+ check(ga!=gb,"Os dois grupos receberam mesmo ID");
+ const auto beforeUngroup=v.editor.undoCount();
+ const int changed=v.editor.ungroupSelection({a,c});
+ check(changed==2&&v.editor.undoCount()==beforeUngroup+1,
+  "Desagrupar selecao deveria consumir uma operacao unica");
+ for(const int id:{a,b,c,d})
+  check(v.editor.state().objects.at(id).group==0,"Membro ficou agrupado");
+ check(serialize(encode(v.editor.state().doc))==geometryBefore,
+       "Desagrupar alterou geometria do desenho");
+ check(v.editor.state().objects.at(a).layer==2&&
+       v.editor.state().objects.at(c).layer==0,"Desagrupar alterou camadas");
+ v.rebuild();
+ check(v.editor.undo(),"Nao foi possivel desfazer desagrupamento");
+ check(v.editor.state().objects.at(a).group==ga&&
+       v.editor.state().objects.at(c).group==gb,"Desfazer nao restaurou agrupamento");
+ check(v.editor.redo(),"Nao foi possivel refazer desagrupamento");
+ check(v.editor.state().objects.at(a).group==0,"Refazer nao separou objetos");
+ const auto actual=metadata(v.editor.state());
+ for(auto& layer:actual.at("layers").as_array()){
+  auto& row=layer.as_object();row.erase("mode");
+ }
+ const auto legacy=fromMetadata(v.editor.state().doc,actual);
+ check(legacy.layers.at(2).mode=="Line","Metadata antiga sem modo deixou de abrir");
+ QTemporaryDir temp(QDir(directory).filePath("camadas_XXXXXX"));
+ check(temp.isValid(),"Nao foi possivel criar diretorio de teste");
+ const QString file=temp.filePath("roundtrip.alaser");
+ (void)saveNative(file,v.editor.state());
+ const auto restored=editorStateForIntegratedProject(openNative(file));
+ check(restored.layers.at(2).mode=="Fill","Modo nao sobreviveu ao salvar/reabrir .alaser");
+ check(restored.objects.at(a).layer==2,"Transferencia de camada se perdeu no roundtrip");
+ w.grab().save(directory+"/CAMADAS_19_8.png");
+ return {{"status","PASS"},{"ungroup_two_groups_atomic",true},
+  {"ungroup_undo_redo",true},{"layer_transfer",true},
+  {"fill_preview_closed",true},{"legacy_mode_default",true},
+  {"alaser_roundtrip",true},{"hardware_commands_sent",false}};
+}
 static QJsonObject inlineTransforms198Test(const QString& directory){
  QDir().mkpath(directory);
  LabWindow textWindow(Document{});textWindow.show();QApplication::processEvents();
  auto& tv=textWindow.view;tv.setTransform(QTransform::fromScale(4.,4.));
  tv.centerOn(QPointF(80,65));QApplication::processEvents();
  clickButton(textWindow,"text");clickScene(textWindow,{80,65});
- QLineEdit* entry=textWindow.findChild<QLineEdit*>("inlineTextEdit");
+ QLineEdit* empty=textWindow.inlineTextEntry_;
+ check(empty&&empty->isVisible(),"Campo de texto vazio nao foi criado");
+ const auto beforeEmpty=stateText(tv.editor.state());
+ clickButton(textWindow,"select");QApplication::processEvents();
+ check(textWindow.inlineTextEntry_==nullptr,"Trocar ferramenta nao cancelou campo vazio");
+ check(stateText(tv.editor.state())==beforeEmpty,"Campo vazio alterou o desenho");
+ clickButton(textWindow,"text");clickScene(textWindow,{80,65});
+ QLineEdit* entry=textWindow.inlineTextEntry_;
  check(entry&&entry->isVisible(),"Texto nao apareceu dentro da mesa");
  check(entry->parentWidget()==tv.viewport(),"Texto nao pertence a viewport");
  check(entry->styleSheet().contains("background:transparent"),"Texto nao e transparente");
  QTest::keyClicks(entry,"Teste");QApplication::processEvents();
  check(tv.editor.state().doc.contours.empty(),"Texto em digitacao alterou o documento");
  QTest::keyClick(entry,Qt::Key_Return);QApplication::processEvents();
- check(!textWindow.findChild<QLineEdit*>("inlineTextEdit")||
-       !textWindow.findChild<QLineEdit*>("inlineTextEdit")->isVisible(),
-       "Campo de texto ficou aberto apos concluir");
+ check(textWindow.inlineTextEntry_==nullptr,"Campo de texto ficou ativo apos concluir");
  check(!tv.editor.state().doc.contours.empty(),"Texto nao criou contornos vetoriais");
  check(tv.editor.undoCount()==1,"Texto nao criou transacao unica");
  pressKey(textWindow,Qt::Key_Z,Qt::ControlModifier);
@@ -3810,6 +3870,12 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--layers-ungroup-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=layersUngroup198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_CAMADAS_19_8.json");if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--inline-transforms-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=inlineTransforms198Test(out);}
