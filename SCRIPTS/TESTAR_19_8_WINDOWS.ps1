@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao)
+param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -60,6 +60,19 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteCamadas) {
+        Write-Host 'FOCO: Ctrl+U desagrupar, camadas e modo visual Linha/Fill.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt de camadas'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\camadas'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --layers-ungroup-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Camadas e Desagrupar' (Join-Path $destino 'RESULTADO_CAMADAS_19_8.json')
+        Write-Host 'Camadas e Desagrupar PASS automatizado; teste manual ainda necessario.' -ForegroundColor Green
+        return
+    }
     if ($SomenteInteracao) {
         Write-Host 'FOCO: texto direto na mesa, escala e rotacao por alcas.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test7_qt6
@@ -179,6 +192,10 @@ try {
     New-Item -ItemType Directory -Path $dirInteracao -Force | Out-Null
     & $app --inline-transforms-19-8-test $fixture $dirInteracao
     Checar-ResultadoQt 'Texto direto e alcas' (Join-Path $dirInteracao 'RESULTADO_TEXTO_TRANSFORMACOES_19_8.json')
+    $dirCamadas = Join-Path $destino 'camadas'
+    New-Item -ItemType Directory -Path $dirCamadas -Force | Out-Null
+    & $app --layers-ungroup-19-8-test $fixture $dirCamadas
+    Checar-ResultadoQt 'Camadas e Desagrupar 19.8' (Join-Path $dirCamadas 'RESULTADO_CAMADAS_19_8.json')
     Write-Host 'BUILD E REGRESSOES AUTOMATIZADAS PASSARAM. AVALIACAO VISUAL AINDA NECESSARIA.' -ForegroundColor Green
     if ($Abrir) {
         Write-Host 'Abrindo editor em modo de desenvolvimento; mantenha o laser desconectado.' -ForegroundColor Yellow
