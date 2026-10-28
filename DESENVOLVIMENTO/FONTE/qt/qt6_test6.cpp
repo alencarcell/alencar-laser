@@ -651,7 +651,10 @@ public:
  size_t directQueries()const{return picker_.directQueries();}
  void invalidateSelectionCache(){picker_.invalidate();}
  void rebuild(){
-  clearScissorHover();clearShapePreview();clearMarquee();endChunkPreview();
+  clearScissorHover();clearShapePreview();clearMarquee();
+  // Rebuild externo nao pode deixar um rascunho de linha com preview destruido.
+  if(polylineActive_)clearPolyline();
+  endChunkPreview();
   scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
    auto* o=scene_.addPath(pathOf(c),QPen(layerColor(editor.state().objects.at(c.key.object).layer),0));o->setZValue(1);
