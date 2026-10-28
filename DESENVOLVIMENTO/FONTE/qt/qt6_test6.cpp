@@ -3543,11 +3543,37 @@ static QJsonObject inlineTransforms198Test(const QString& directory){
  check(stateText(v.editor.state())!=stateScaled,"Rotacao nao alterou vertices");
  pressKey(transformWindow,Qt::Key_Z,Qt::ControlModifier);
  check(stateText(v.editor.state())==stateScaled,"Undo da rotacao nao restaurou desenho");
+ // Shift permite escala nao proporcional; Ctrl fixa o centro.
+ const int freeId=v.editor.rectangle({110,45},20,10);
+ v.clearSelection();v.rebuild();clickScene(transformWindow,{115,45});
+ check(v.selected.count(freeId)>0,"Retangulo de escala livre nao selecionado");
+ drag(v.mapFromScene({130,45}),v.mapFromScene({150,43}),Qt::ShiftModifier);
+ auto boundsFree=[&]()->QRectF{
+  const auto* c=get(v.editor.state().doc,{freeId,0});
+  check(c!=nullptr,"Retangulo transformado nao encontrado");
+  double x0=1e20,y0=1e20,x1=-1e20,y1=-1e20;
+  for(const auto& n:c->nodes){x0=std::min(x0,n.p.x);x1=std::max(x1,n.p.x);
+   y0=std::min(y0,n.p.y);y1=std::max(y1,n.p.y);}
+  return {QPointF(x0,y0),QPointF(x1,y1)};
+ };
+ const QRectF freeBounds=boundsFree();
+ check(freeBounds.width()>35.&&freeBounds.height()<16.,
+       "Shift nao liberou proporcao entre largura e altura");
+ // Teste independente de escala com ancora central.
+ v.clearSelection();v.activate({freeId,0});
+ const QRectF centerBefore=boundsFree();
+ const QPointF corner=centerBefore.topRight();
+ const QPointF target=corner+QPointF(10.,-6.);
+ drag(v.mapFromScene(corner),v.mapFromScene(target),Qt::ControlModifier|Qt::ShiftModifier);
+ const QRectF centerAfter=boundsFree();
+ check(QLineF(centerBefore.center(),centerAfter.center()).length()<0.8,
+       "Ctrl nao preservou o centro ao redimensionar");
  transformWindow.grab().save(directory+"/TRANSFORMACOES_EDITOR_19_8.png");
  textWindow.grab().save(directory+"/TEXTO_DIRETO_19_8.png");
  return {{"status","PASS"},{"inline_text",true},{"transparent_overlay",true},
   {"text_atomic_undo",true},{"scale_proportional",true},
-  {"rotation_handle",true},{"undo_rotate",true},{"hardware_commands_sent",false}};
+  {"rotation_handle",true},{"undo_rotate",true},{"shift_free_scale",true},
+  {"ctrl_center_scale",true},{"hardware_commands_sent",false}};
 }
 static QJsonObject editorMultitool198Test(const QString& directory){
  // Gesto multi-nos, fechamento e linha por arraste legada.
