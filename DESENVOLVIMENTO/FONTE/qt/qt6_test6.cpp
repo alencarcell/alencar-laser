@@ -4234,12 +4234,30 @@ static QJsonObject traceEditor198Test(const QString& directory){
  check(!attempts.empty(),"Clique Tesoura nao foi registrado no relatorio");
  check(attempts.first().toObject().contains("reason_code"),
    "Relatorio da Tesoura nao guardou motivo de falha");
+ // Curvas nativas: converter retas em Cubicas, preservar nos e desfazer.
+ CurveDocument native;native.nextId=4;
+ CurveContour curve;curve.key={1,0};curve.closed=false;
+ curve.nodes={{{1,{0,0},{0,0},{0,0}}},
+              {{2,{10,6},{10,6},{10,6}}},
+              {{3,{20,0},{20,0},{20,0}}}};
+ curve.edgeKind={0,0};native.contours.push_back(curve);
+ validateCurve(native);
+ CurveDragSession curves(native);curves.select({1,0});
+ check(curves.smoothSelected(),"Suavizacao nao alterou arestas retas");
+ check(curves.committed().contours[0].edgeKind[0]==1&&
+       curves.committed().contours[0].edgeKind[1]==1,
+       "As arestas nao viraram cubicas");
+ const auto& curveSmoothed=curves.committed().contours[0];
+ check(dist(curveSmoothed.nodes[1].handleIn,curveSmoothed.nodes[1].anchor)>.1,
+       "Bezier continua sem alcas tangentes");
+ check(curves.undo()&&curves.committed().contours[0].edgeKind[0]==0,
+       "Undo nao restaurou curva nativa anterior");
  w.grab().save(directory+"/RASTREIO_EDITOR_19_8.png");
  return {{"status","PASS"},{"loops",int(traced.loops.size())},
   {"trace_nodes",traced.nodes},{"noise_ignored",traced.ignored},
   {"text_R_nodes",int(textNodes)},{"trace_single_undo",true},
   {"trace_grouped",true},{"scissors_details",int(attempts.size())},
-  {"hardware_commands_sent",false}};
+  {"bezier_native_smooth_undo",true},{"hardware_commands_sent",false}};
 }
 
 static QJsonObject lightburnImport198Test(const QString& directory){
