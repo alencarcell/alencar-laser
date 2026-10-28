@@ -48,6 +48,41 @@ inline Plan build(const EditorState& state,size_t maxSegments=300000){
  }
  return out;
 }
+// Repete o plano vetorial completo, NAO a ordenacao por camada/forma do LightBurn.
+// Entre passagens, retorna virtualmente a origem antes de reiniciar o plano.
+// Nao produz comandos nem escreve no documento original.
+inline Plan repeated(const Plan& single,int passes,size_t maxMoves=300000){
+ if(passes<1||passes>20)throw std::runtime_error("Passagens virtuais fora de 1..20");
+ if(!single.moves.empty()&&single.moves.size()>maxMoves/size_t(passes))
+  throw std::runtime_error("Passagens excedem limite de movimentos virtuais");
+ Plan output;
+ output.ignoredFill=single.ignoredFill;
+ output.ignoredDisabled=single.ignoredDisabled;
+ output.ignoredTool=single.ignoredTool;
+ if(single.moves.empty())return output;
+ const Pt start=single.moves.front().from;
+ output.moves.reserve(single.moves.size()*size_t(passes)+size_t(passes)-1);
+ for(int pass=0;pass<passes;++pass){
+  if(pass>0){
+   const Pt end=output.moves.back().to;
+   const double gap=std::hypot(start.x-end.x,start.y-end.y);
+   if(gap>1e-9){
+    if(output.moves.size()>=maxMoves)
+     throw std::runtime_error("Limite virtual excedido entre passagens");
+    output.moves.push_back({end,start,false,single.moves.front().layer});
+    output.travelMm+=gap;
+   }
+  }
+  for(const auto& m:single.moves){
+   if(output.moves.size()>=maxMoves)
+    throw std::runtime_error("Limite de movimentos virtuais excedido");
+   output.moves.push_back(m);
+   const double length=std::hypot(m.to.x-m.from.x,m.to.y-m.from.y);
+   if(m.laser)output.cutMm+=length;else output.travelMm+=length;
+  }
+ }
+ return output;
+}
 inline double minutes(const Plan& plan,double cutMmMin,double rapidMmMin){
  if(!std::isfinite(cutMmMin)||!std::isfinite(rapidMmMin)||cutMmMin<=0||rapidMmMin<=0)
   throw std::runtime_error("Velocidades virtuais invalidas");
