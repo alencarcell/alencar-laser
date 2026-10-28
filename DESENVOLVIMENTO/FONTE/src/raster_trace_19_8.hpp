@@ -7,6 +7,7 @@
 #include <QPointF>
 #include <QtGlobal>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <map>
