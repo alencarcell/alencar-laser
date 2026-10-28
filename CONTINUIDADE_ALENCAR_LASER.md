@@ -284,3 +284,19 @@ Registrar mudanças, testes e pendências.
 - Hotfix aplicado na branch antiga: commit `4c1ef6011850d7a6aa7dd3c24ed05d11918ae407`, alinhando teste a 384. A branch atual `fix/lbrn2-real-shared-primitives-19-8` já possuía a asserção de 384 e suporte adicional real a PrimID/LineClosed.
 - Recomendação: com mudanças locais preservadas, `git fetch origin`; migrar para `fix/lbrn2-real-shared-primitives-19-8`, executar `-SomenteImportacao -ArquivoLbrn2 "<arquivo .lbrn2 do cliente>"`; só depois de PASS executar a suíte `-Abrir`.
 - **Correção no GitHub sem execução Windows nesta resposta**; não marcar homologada. Arquivo original e versão homologada preservados.
+
+
+## 28/10/2026 — vídeo real e refinamentos editor Qt, rastreio bitmap (experimental)
+
+- Vídeo recebido `20261028_135547.mp4` (49,95s, 1280×720): letra R ainda facetada no zoom; formas/Tesoura e seleção; pedido de simplificar barra Desenho/Mesa, transferir camada diretamente pelo painel, ampliar diagnóstico e importar/rastrear bitmap como no LightBurn.
+- Consultadas referências oficiais LightBurn (Trace Image, Edit Nodes, Convert to Path, Colors & Layers, Optimize Selected Shapes). Referência Web registrada `v0.10.58.7` para histórico de nodes, zoom e Tesoura, mas fonte ZIP do rastreador Web não localizada para copiar.
+- Nova branch `feat/editor-trace-diagnosticos-curvas-19-8`, derivada da compatibilidade real LBRN2. **Não compilada nem homologada no Windows. `main` e `APLICATIVO` intocados.**
+- Texto refinado com flatten Qt em precisão 18× e limite de nós; ainda polilinha, sem tipo de texto editável.
+- CurveDragSession ganhou `smoothSelected` com alças Catmull-Rom convertendo segmentos retos *de curvas nativas v5*, Ctrl+Z; seleção poligonal comum não se torna curva nativa por isso.
+- Nova `src/raster_trace_19_8.hpp`: raster preto/branco Otsu/manual, limpeza de ruído, proteção de letras pequenas e vazados, bordas subpixel limitadas ao erro de simplificação (0,45 px por padrão), múltiplos loops, limites contra travamento.
+- Na GUI: Arquivo → Abrir imagem para traçar ou arrastar PNG/JPG/BMP/WebP; imagem como overlay temporário; botão direito → Traçar imagem; diálogo de prévia/threshold, limpeza e simplificação; confirmação cria vetores agrupados em um Ctrl+Z.
+- Camadas: mudar o combo direito com seleção agora transfere imediatamente, assim como a paleta de cores; sem seleção ativa camada para próximas formas.
+- Tesoura: com coleta ativada, 100 últimos detalhes de clique (motivo da rejeição, ID, número de nós, estado da camada, zoom) no JSON. Botão Copiar diagnóstico para compartilhar; nenhum desenho/coordenada enviado.
+- Barra superior da mesa compactada, sem excluir ações.
+- Gate `-SomenteRastreio` e `-SomenteCamadas`; ambos mais suite completa `-Abrir` exigidos para homologação. Testar Windows com máquina desconectada.
+- Especificação: `DESENVOLVIMENTO/ESPECIFICACOES/EDITOR_TRACE_WEB_LB_19_8.md`. Limitações: não há trace mágico/OCR, curvas naturais para todas as polilinhas, hatch real, nem bitmap persistente no `.alaser` antes de traçar.
