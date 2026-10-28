@@ -11,6 +11,7 @@
 #include <QLineEdit>
 #include <QLabel>
 #include <QDialogButtonBox>
+#include <QCheckBox>
 #include <QString>
 #include <optional>
 
@@ -54,6 +55,11 @@ inline std::optional<Layer> edit(QWidget* parent,const Layer& original){
  form->addRow("Passagens previstas",passes);
  form->addRow("Modo GRBL (referencia)",powerMode);
  column->addLayout(form);
+ auto* optimize=new QCheckBox("Permitir otimizar rota desta camada na previa");
+ optimize->setObjectName("layer_settings_optimize");
+ optimize->setChecked(original.optimizeTravel);
+ optimize->setToolTip("Heuristica de vizinho proximo, sem alterar o desenho; exige habilitar otimizacao global na previa.");
+ column->addWidget(optimize);
  auto* note=new QLabel(
   "M3 nao e 'modo de perfuracao': e o modo de potencia constante. "
   "M4 e o modo de potencia dinamica. Os dois precisam de GRBL compatível "
@@ -72,6 +78,7 @@ inline std::optional<Layer> edit(QWidget* parent,const Layer& original){
  result.powerPercent=power->value();
  result.passes=passes->value();
  result.powerMode=powerMode->currentData().toString().toStdString();
+ result.optimizeTravel=optimize->isChecked();
  return result;
 }
 } // namespace alaser::layerui198
