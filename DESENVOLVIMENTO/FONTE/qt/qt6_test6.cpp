@@ -15,12 +15,15 @@
 #include "bezier_package.hpp"
 #include "integrated_project_edit.hpp"
 #include "bezier_interaction.hpp"
+#include "raster_trace_19_8.hpp"
 #include "render_chunks.hpp"
 #include <QApplication>
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
+#include <QGraphicsPixmapItem>
+#include <QSlider>
 #include <QContextMenuEvent>
 #include <array>
 #include <QPainter>
@@ -185,6 +188,9 @@ class QtEditorLab final:public QGraphicsView{
  CurveDragSession* nativeSession_=nullptr;
  bool nativeMode_=false;
  bool fillPreview_=false; // Editor LightBurn mostra linhas por padrao.
+ QImage rasterSource_; // preview temporario fora do arquivo .alaser
+ QRectF rasterRect_;
+ QGraphicsPixmapItem* rasterOverlay_=nullptr;
  std::map<Key,QGraphicsPathItem*> nativeItems_;
  std::optional<CurveHit> nativeSelectedPart_;
  std::optional<Key> nativeStyledKey_;
@@ -606,6 +612,33 @@ class QtEditorLab final:public QGraphicsView{
   if(shapePreviewItems_.empty())return;
   shapeDragStart_=origin;shapeDragging_=true;
  }
+ void drawRasterOverlay(){
+  rasterOverlay_=nullptr;
+  if(rasterSource_.isNull())return;
+  rasterOverlay_=scene_.addPixmap(QPixmap::fromImage(rasterSource_));
+  rasterOverlay_->setAcceptedMouseButtons(Qt::NoButton);
+  rasterOverlay_->setZValue(-20);
+  rasterOverlay_->setPos(rasterRect_.topLeft());
+  rasterOverlay_->setTransform(QTransform::fromScale(
+    rasterRect_.width()/rasterSource_.width(),rasterRect_.height()/rasterSource_.height()));
+  rasterOverlay_->setOpacity(.72);
+ }
+ void setRasterImage(const QImage& image){
+  if(image.isNull())throw std::runtime_error("Imagem vazia");
+  if(image.width()>10000||image.height()>10000)
+   throw std::runtime_error("Imagem excede 10000 pixels");
+  rasterSource_=image;
+  rasterRect_=QRectF(20,20,120.,120.*image.height()/image.width());
+  rebuild();viewport()->update();
+ }
+ const QImage& rasterImage()const{return rasterSource_;}
+ QRectF rasterBounds()const{return rasterRect_;}
+ bool hasRasterImage()const{return !rasterSource_.isNull();}
+ void clearRasterImage(){
+  rasterSource_=QImage();rasterRect_=QRectF();
+  if(rasterOverlay_){scene_.removeItem(rasterOverlay_);delete rasterOverlay_;rasterOverlay_=nullptr;}
+  viewport()->update();
+ }
  void clearNativeItems(){
   nativeContourPressing_=false;
   for(auto& entry:nativeItems_){scene_.removeItem(entry.second);delete entry.second;}
@@ -690,6 +723,7 @@ public:
  std::function<void()> stateChanged;
  std::function<void(const QString&)> toolWarning;
  std::function<void(Pt)> requestTextAt;
+ std::function<void()> requestTraceImage;
  std::function<void()> requestSelectTool;
  std::function<void(Tool)> requestToolChange;
  std::function<void(const QString&,int)> diagnosticEvent;
@@ -885,7 +919,7 @@ public:
  void invalidateSelectionCache(){picker_.invalidate();}
  void rebuild(){
   clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
-  clearPolyline();clearMarquee();scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
+  clearPolyline();clearMarquee();scene_.clear();rasterOverlay_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
     const auto meta=editor.state().objects.at(c.key.object);
     const auto layer=editor.state().layers.at(meta.layer);
@@ -900,6 +934,7 @@ public:
   if(active_&&(!get(editor.state().doc,*active_)||!editable(editor.state(),active_->object)))active_.reset();
   if(active_)activate(*active_,false);else applySelectionStyles();
   createNativeItems();
+  drawRasterOverlay();
   // O índice só deve ser invalidado por uma alteração real na geometria.
   // Mudanças em camadas, agrupamentos ou destaque preservam o cache.
   fullRebuilds++;viewport()->update();
@@ -1490,10 +1525,17 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   QAction* line=tools->addAction("Linha contínua");
   QAction* scissors=tools->addAction("Tesoura (K)");
   QAction* nodes=tools->addAction("Editar nós");
+  menu.addSeparator();
+  QAction* traceBitmap=menu.addAction("Traçar imagem (Alt+T) — P&B");
+  QAction* clearBitmap=menu.addAction("Remover imagem de referência");
+  traceBitmap->setEnabled(hasRasterImage());
+  clearBitmap->setEnabled(hasRasterImage());
   QAction* picked=menu.exec(e->globalPos());
   if(!picked){e->accept();return;}
   try{
-   if(picked==all)selectAllVisible();
+   if(picked==traceBitmap&&requestTraceImage)requestTraceImage();
+   else if(picked==clearBitmap)clearRasterImage();
+   else if(picked==all)selectAllVisible();
    else if(picked==invert)invertSelection();
    else if(picked==clear)clearSelection();
    else if(picked==remove)deleteSelectedShapes();
