@@ -1925,7 +1925,7 @@ public:
   const QString draw=QString("%1 × %2 mm").arg(workspaceCfg_.drawingWidth,0,'f',0).arg(workspaceCfg_.drawingHeight,0,'f',0);
   const QString machine=QString("%1 × %2 mm").arg(workspaceCfg_.machineWidth,0,'f',0).arg(workspaceCfg_.machineHeight,0,'f',0);
   if(workspaceSummary_)workspaceSummary_->setText("Área de desenho: "+draw+"\nMesa configurada: "+machine);
-  if(workspaceTopMeta_)workspaceTopMeta_->setText("DESENHO  "+draw+"  |  MESA  "+machine);
+  if(workspaceTopMeta_)workspaceTopMeta_->setText("Desenho "+draw+"  ·  Mesa "+machine);
   if(machineProfileSelector_){
    QSignalBlocker block(machineProfileSelector_);
    machineProfileSelector_->setCurrentIndex(workspaceCfg_.profile=="Personalizado"?1:0);
@@ -2238,28 +2238,36 @@ public:
   splitter->addWidget(left);
 
   auto* center=new QFrame;center->setObjectName("canvasPanel");
-  auto* canvasLayout=new QVBoxLayout(center);canvasLayout->setContentsMargins(8,8,8,8);canvasLayout->setSpacing(6);
+  auto* canvasLayout=new QVBoxLayout(center);canvasLayout->setContentsMargins(4,2,4,3);canvasLayout->setSpacing(2);
   auto* canvasBar=new QHBoxLayout;
-  auto* canvasMeta=new QLabel("DESENHO 400 × 400 mm | MESA 400 × 400 mm");canvasMeta->setObjectName("canvasMeta");
+  auto* canvasMeta=new QLabel("Desenho 400 × 400 · Mesa 400 × 400 mm");canvasMeta->setObjectName("canvasMeta");
   workspaceTopMeta_=canvasMeta;
   canvasBar->addWidget(canvasMeta);canvasBar->addStretch();
-  auto* configureBed=new QPushButton("Configurar área...");configureBed->setObjectName("configure_workspace");
+  auto* configureBed=new QPushButton("Área…");configureBed->setObjectName("configure_workspace");
   configureBed->setToolTip("Configurar separadamente a área de desenho e a mesa da máquina");
   configureBed->setFocusPolicy(Qt::NoFocus);canvasBar->addWidget(configureBed);
   connect(configureBed,&QPushButton::clicked,this,[this]{run([this]{configureWorkspace();});});
-  auto* fitBed=new QPushButton("Enquadrar mesa");fitBed->setFocusPolicy(Qt::NoFocus);
+  auto* fitBed=new QPushButton("Mesa");fitBed->setFocusPolicy(Qt::NoFocus);
   connect(fitBed,&QPushButton::clicked,this,[this]{view.fitMachineBed();view.setFocus();});
   canvasBar->addWidget(fitBed);
-  auto* fit=new QPushButton("Ajustar desenho");fit->setObjectName("fit_drawing");fit->setFocusPolicy(Qt::NoFocus);
+  auto* fit=new QPushButton("Desenho");fit->setObjectName("fit_drawing");fit->setFocusPolicy(Qt::NoFocus);
   canvasBar->addWidget(fit);connect(fit,&QPushButton::clicked,this,[this]{
     auto r=view.scene()->itemsBoundingRect();if(!r.isEmpty())view.fitInView(r.adjusted(-10,-10,10,10),Qt::KeepAspectRatio);
     view.reportZoom();view.setFocus();
   });
-  auto* zoom=new QComboBox;zoom->setObjectName("zoom_scale");zoom->setMinimumWidth(100);
+  auto* zoom=new QComboBox;zoom->setObjectName("zoom_scale");zoom->setMinimumWidth(76);
   for(int scale:{1,2,4,6,8,12,24,48,120,240,500,1000,2000,4000})zoom->addItem(QString::number(scale)+"×",scale);
   zoom->addItem("Personalizado",-1.0);
   zoom->setCurrentIndex(3);
   canvasBar->addWidget(zoom);
+  for(auto* button:{configureBed,fitBed,fit}){
+   button->setProperty("compact",true);
+   button->setStyleSheet("QPushButton {padding:2px 5px; min-height:18px; font-size:10px;}");
+  }
+  zoom->setStyleSheet("QComboBox {padding:2px 4px; min-height:19px; font-size:10px;}");
+  configureBed->setToolTip("Configurar área de desenho e mesa");
+  fitBed->setToolTip("Enquadrar a mesa configurada");
+  fit->setToolTip("Ajustar desenho à área disponível");
   view.zoomChanged=[zoom](double level){
    QSignalBlocker block(zoom);
    int ix=-1;
