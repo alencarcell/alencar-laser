@@ -416,10 +416,11 @@ class QtEditorLab final:public QGraphicsView{
  }
  std::optional<QRectF> selectedBounds()const{
   if(selected.empty()||tool!=Tool::Select||nativeMode_)return {};
-  auto ids=expandedSelection();
+  const auto ids=expandedSelection();
+  const std::set<int> idsSet(ids.begin(),ids.end());
   double minX=0.,minY=0.,maxX=0.,maxY=0.;bool has=false;
   for(const auto& c:editor.state().doc.contours){
-   if(std::find(ids.begin(),ids.end(),c.key.object)==ids.end())continue;
+   if(!idsSet.count(c.key.object))continue;
    if(!editable(editor.state(),c.key.object))continue;
    for(const auto& node:c.nodes){
     const Pt p=node.p;
