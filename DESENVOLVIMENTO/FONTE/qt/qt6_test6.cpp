@@ -40,6 +40,7 @@
 #include <QCloseEvent>
 #include <QIcon>
 #include <QPixmap>
+#include <QClipboard>
 #include <QPolygonF>
 #include <QDoubleSpinBox>
 #include <QDialog>
@@ -693,6 +694,7 @@ public:
  std::function<void()> requestSelectTool;
  std::function<void(Tool)> requestToolChange;
  std::function<void(const QString&,int)> diagnosticEvent;
+ std::function<void(const QJsonObject&)> scissorDiagnostic;
  std::function<void(double)> zoomChanged;
  double currentZoom()const{return std::hypot(transform().m11(),transform().m21());}
  void reportZoom(){if(zoomChanged)zoomChanged(currentZoom());}
@@ -1214,6 +1216,26 @@ void mousePressEvent(QMouseEvent* e)override{
      else reason="Tesoura: contorno encontrado, mas sem trecho seguro; verifique vertice, tangencia, sobreposicao ou geometria composta.";
      if(diagnosticEvent)diagnosticEvent("scissor_no_safe_span",1);
     }
+    if(scissorDiagnostic){
+     QJsonObject detail{{"outcome","refused"},{"reason_code",hits.empty()?"no_hit":"no_safe_span"},
+       {"hits",int(hits.size())},{"zoom",currentZoom()}};
+     if(!hits.empty()){
+      const Key key=hits.front().key;
+      const auto* c=get(editor.state().doc,key);
+      detail["object_id"]=key.object;detail["subpath"]=key.sub;
+      if(c){detail["nodes"]=int(c->nodes.size());detail["closed"]=c->closed;}
+      auto meta=editor.state().objects.find(key.object);
+      if(meta!=editor.state().objects.end()){
+       detail["group_id"]=meta->second.group;detail["layer_id"]=meta->second.layer;
+       auto layer=editor.state().layers.find(meta->second.layer);
+       if(layer!=editor.state().layers.end()){
+        detail["layer_locked"]=layer->second.locked;
+        detail["layer_visible"]=layer->second.visible;
+       }
+      }
+     }
+     scissorDiagnostic(detail);
+    }
     if(toolWarning)toolWarning(reason);
     e->accept();return;
    }
@@ -1223,9 +1245,13 @@ void mousePressEvent(QMouseEvent* e)override{
     const int obj=editor.removeScissorSpan(cutting);
     selected.clear();rebuild();if(obj>0)activate({obj,0});
     if(diagnosticEvent)diagnosticEvent("scissor_continuous_span_removed",1);
+    if(scissorDiagnostic)scissorDiagnostic(QJsonObject{{"outcome","cut_committed"},
+      {"object_id",cutting.key.object},{"subpath",cutting.key.sub},
+      {"closed",cutting.closed},{"zoom",currentZoom()}});
     if(stateChanged)stateChanged();
    }catch(const std::exception& ex){
     clearScissorHover();
+    if(scissorDiagnostic)scissorDiagnostic(QJsonObject{{"outcome","cut_error"},{"reason_code","geometry_exception"}});
     if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));
    }
    e->accept();return;
@@ -1674,6 +1700,7 @@ public:
  QLabel* machineHeaderStatus_=nullptr;
  QLabel* collectorSummary_=nullptr;
  QPlainTextEdit* collectorLog_=nullptr;
+ QJsonArray scissorDiagnosticHistory_;
  // Diagnostics must NEVER let an exception cross a Qt event-loop callback.
  void captureEvent(const QString& code,int n=1) noexcept{
   try{
@@ -1762,7 +1789,8 @@ public:
    {"exported_utc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
    {"collection_active",collector_.active()},{"events_retained",int(collector_.records().size())},
    {"events_dropped",double(collector_.dropped())},{"elapsed_ms",double(collector_.elapsedMs())},
-   {"events",events},{"counts",counters},{"project_summary",QJsonObject{
+   {"events",events},{"counts",counters},{"scissor_click_details",scissorDiagnosticHistory_},
+   {"project_summary",QJsonObject{
     {"polyline_contours",int(view.editor.state().doc.contours.size())},
     {"polyline_nodes",double(countNodes(view.editor.state().doc))},
     {"bezier_contours",int(curves?curves->committed().contours.size():0)},
@@ -2409,10 +2437,18 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   exportBtn->setObjectName("diagnostics_export");
   connect(exportBtn,&QPushButton::clicked,this,[this]{run([this]{exportCapture();});});
   collectionLayout->addWidget(exportBtn);
+  auto* copyBtn=new QPushButton("Copiar diagnóstico JSON para compartilhar");
+  copyBtn->setObjectName("diagnostics_copy");
+  connect(copyBtn,&QPushButton::clicked,this,[this]{
+   QGuiApplication::clipboard()->setText(
+    QString::fromUtf8(QJsonDocument(captureDocument()).toJson(QJsonDocument::Indented)));
+   if(status)status->setText("Diagnóstico copiado. Cole no chat para análise técnica.");
+  });
+  collectionLayout->addWidget(copyBtn);
   auto* clearBtn=new QPushButton("Limpar dados coletados");
   clearBtn->setObjectName("diagnostics_clear");
   connect(clearBtn,&QPushButton::clicked,this,[this]{
-   collector_.clear();collectorLog_->clear();updateCaptureSummary();
+   collector_.clear();scissorDiagnosticHistory_=QJsonArray{};collectorLog_->clear();updateCaptureSummary();
   });collectionLayout->addWidget(clearBtn);
   inspectorTabs->addTab(collectionTab,"Diagnósticos");updateCaptureSummary();
 
@@ -2718,6 +2754,12 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    });
   view.stateChanged=[this]{if(uiPersistenceEnabled_)recoveryPolicy_.edited();refresh();};
   view.diagnosticEvent=[this](const QString& code,int count){captureEvent(code,count);};
+  view.scissorDiagnostic=[this](const QJsonObject& detail){
+   if(!collector_.active())return;
+   if(scissorDiagnosticHistory_.size()>=100)scissorDiagnosticHistory_.removeAt(0);
+   scissorDiagnosticHistory_.append(detail);
+   captureEvent("scissor_click_detail");
+  };
   view.drawingLayer=[this]{return layers->currentData().toInt();};
    view.requestTextAt=[this](Pt at){insertVectorText(at);};
    connect(qApp,&QApplication::focusChanged,this,[this](QWidget* previous,QWidget* next){
