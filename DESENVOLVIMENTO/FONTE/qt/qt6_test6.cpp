@@ -3609,6 +3609,100 @@ static QJsonObject newDrawingTools198Test(const QString& directory){
 
 // Qt GUI: texto direto na mesa, proporcao, escala livre e rotacao.
 // Qt 19.8: camadas persistentes, modo visual, grupos multiplos e Ctrl+U.
+// 19.8: topologia real do arquivo TESTE TESOURA.alaser (sem copiar sua arte).
+// O arquivo do cliente tem 571 anéis com ultimo no repetido e closed=false.
+static QJsonObject scissorClosures198Test(const QString& directory){
+ QDir().mkpath(directory);
+ Document d;d.nextId=6;
+ d.contours.push_back({{1,0},
+  {{1,{0,0}},{2,{20,0}},{3,{20,20}},{4,{0,20}},{5,{0,0}}},false});
+ check(hasExactDuplicateClosure(d.contours.front()),"Fecho duplicado nao identificado");
+ const auto original=serialize(encode(d));
+ ScissorSpanPlanner planner;planner.reset(d);
+ auto candidate=planner.candidate(d,Hit{{1,0},0,0,{10,0}});
+ check(candidate.has_value()&&candidate->closed,"Tesoura ignorou anel virtual");
+ check(serialize(encode(d))==original,"Hover da Tesoura alterou arquivo");
+ Editor isolated(fromDocument(d));
+ isolated.removeScissorSpan(*candidate);
+ check(isolated.state().doc.contours.empty(),"Tesoura nao removeu anel isolado");
+ check(isolated.undo(),"Undo do corte falhou");
+ check(serialize(encode(isolated.state().doc))==original,"Undo nao restaurou fecho original");
+ Document crosses=d;
+ crosses.contours.push_back({{2,0},{{6,{5,-10}},{7,{5,30}}},false});
+ crosses.contours.push_back({{3,0},{{8,{15,-10}},{9,{15,30}}},false});
+ crosses.nextId=10;
+ ScissorSpanPlanner crossPlanner;crossPlanner.reset(crosses);
+ auto crossSpan=crossPlanner.candidate(crosses,Hit{{1,0},0,0,{10,0}});
+ check(crossSpan.has_value()&&crossSpan->closed,
+  "Tesoura nao encontrou segmento entre cruzamentos com fecho duplicado");
+ const auto crossingBefore=serialize(encode(crosses));
+ Editor crossed(fromDocument(crosses));
+ const auto crossUndo=crossed.undoCount();
+ crossed.removeScissorSpan(*crossSpan);
+ check(crossed.undoCount()==crossUndo+1,"Corte nao registrou undo unico");
+ check(crossed.state().doc.contours.size()==3,"Corte alterou outras formas");
+ const auto* trimmed=get(crossed.state().doc,{1,0});
+ check(trimmed&&(!trimmed->closed),"Corte nao abriu restante do anel");
+ check(sameDoc(Document{{crosses.contours[1],crosses.contours[2]},10},
+                   Document{{crossed.state().doc.contours[1],crossed.state().doc.contours[2]},10}),
+       "Corte alterou outros objetos");
+ check(crossed.undo()&&serialize(encode(crossed.state().doc))==crossingBefore,
+       "Undo nao restaurou contornos cruzados");
+ // Alca central move o conjunto com uma unica acao.
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ auto& v=w.view;v.setTransform(QTransform::fromScale(5.,5.));
+ v.centerOn(QPointF(40,40));QApplication::processEvents();
+ const int id=v.editor.rectangle({30,30},20,20);v.rebuild();
+ clickButton(w,"select");v.activate({id,0});
+ const auto start=v.mapFromScene({40,40}),end=v.mapFromScene({50,40});
+ const auto nUndo=v.editor.undoCount();
+ QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,start);
+ QMouseEvent move(QEvent::MouseMove,QPointF(end),
+   QPointF(v.viewport()->mapToGlobal(end)),Qt::NoButton,Qt::LeftButton,Qt::NoModifier);
+ QApplication::sendEvent(v.viewport(),&move);
+ QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,end);
+ QApplication::processEvents();
+ check(v.editor.undoCount()==nUndo+1,"Alca central nao gerou um unico undo");
+ const auto* moved=get(v.editor.state().doc,{id,0});
+ check(moved&&std::abs(moved->nodes.front().p.x-40.)<.5,
+       "Alca central nao moveu o objeto em 10 mm");
+ check(v.editor.undo(),"Alca central nao pode ser desfeita");
+ check(std::abs(get(v.editor.state().doc,{id,0})->nodes.front().p.x-30.)<.1,
+       "Undo da alca central falhou");
+ // Paleta: clique simples move selecao para camada.
+ v.activate({id,0});
+ auto* swatch=w.findChild<QPushButton*>("layer_swatch_3");
+ check(swatch,"Swatch nao encontrado");
+ QTest::mouseClick(swatch,Qt::LeftButton);QApplication::processEvents();
+ check(v.editor.state().objects.at(id).layer==3,
+       "Clique simples na paleta nao moveu a selecao para camada 3");
+ // XML LightBurn com raio em Rect e elipse.
+ const QString path=directory+"/LBRN2_RAIO_19_8.lbrn2";
+ QFile xml(path);check(xml.open(QIODevice::WriteOnly),"Nao criou fixture LBRN2");
+ const QByteArray fixture=R"XML(<?xml version="1.0" encoding="utf-8"?>
+<LightBurnProject>
+<Shape Type="Rect" W="20" H="10" Cr="3" CutIndex="2">
+ <XForm>1 0 0 1 25 30</XForm>
+</Shape>
+<Shape Type="Ellipse" W="16" H="16" CutIndex="3">
+ <XForm>1 0 0 1 50 50</XForm>
+</Shape>
+</LightBurnProject>)XML";
+ xml.write(fixture);xml.close();
+ auto parsed=lightburn::readGeometry(path);
+ check(parsed.shapeCount==2&&parsed.state.doc.contours.size()==2,
+       "Importador rejeitou retangulo arredondado e elipse");
+ check(parsed.state.doc.contours.front().nodes.size()>70,
+       "Cr foi ignorado e retangulo virou cantos retos");
+ check(parsed.state.doc.contours[1].nodes.size()==384,
+       "Elipse LBRN2 nao manteve suavizacao");
+ w.grab().save(directory+"/ALCA_CENTRAL_19_8.png");
+ return {{"status","PASS"},{"client_topology_reproduced",true},
+   {"virtual_closed_isolated",true},{"virtual_closed_crossings",true},
+   {"original_and_undo_preserved",true},{"center_move",true},
+   {"palette_simple_click",true},{"rounded_rect_lbrn2",true},
+   {"laser_commands_sent",false}};
+}
 static QJsonObject layersUngroup198Test(const QString& directory){
  QDir().mkpath(directory);
  LabWindow w(Document{});w.show();QApplication::processEvents();
@@ -3941,6 +4035,12 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--scissor-closures-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=scissorClosures198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_CASO_REAL_19_8.json");if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--layers-ungroup-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=layersUngroup198Test(out);}
