@@ -4,6 +4,7 @@
 #include "preview_sim_19_8.hpp"
 #include "preview_motion_19_8.hpp"
 #include "preview_raster_19_8.hpp"
+#include "preview_route_19_8.hpp"
 #include <QDialog>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -109,6 +110,12 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  rasterControls->addWidget(bitmapMode,2,2);
  rasterControls->addWidget(bitmapThreshold,2,3);
  column->addLayout(rasterControls);
+ auto* optimizeTravel=new QCheckBox("Reduzir deslocamentos (heuristica local por camada)");
+ optimizeTravel->setToolTip("Vizinho mais proximo; reordena apenas Line, nao garante a rota global mais curta. Sem modificar o projeto.");
+ auto* useLayerFeeds=new QCheckBox("Utilizar velocidades virtuais salvas por camada");
+ useLayerFeeds->setChecked(true);
+ useLayerFeeds->setToolTip("Potencia/M3/M4 permanecem apenas registrados; passes de cada camada ainda nao alteram a estimativa.");
+ column->addWidget(optimizeTravel);column->addWidget(useLayerFeeds);
  auto* stats=new QLabel;stats->setWordWrap(true);column->addWidget(stats);
  auto* canvas=new QLabel;canvas->setMinimumHeight(280);
  canvas->setAlignment(Qt::AlignCenter);column->addWidget(canvas,1);
@@ -187,7 +194,8 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    scan.intervalMm=interval->value();
    scan.overscanMm=overscan->value();
    scan.bidirectional=bidirectional->isChecked();
-   Plan combined=sourcePlan;
+   Plan combined=optimizeTravel->isChecked()?
+      route::nearestNeighborLines(source):sourcePlan;
    if(enableFill->isChecked()){
     raster::appendFill(combined,source,scan);
     combined.ignoredFill=0; // Fill vetorial incluido; contornos abertos nao geram hatch.
@@ -214,16 +222,28 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
                        imageBounds.width(),imageBounds.height()},scan);
    }
    shown=repeated(combined,passes->value());
-   timeline=motion::estimate(shown,settings);
-   const double nominal=minutes(shown,settings.cutMmMin,settings.rapidMmMin)*60.0;
+   const auto layerSpeed=[&](int id){
+    const auto it=source.layers.find(id);
+    return useLayerFeeds->isChecked()&&it!=source.layers.end()?
+      it->second.speedMmMin:settings.cutMmMin;
+   };
+   timeline=motion::estimateWithFeeds(shown,settings,layerSpeed);
+   double nominal=0;
+   for(const auto& move:shown.moves){
+    const double length=std::hypot(move.to.x-move.from.x,move.to.y-move.from.y);
+    const double feed=move.laser?layerSpeed(move.layer):settings.rapidMmMin;
+    nominal+=length/feed*60.0;
+   }
    stats->setText(QString("Movimento virtual ativo %1 mm | viagem %2 mm | tempo nominal %3 s | "
      "tempo c/ aceleracao %4 s | grupos %5 | "
      "Fill omitido %6, Saida off %7, T1/T2 %8. "
-     "Fill P&B e imagem apenas demonstrativos; sem potencia nem G-code.")
+     "Rota linha original %9 mm, otimizada %10 mm (heuristica). "
+     "Fill e imagem: demonstrativos. M3/M4 e potencia salvos, sem emissao.")
      .arg(shown.cutMm,0,'f',1).arg(shown.travelMm,0,'f',1)
      .arg(nominal,0,'f',1).arg(timeline.totalSeconds,0,'f',1)
      .arg(qulonglong(timeline.runs)).arg(qulonglong(shown.ignoredFill))
-     .arg(qulonglong(shown.ignoredDisabled)).arg(qulonglong(shown.ignoredTool)));
+     .arg(qulonglong(shown.ignoredDisabled)).arg(qulonglong(shown.ignoredTool))
+     .arg(sourcePlan.travelMm,0,'f',1).arg(combined.travelMm,0,'f',1));
    play->setEnabled(!shown.moves.empty()&&timeline.totalSeconds>0);
    render();
   }catch(const std::exception& e){
@@ -244,6 +264,10 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"model","kinematic-start-stop-angular-runs-12deg"},
    {"notes","Experimental Line, vector Fill, binary image. Simplified scan, no GRBL/LightBurn equivalence"},
    {"passes",passes->value()},
+   {"route_heuristic_enabled",optimizeTravel->isChecked()},
+   {"line_travel_original_mm",sourcePlan.travelMm},
+   {"layer_feed_enabled",useLayerFeeds->isChecked()},
+   {"layer_parameters_are_not_machine_commands",true},
    {"fill_simulation_enabled",enableFill->isChecked()},
    {"image_simulation_enabled",enableImage->isChecked()&&imagePresent},
    {"scan_line_interval_mm",interval->value()},
@@ -282,7 +306,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  for(auto* box:{interval,overscan})
   QObject::connect(box,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
                    &dialog,[&](double){recalculate();});
- for(auto* checkbox:{enableFill,enableImage,bidirectional})
+ for(auto* checkbox:{enableFill,enableImage,bidirectional,optimizeTravel,useLayerFeeds})
   QObject::connect(checkbox,&QCheckBox::toggled,&dialog,[&](bool){recalculate();});
  QObject::connect(bitmapMode,QOverload<int>::of(&QComboBox::currentIndexChanged),
                   &dialog,[&](int){recalculate();});
