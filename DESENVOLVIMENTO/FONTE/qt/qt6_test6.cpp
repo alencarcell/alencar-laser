@@ -3087,22 +3087,22 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     auto* air=flag("A",layer.air,"Anotação de assistência de ar (sem ação física)");
     output->setEnabled(!tool);air->setEnabled(!tool);
     connect(output,&QCheckBox::toggled,this,[this,id](bool checked){
-     run([this,id,checked]{
+     QTimer::singleShot(0,this,[this,id,checked]{run([this,id,checked]{
       const auto l=view.editor.state().layers.at(id);
       view.editor.setLayerPreviewFlags(id,checked,l.air);
-     });
+     });});
     });
     connect(show,&QCheckBox::toggled,this,[this,id](bool checked){
-     run([this,id,checked]{
+     QTimer::singleShot(0,this,[this,id,checked]{run([this,id,checked]{
       const auto l=view.editor.state().layers.at(id);
       view.editor.setLayerFlags(id,checked,l.locked);view.rebuild();
-     });
+     });});
     });
     connect(air,&QCheckBox::toggled,this,[this,id](bool checked){
-     run([this,id,checked]{
+     QTimer::singleShot(0,this,[this,id,checked]{run([this,id,checked]{
       const auto l=view.editor.state().layers.at(id);
       view.editor.setLayerPreviewFlags(id,l.output,checked);
-     });
+     });});
     });
     activeLayerRows_->addWidget(row);
    }
@@ -4585,9 +4585,20 @@ static QJsonObject lightburnImport198Test(const QString& directory){
  QDragEnterEvent drag(QPoint(20,20),Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);
  QApplication::sendEvent(&w,&drag);
  check(drag.isAccepted(),"janela nao aceita arrastar .lbrn2");
+ QDragEnterEvent canvasDrag(QPoint(20,20),Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);
+ QApplication::sendEvent(w.view.viewport(),&canvasDrag);
+ check(canvasDrag.isAccepted(),"viewport nao aceita .lbrn2 por arrastar");
+ const QString samplePng=temp.filePath("arraste.png");
+ QImage sample(20,20,QImage::Format_ARGB32);sample.fill(Qt::white);
+ check(sample.save(samplePng),"nao foi possivel gerar fixture de imagem");
+ QMimeData imageMime;imageMime.setUrls({QUrl::fromLocalFile(samplePng)});
+ QDragEnterEvent canvasImg(QPoint(20,20),Qt::CopyAction,&imageMime,Qt::LeftButton,Qt::NoModifier);
+ QApplication::sendEvent(w.view.viewport(),&canvasImg);
+ check(canvasImg.isAccepted(),"viewport nao aceita PNG por arrastar");
  return {{"status","PASS"},{"rect_transform",true},{"group_transform",true},
          {"ellipse_384_segments",true},{"path_lines",true},{"path_bezier",true},{"layers",true},{"unsupported_path_rejected",true},
-         {"drag_enter_lbrn2",true},{"lineclosed_shared_primid",true},{"shared_verts",true},{"unknown_primid_rejected",true},{"hardware_commands_sent",false}};
+         {"drag_enter_lbrn2",true},{"drag_enter_canvas_lbrn2_png",true},
+         {"lineclosed_shared_primid",true},{"shared_verts",true},{"unknown_primid_rejected",true},{"hardware_commands_sent",false}};
 }
 
 
