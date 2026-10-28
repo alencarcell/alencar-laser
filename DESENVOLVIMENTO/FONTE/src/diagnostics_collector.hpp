@@ -47,7 +47,13 @@ public:
    "undo","redo","project_saved","project_opened","command_error",
    "grbl_connected","grbl_disconnected","grbl_probe","grbl_received",
    "grbl_tcp_connect_requested","grbl_tcp_connected","grbl_tcp_disconnected",
-   "grbl_tcp_error","objects_layer_changed"};
+   "grbl_tcp_error","objects_layer_changed",
+   // Eventos reais usados pelo Qt 19.8: antes eram rejeitados silenciosamente.
+   "scissor_no_hit","scissor_no_safe_span","scissor_continuous_span_removed",
+   "vector_text_created","groups_ungrouped","layer_mode_visual_changed",
+   "lightburn_geometry_imported","marquee_selected","pencil_stroke_created",
+   "tool_scissors_activated","tool_bezier_activated","image_trace_started",
+   "image_trace_created","image_trace_cancelled"};
   if(std::find(allow.begin(),allow.end(),event)==allow.end())throw std::invalid_argument("unknown diagnostic event");
   if(objects<0)throw std::invalid_argument("negative item count");
   ++counters_[event];
