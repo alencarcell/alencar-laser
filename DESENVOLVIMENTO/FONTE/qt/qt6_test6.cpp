@@ -4212,6 +4212,37 @@ static QJsonObject inlineTransforms198Test(const QString& directory){
  const auto reloaded=fromMetadata(previewEditor.state().doc,metadata(previewEditor.state()));
  check(!reloaded.layers.at(1001).output&&reloaded.layers.at(0).air,
        "Metadata Output/Air nao foi preservada");
+ // Regressao 19.8: tempo de aceleracao X/Y e multiplas passagens.
+ Editor timingEditor(Document{});
+ const int timingId=timingEditor.rectangle({10,10},20,10);
+ const auto singlePass=sim198::build(timingEditor.state());
+ const auto twoPasses=sim198::repeated(singlePass,2);
+ check(std::abs(twoPasses.cutMm-120.)<.01&&
+       twoPasses.moves.size()>=singlePass.moves.size()*2,
+       "Multipasses nao repetiram o comprimento completo");
+ sim198::motion::Settings physics;
+ const auto timing=sim198::motion::estimate(twoPasses,physics);
+ check(timing.totalSeconds>0&&timing.endSeconds.size()==twoPasses.moves.size(),
+       "Modelo cinemático nao gerou cronograma");
+ check(std::abs(timing.totalSeconds-timing.lineSeconds-timing.travelSeconds)<1e-7,
+       "Tempo de linha + deslocamento difere do total");
+ check(timing.totalSeconds>
+       sim198::minutes(twoPasses,physics.cutMmMin,physics.rapidMmMin)*60.,
+       "Aceleracao por parada deveria exceder estimativa nominal nesta fixture");
+ const auto firstMove=sim198::motion::moveIndexAt(twoPasses,timing,0.0);
+ const auto lastMove=sim198::motion::moveIndexAt(twoPasses,timing,timing.totalSeconds+1);
+ check(firstMove==0&&lastMove==twoPasses.moves.size()-1,
+       "Slider de tempo nao incluiu primeiro/ultimo movimento");
+ timingEditor.setLayerPreviewFlags(0,false,false);
+ check(sim198::repeated(sim198::build(timingEditor.state()),3).moves.empty(),
+       "Camada Output off reapareceu com passes multiplos");
+ bool rejectedPasses=false;
+ try{(void)sim198::repeated(singlePass,21);}
+ catch(const std::exception&){rejectedPasses=true;}
+ check(rejectedPasses,"Numero de passagens acima do limite foi aceito");
+ // A estimativa recebe apenas acesso constante ao estado.
+ check(timingEditor.state().doc.contours.size()==1,
+       "O planejador modificou a geometria de origem");
 
  LabWindow textWindow(Document{});textWindow.show();QApplication::processEvents();
  // Teste de viewport: barra lateral nao pode recortar icones horizontalmente.
