@@ -4315,6 +4315,98 @@ static QJsonObject previewRaster198Test(){
     {"size_limits_enforced",true},{"hardware_commands_sent",false}};
 }
 
+static QJsonObject routeNesting198Test(){
+ auto laserRuns=[](const sim198::Plan& plan){
+  std::vector<double> runs;double length=0;
+  for(const auto& move:plan.moves){
+   const double d=std::hypot(move.to.x-move.from.x,move.to.y-move.from.y);
+   if(move.laser)length+=d;
+   else if(length>0){runs.push_back(length);length=0;}
+  }
+  if(length>0)runs.push_back(length);
+  return runs;
+ };
+ // Nested shapes added in worst order: outer first, then middle, then inner.
+ Editor e(Document{});
+ e.rectangle({0,0},100,100);
+ e.rectangle({20,20},60,60);
+ e.rectangle({40,40},20,20);
+ const auto fingerprint=stateText(e.state());
+ const auto original=sim198::build(e.state());
+ std::size_t constraints=0;
+ const auto optimized=sim198::route::nearestNeighborLines(
+    e.state(),300000,1500,true,&constraints);
+ const auto order=laserRuns(optimized);
+ check(constraints==3,"Tres contornos aninhados devem gerar 3 dependencias");
+ check(order.size()==3&&std::abs(order[0]-80.)<1e-6&&
+       std::abs(order[1]-240.)<1e-6&&std::abs(order[2]-400.)<1e-6,
+       "Contornos internos nao precederam externos");
+ check(std::abs(original.cutMm-optimized.cutMm)<1e-8&&
+       fingerprint==stateText(e.state()),
+       "Inner-first mudou geometria ou distancia total de corte");
+ std::size_t offConstraints=99;
+ const auto without=sim198::route::nearestNeighborLines(
+    e.state(),300000,1500,false,&offConstraints);
+ const auto offOrder=laserRuns(without);
+ check(offConstraints==0&&offOrder.size()==3&&
+       std::abs(offOrder.front()-400.)<1e-6,
+       "Desabilitar inner-first nao restaurou vizinho mais proximo");
+ // Explicit per-layer opt-out is stronger than global inner-first.
+ auto config=e.state().layers.at(0);config.optimizeTravel=false;
+ e.configureLayer(0,config);
+ const auto preserved=sim198::route::nearestNeighborLines(e.state());
+ const auto preservedOrder=laserRuns(preserved);
+ check(preservedOrder.size()==3&&std::abs(preservedOrder.front()-400.)<1e-6,
+       "Opt-out da camada ignorou ordem original");
+ // Different layers never impose cross-layer nesting constraints.
+ Editor different(Document{});
+ different.rectangle({0,0},100,100);
+ different.addLayer(1,"Linha interna");
+ different.rectangle({30,30},10,10,1);
+ std::size_t crossLayer=99;
+ const auto independent=sim198::route::nearestNeighborLines(
+    different.state(),300000,1500,true,&crossLayer);
+ const auto independentRuns=laserRuns(independent);
+ check(crossLayer==0&&independentRuns.size()==2&&
+       std::abs(independentRuns.front()-400.)<1e-6,
+       "Inner-first cruzou a ordem de camadas");
+ // Internal open scoring lines are allowed; outer must be closed.
+ Editor open(Document{});
+ open.rectangle({0,0},100,100);
+ open.line({30,50},{70,50});
+ std::size_t openConstraints=0;
+ const auto openPlan=sim198::route::nearestNeighborLines(
+     open.state(),300000,1500,true,&openConstraints);
+ const auto openRuns=laserRuns(openPlan);
+ check(openConstraints==1&&openRuns.size()==2&&
+       std::abs(openRuns.front()-40.)<1e-6,
+       "Linha aberta interna nao teve precedencia sobre corte externo");
+ // Touching the external edge is ambiguous; never force containment.
+ Editor touching(Document{});
+ touching.rectangle({0,0},100,100);
+ touching.rectangle({0,20},20,20);
+ std::size_t touchConstraints=99;
+ (void)sim198::route::nearestNeighborLines(
+    touching.state(),300000,1500,true,&touchConstraints);
+ check(touchConstraints==0,"Contorno tocando borda criou falsa dependência");
+ // T1/T2 remain excluded even if nested and visibly in the design.
+ Editor guide(Document{});
+ guide.rectangle({0,0},100,100);
+ guide.addLayer(1001,"T1 - guia");
+ guide.rectangle({20,20},20,20,1001);
+ std::size_t toolConstraints=99;
+ const auto safe=sim198::route::nearestNeighborLines(
+    guide.state(),300000,1500,true,&toolConstraints);
+ check(toolConstraints==0&&std::abs(safe.cutMm-400.)<1e-6,
+       "Guia T1 contaminou plano de contornos");
+ return {{"status","PASS"},{"three_level_nesting",true},
+  {"nested_line_preserves_length",true},{"disable_inner_first",true},
+  {"per_layer_opt_out",true},{"layer_order_preserved",true},
+  {"open_inner_marking_first",true},{"touching_not_contained",true},
+  {"tool_layers_excluded",true},{"read_only",true},
+  {"hardware_commands_sent",false}};
+}
+
 static QJsonObject layerRoute198Test(){
  Editor model(Document{});
  const int a=model.rectangle({10,10},2,2);
@@ -5057,6 +5149,13 @@ int main(int argc,char** argv){
   try{report=previewRaster198Test();}
   catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile f(out+"/RESULTADO_PREVIA_RASTER_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--route-nesting-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=routeNesting198Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_CONTORNOS_INTERNOS_19_8.json");
   if(!f.open(QIODevice::WriteOnly))return 2;
   f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--layer-route-19-8-test"){
