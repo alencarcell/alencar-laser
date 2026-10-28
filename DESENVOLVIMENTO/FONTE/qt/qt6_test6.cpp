@@ -1,6 +1,7 @@
 // Alencar Laser TESTE_15 — Qt6 integration laboratory (Bézier native + v5), not production software.
 // GRBL 19.5: diagnostic observer only; no G-code, motion or laser operations.
 #include "editor_tools.hpp"
+#include "raster_trace_19_8.hpp"
 #include "workspace_dimensions.hpp"
 #include "lightburn_reference_inspector.hpp"
 #include "lightburn_geometry_import.hpp"
@@ -21,6 +22,8 @@
 #include <QGraphicsScene>
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
+#include <QGraphicsPixmapItem>
+#include <QSlider>
 #include <QContextMenuEvent>
 #include <array>
 #include <QPainter>
@@ -186,6 +189,10 @@ class QtEditorLab final:public QGraphicsView{
  CurveDragSession* nativeSession_=nullptr;
  bool nativeMode_=false;
  bool fillPreview_=false; // Editor LightBurn mostra linhas por padrao.
+ QImage traceRasterImage_;QPixmap traceRasterPixmap_;
+ Pt traceRasterOrigin_{};
+ double traceRasterMmPerPixel_=1.;
+ QGraphicsPixmapItem* traceRasterItem_=nullptr;
  std::map<Key,QGraphicsPathItem*> nativeItems_;
  std::optional<CurveHit> nativeSelectedPart_;
  std::optional<Key> nativeStyledKey_;
@@ -695,6 +702,23 @@ public:
  std::function<void(Tool)> requestToolChange;
  std::function<void(const QString&,int)> diagnosticEvent;
  std::function<void(const QJsonObject&)> scissorDiagnostic;
+ std::function<void()> requestTraceRaster;
+ bool hasTraceRaster()const{return !traceRasterImage_.isNull();}
+ QImage traceRasterImage()const{return traceRasterImage_;}
+ Pt traceRasterOrigin()const{return traceRasterOrigin_;}
+ double traceRasterMmPerPixel()const{return traceRasterMmPerPixel_;}
+ void setTraceRaster(const QImage& image,Pt topLeft,double mmPerPixel){
+  if(image.isNull()||image.width()>1600||image.height()>1600||
+     qint64(image.width())*image.height()>1500000)
+   throw std::runtime_error("Imagem grande demais: ate 1600 px e 1,5 MP.");
+  traceRasterImage_=image.convertToFormat(QImage::Format_ARGB32);
+  traceRasterPixmap_=QPixmap::fromImage(image);
+  traceRasterOrigin_=topLeft;traceRasterMmPerPixel_=mmPerPixel;rebuild();
+ }
+ void clearTraceRaster(){
+  traceRasterImage_=QImage();traceRasterPixmap_=QPixmap();
+  traceRasterItem_=nullptr;rebuild();
+ }
  std::function<void(double)> zoomChanged;
  double currentZoom()const{return std::hypot(transform().m11(),transform().m21());}
  void reportZoom(){if(zoomChanged)zoomChanged(currentZoom());}
@@ -902,6 +926,15 @@ public:
   if(active_&&(!get(editor.state().doc,*active_)||!editable(editor.state(),active_->object)))active_.reset();
   if(active_)activate(*active_,false);else applySelectionStyles();
   createNativeItems();
+  traceRasterItem_=nullptr;
+  if(!traceRasterImage_.isNull()){
+   traceRasterItem_=scene_.addPixmap(traceRasterPixmap_);
+   traceRasterItem_->setScale(traceRasterMmPerPixel_);
+   traceRasterItem_->setPos(traceRasterOrigin_.x,traceRasterOrigin_.y);
+   traceRasterItem_->setOpacity(0.60);
+   traceRasterItem_->setZValue(4);
+   traceRasterItem_->setAcceptedMouseButtons(Qt::NoButton);
+  }
   // O índice só deve ser invalidado por uma alteração real na geometria.
   // Mudanças em camadas, agrupamentos ou destaque preservam o cache.
   fullRebuilds++;viewport()->update();
@@ -1516,10 +1549,14 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   QAction* line=tools->addAction("Linha contínua");
   QAction* scissors=tools->addAction("Tesoura (K)");
   QAction* nodes=tools->addAction("Editar nós");
+  menu.addSeparator();
+  QAction* traceBitmap=menu.addAction("Traçar imagem (preto e branco)...");
+  traceBitmap->setEnabled(hasTraceRaster()&&bool(requestTraceRaster));
   QAction* picked=menu.exec(e->globalPos());
   if(!picked){e->accept();return;}
   try{
-   if(picked==all)selectAllVisible();
+   if(picked==traceBitmap&&requestTraceRaster)requestTraceRaster();
+   else if(picked==all)selectAllVisible();
    else if(picked==invert)invertSelection();
    else if(picked==clear)clearSelection();
    else if(picked==remove)deleteSelectedShapes();
