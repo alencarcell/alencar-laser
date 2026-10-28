@@ -1598,32 +1598,80 @@ static IntegratedProject openNative(const QString& file){
 }
 static double percentile(std::vector<double> values,double q){if(values.empty())return 0;std::sort(values.begin(),values.end());return values[size_t((values.size()-1)*q)];}
 // Vetorizador unico usado pelo botao Texto e pela regressao Qt; nao envia G-code.
+// Tesselação adaptativa de Bézier cúbica de fonte: erro geométrico em mm.
+// QPainterPath::toSubpathPolygons usa tolerância visual no espaço do glifo e
+// cria facetas visíveis quando o usuário aproxima letras (ex.: R, O, S).
+static double cubicFlatness(Pt a,Pt b,Pt c,Pt d){
+ const double dx=d.x-a.x,dy=d.y-a.y,length=std::hypot(dx,dy);
+ if(length<1e-9)return std::max(dist(a,b),dist(a,c));
+ return std::max(std::abs((b.x-a.x)*dy-(b.y-a.y)*dx),
+                 std::abs((c.x-a.x)*dy-(c.y-a.y)*dx))/length;
+}
+static void appendAdaptiveCubic(std::vector<Pt>& out,Pt a,Pt b,Pt c,Pt d,
+                                double tolerance,int depth=0){
+ if(out.size()>=80000)throw std::runtime_error("Texto excedeu limite seguro de nos");
+ if(depth>=15||cubicFlatness(a,b,c,d)<=tolerance){
+  if(out.empty()||dist(out.back(),d)>1e-8)out.push_back(d);
+  return;
+ }
+ const Pt ab=(a+b)*.5,bc=(b+c)*.5,cd=(c+d)*.5;
+ const Pt abc=(ab+bc)*.5,bcd=(bc+cd)*.5,m=(abc+bcd)*.5;
+ appendAdaptiveCubic(out,a,ab,abc,m,tolerance,depth+1);
+ appendAdaptiveCubic(out,m,bcd,cd,d,tolerance,depth+1);
+}
 static std::vector<std::vector<Pt>> vectorTextOutlines(const QString& value,QFont font,
                                                         double height,Pt origin){
- if(value.isEmpty()||value.size()>100||!std::isfinite(height)||height<1||height>150)
+ if(value.trimmed().isEmpty()||value.size()>100||!std::isfinite(height)||height<1||height>150)
   throw std::runtime_error("Texto ou altura fora do limite");
- font.setPixelSize(180);
+ font.setPixelSize(1024); // escala interna alta; coordenadas finais continuam em mm
  QPainterPath outline;outline.addText(QPointF(0,0),font,value);
  if(outline.isEmpty())throw std::runtime_error("A fonte nao produziu contornos");
  const QRectF bounds=outline.boundingRect();
  if(bounds.height()<1e-6)throw std::runtime_error("Fonte sem altura util");
- QTransform t;t.translate(origin.x,origin.y);
+ QTransform t;
+ t.translate(origin.x,origin.y);
  const double scale=height/bounds.height();t.scale(scale,scale);
  t.translate(-bounds.left(),-bounds.top());
- const auto polygons=outline.toSubpathPolygons(t);
+ auto transformed=[&](const QPainterPath::Element& e)->Pt {
+  const QPointF p=t.map(QPointF(e.x,e.y));return {p.x(),p.y()};
+ };
  std::vector<std::vector<Pt>> shapes;
- for(const QPolygonF& polygon:polygons){
-  std::vector<Pt> points;points.reserve(size_t(polygon.size()));
-  for(const QPointF& q:polygon){
-   const Pt p{q.x(),q.y()};
-   if(points.empty()||dist(points.back(),p)>1e-5)points.push_back(p);
+ std::vector<Pt> current;
+ auto complete=[&]{
+  if(current.size()>1&&dist(current.front(),current.back())<1e-7)current.pop_back();
+  if(current.size()>=3)shapes.push_back(std::move(current));
+  current.clear();
+ };
+ constexpr double toleranceMm=.016; // erro máximo local de curva, não arredonda cantos
+ for(int i=0;i<outline.elementCount();++i){
+  const auto e=outline.elementAt(i);
+  if(e.type==QPainterPath::MoveToElement){
+   complete();current.push_back(transformed(e));continue;
   }
-  if(points.size()>1&&dist(points.front(),points.back())<1e-5)points.pop_back();
-  if(points.size()>=3)shapes.push_back(std::move(points));
+  if(e.type==QPainterPath::LineToElement){
+   Pt p=transformed(e);
+   if(current.empty()||dist(current.back(),p)>1e-8)current.push_back(p);
+   continue;
+  }
+  if(e.type==QPainterPath::CurveToElement){
+   if(i+2>=outline.elementCount()||current.empty())
+    throw std::runtime_error("Fonte com curva incompleta");
+   const Pt b=transformed(e),c=transformed(outline.elementAt(i+1)),
+            d=transformed(outline.elementAt(i+2));
+   appendAdaptiveCubic(current,current.back(),b,c,d,toleranceMm);
+   i+=2;
+   continue;
+  }
+  if(e.type==QPainterPath::CurveToDataElement)
+   throw std::runtime_error("Controle Bezier inesperado no texto");
  }
- if(shapes.empty())throw std::runtime_error("Texto sem contornos fechados");
+ complete();
+ size_t total=0;
+ for(const auto& polygon:shapes)total+=polygon.size();
+ if(shapes.empty()||total>80000)throw std::runtime_error("Texto sem contornos validos ou muito complexo");
  return shapes;
 }
+
 class LabWindow final:public QWidget{
 public:
  QtEditorLab view;
