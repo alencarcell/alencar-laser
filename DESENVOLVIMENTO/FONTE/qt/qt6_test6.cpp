@@ -82,6 +82,8 @@
 #include <QButtonGroup>
 #include <QComboBox>
 #include <QLineEdit>
+#include <QFontMetrics>
+#include <QEvent>
 #include <QCheckBox>
 #include <QLabel>
 #include <QShortcut>
@@ -1421,6 +1423,10 @@ public:
  QString projectPath,lastError;bool refreshing=false;
  std::optional<IntegratedProject> loadedProject_; // operações, origem e metadados adicionais preservados
  bool bezierToolActive_=false;
+ QLineEdit* inlineTextEntry_=nullptr;
+ Pt inlineTextAnchor_{};
+ double inlineTextHeightMm_=12.;
+ QFont inlineTextFont_{"Arial",12};
  bool darkTheme_=true;
  // Persistent local preferences and crash recovery; no automatic machine connection.
  alaser::RecoveryPolicy recoveryPolicy_;
@@ -1937,7 +1943,7 @@ public:
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Polygon);});
   compact(shapeGrid,4,0,"pencil","✏ Lápis","Traço livre (P), arraste o mouse; uma acao de desfazer",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Pencil);});
-  compact(shapeGrid,5,0,"text","T Texto","Texto vetorial (T), clique na mesa, escolha fonte e altura",
+  compact(shapeGrid,5,0,"text","T Texto","Texto transparente direto na mesa (T): Enter/Esc conclui",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Text);});
   buttons.at("select")->setChecked(true);
   auto future=[&](const QString& name,const QString& tip){
@@ -2443,7 +2449,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   view.stateChanged=[this]{if(uiPersistenceEnabled_)recoveryPolicy_.edited();refresh();};
   view.diagnosticEvent=[this](const QString& code,int count){captureEvent(code,count);};
   view.drawingLayer=[this]{return layers->currentData().toInt();};
-  view.requestTextAt=[this](Pt at){run([this,at]{insertVectorText(at);});};
+  view.requestTextAt=[this](Pt at){insertVectorText(at);};
   auto shortcut=[this](const QString& sequence,std::function<void()> fn){auto* sc=new QShortcut(QKeySequence(sequence),this);connect(sc,&QShortcut::activated,this,[this,fn]{run(fn);});};
   shortcut("Ctrl+Z",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(false);}else view.history(false);});
   shortcut("Ctrl+Y",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(true);}else view.history(true);});
@@ -2471,6 +2477,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   // Atalho Esc nao pode depender de run(): run() rejeita comandos durante gestos ativos.
   auto* cancelGesture=new QShortcut(QKeySequence("Esc"),this);
   connect(cancelGesture,&QShortcut::activated,this,[this]{
+   if(inlineTextEntry_){finishInlineText(true);return;}
    view.cancelCurrentGesture();
    if(buttons.count("select"))buttons.at("select")->click();
   });
@@ -2570,25 +2577,62 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const QString previous=projectPath;projectPath=chosen;
   try{save();}catch(...){projectPath=previous;throw;}
  }
+
+ bool eventFilter(QObject* object,QEvent* event)override{
+  if(inlineTextEntry_&&object==inlineTextEntry_){
+   if(event->type()==QEvent::ShortcutOverride){
+    auto* key=static_cast<QKeyEvent*>(event);
+    if(key->key()==Qt::Key_Escape){event->accept();return false;}
+   }
+   if(event->type()==QEvent::KeyPress){
+    auto* key=static_cast<QKeyEvent*>(event);
+    if(key->key()==Qt::Key_Escape){finishInlineText(true);return true;}
+   }
+  }
+  return QWidget::eventFilter(object,event);
+ }
+ void finishInlineText(bool commit){
+  if(!inlineTextEntry_)return;
+  QLineEdit* field=inlineTextEntry_;
+  const QString message=field->text();const Pt anchor=inlineTextAnchor_;
+  inlineTextEntry_=nullptr;
+  field->removeEventFilter(this);field->hide();field->deleteLater();
+  if(!commit||message.trimmed().isEmpty()){view.setFocus();return;}
+  try{
+   if(message.size()>100)throw std::runtime_error("Texto limitado a 100 caracteres");
+   auto outlines=vectorTextOutlines(message,inlineTextFont_,inlineTextHeightMm_,anchor);
+   const auto ids=view.editor.addContours(std::move(outlines),true,layers->currentData().toInt());
+   view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+   view.activate({ids.front(),0});recoveryPolicy_.edited();
+   captureEvent("vector_text_created");
+   status->setText(QString("Texto inserido na mesa: %1 contornos; Ctrl+Z desfaz.").arg(ids.size()));
+  }catch(const std::exception& ex){status->setText(QString::fromUtf8(ex.what()));}
+  view.setFocus();
+ }
  void insertVectorText(Pt at){
-  bool ok=false;
-  const QString message=QInputDialog::getText(this,"Texto vetorial","Digite o texto:",
-       QLineEdit::Normal,QString(),&ok);
-  if(!ok||message.trimmed().isEmpty())return;
-  if(message.size()>100)throw std::runtime_error("Texto limitado a 100 caracteres nesta candidata");
-  const double height=QInputDialog::getDouble(this,"Altura do texto",
-      "Altura dos contornos (mm):",12.,1.,150.,1,&ok);
-  if(!ok)return;
-  const QFont selected=QFontDialog::getFont(&ok,QFont("Arial",12),this,"Fonte do texto");
-  if(!ok)return;
-  auto shapes=vectorTextOutlines(message,selected,height,at);
-  const auto ids=view.editor.addContours(std::move(shapes),true,layers->currentData().toInt());
-  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
-  view.activate({ids.front(),0});
-  recoveryPolicy_.edited();
-  captureEvent("vector_text_created");
-  status->setText(QString("Texto convertido em %1 contornos; Ctrl+Z desfaz em uma acao.")
-     .arg(ids.size()));
+  if(inlineTextEntry_)finishInlineText(true);
+  if(view.busy()||layers->currentIndex()<0)return;
+  const auto layer=view.editor.state().layers.at(layers->currentData().toInt());
+  if(!layer.visible||layer.locked){
+   status->setText("Texto: camada deve estar visivel e desbloqueada.");return;
+  }
+  inlineTextAnchor_=at;
+  auto* field=new QLineEdit(view.viewport());
+  inlineTextEntry_=field;field->setObjectName("inlineTextEdit");
+  field->setMaxLength(100);field->setPlaceholderText("Digite texto...");
+  const int px=int(std::clamp(inlineTextHeightMm_*view.currentZoom(),12.,82.));
+  QFont font=inlineTextFont_;font.setPixelSize(px);field->setFont(font);
+  field->setFrame(false);
+  field->setStyleSheet("QLineEdit#inlineTextEdit { background:transparent; border:none;"
+     " color:#FFAA54; padding:0; selection-background-color:#996031; }");
+  QPoint point=view.mapFromScene(QPointF(at.x,at.y));
+  point.setX(std::clamp(point.x(),0,std::max(0,view.viewport()->width()-80)));
+  point.setY(std::clamp(point.y(),0,std::max(0,view.viewport()->height()-px-12)));
+  field->move(point);field->resize(std::max(80,view.viewport()->width()-point.x()-8),px+12);
+  field->installEventFilter(this);
+  connect(field,&QLineEdit::returnPressed,this,[this]{finishInlineText(true);});
+  field->show();field->raise();field->setFocus(Qt::MouseFocusReason);
+  status->setText("Texto direto: digite no desenho; Enter ou Esc conclui; vazio cancela.");
  }
  void openOther(){
   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
