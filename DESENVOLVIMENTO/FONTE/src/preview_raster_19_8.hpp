@@ -65,7 +65,8 @@ inline void appendFill(Plan& out,const EditorState& state,const Settings& settin
  // Detect open contours in Fill explicitly: no accidental closure or emission.
  std::map<int,std::vector<const Contour*>> groups;
  for(const auto& c:state.doc.contours){
-  if(c.nodes.size()<3||!c.closed)continue;
+  // Importacoes LightBurn podem representar fecho repetindo o primeiro vertice.
+  if(c.nodes.size()<3||!(c.closed||hasExactDuplicateClosure(c)))continue;
   auto meta=state.objects.find(c.key.object);
   if(meta==state.objects.end())continue;
   auto layer=state.layers.find(meta->second.layer);
