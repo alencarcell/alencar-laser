@@ -2841,20 +2841,26 @@ static QJsonObject editTools197Test(const QString& directory){
  const int rectId=sv.editor.rectangle({145,90},18,18);
  sv.rebuild();sv.centerOn(QPointF(135,100));QApplication::processEvents();
  clickButton(shapes,"scissors");
+ // Evita aceitar eventos Qt atrasados do hover anterior.
+ // Confirma a coordenada solicitada e usa a viewport para entregar o evento
+ // quando QTest::mouseMove nao a atualizou. Nao chama o planner diretamente.
  auto pointHover=[&](QPointF p){
   const QPoint at=sv.mapFromScene(p);
   const uint64_t count=sv.scissorHoverEventCount();
   QTest::mouseMove(sv.viewport(),at);QApplication::processEvents();
-  if(sv.scissorHoverEventCount()==count){
+  if(!sv.scissorHoverReceivedAt(at)||sv.scissorHoverEventCount()==count){
    const QPointF local(at),global(sv.viewport()->mapToGlobal(at));
-   QMouseEvent move(QEvent::MouseMove,local,global,Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+   QMouseEvent move(QEvent::MouseMove,local,global,
+                    Qt::NoButton,Qt::NoButton,Qt::NoModifier);
    QApplication::sendEvent(sv.viewport(),&move);QApplication::processEvents();
   }
-  check(sv.scissorHoverEventCount()>count,"hover isolado nao recebido");
+  if(sv.scissorHoverEventCount()==count||!sv.scissorHoverReceivedAt(at))
+   throw std::runtime_error("MouseMove nao chegou ao contorno isolado: "+
+                            sv.scissorHoverDiagnostics(at));
  };
  pointHover({130,100});
  auto circleSpan=sv.scissorPreview();
- check(bool(circleSpan)&&circleSpan->preview.size()>=64,
+ check(bool(circleSpan)&&circleSpan->key.object==circleId&&circleSpan->preview.size()>=64,
        "Tesoura nao destacou circulo novo completo");
  const int beforeIsolated=int(sv.editor.state().doc.contours.size());
  clickScene(shapes,{130,100});
@@ -2862,8 +2868,11 @@ static QJsonObject editTools197Test(const QString& directory){
        sv.editor.state().objects.count(circleId)==0,"Circulo isolado nao excluido");
  pointHover({154,90});
  auto rectSpan=sv.scissorPreview();
- check(bool(rectSpan)&&rectSpan->preview.size()==5,
-       "Tesoura nao destacou retangulo novo completo");
+ if(!rectSpan||rectSpan->key.object!=rectId||rectSpan->preview.size()!=5){
+  shapes.grab().save(directory+"/FALHA_RETANGULO_TESOURA.png");
+  throw std::runtime_error("Tesoura nao destacou retangulo novo completo: "+
+                           sv.scissorHoverDiagnostics(sv.mapFromScene(QPointF(154,90))));
+ }
  clickScene(shapes,{154,90});
  check(sv.editor.state().doc.contours.empty()&&sv.editor.state().objects.count(rectId)==0,
        "Retangulo isolado nao excluido");
