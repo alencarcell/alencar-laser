@@ -219,3 +219,18 @@ Registrar mudanças, testes e pendências.
 - Commit `79da9cb`: helper passa a exigir `scissorHoverReceivedAt(at)` e despachar evento pela viewport quando QTest não entrega a coordenada pretendida; asserções exigem `ScissorSpan::key.object` do círculo e do retângulo, não apenas quantidade de pontos; falha grava `FALHA_RETANGULO_TESOURA.png` e informa `scissorHoverDiagnostics(at)` (hits/candidato/posição/preview).
 - **Ainda não compilado nem executado no Windows depois desse commit.** Executar primeiro `git pull --ff-only` e `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteTesoura`. Se passar, executar novamente com `-Abrir`. Se falhar, conferir o erro detalhado sem alterar geometria indiscriminadamente.
 - Branch `feat/texto-lapis-importacao-logo-19-8` preservada, `main` intacta e laser desconectado.
+
+
+## 28/10/2026 — novo bloco experimental Texto/Alças/Curvas
+
+- Usuário confirmou avanços com editor multimodal, mas solicitou escrever texto diretamente no canvas sem diálogos, alças de escala proporcional/livre e rotação, suavização de curvas e evolução da Tesoura.
+- Documentação LightBurn verificada em TransformControls, Text e TrimShapes. Regras: escala por canto proporcional por padrão; Shift libera largura/altura; Ctrl altera a âncora para o centro; Tesoura de grupos exige desagrupar.
+- Branch isolada `feat/texto-direto-transformacoes-19-8` derivada de `feat/editor-multiferramentas-19-8`; `main` intocada.
+- Texto: campo QLineEdit transparente sobre a viewport da mesa, Enter/Esc finaliza, commit atômico de contornos com undo. **Limitado a uma linha e convertido a caminhos após concluir, sem semântica de texto editável.**
+- Transformação: 8 alças de tamanho e quatro de rotação em seleção de polilinhas; prévia visual sem alterações na geometria canônica; commit atômico em release; Esc cancela.
+- Elipses novas: amostragem elevada de 64 para 512 nós. **Ainda são polilinhas e podem facetar com zoom extremo**; solução definitiva requer arcos/Bézier nativos.
+- Tesoura: permanece conservadora. Cruzamentos em vértices/tangências/colinearidade e curvas Bézier nativas seguem restritos; exigir arquivo real antes de modificar tolerância/topologia.
+- Adicionado teste GUI `--inline-transforms-19-8-test`, e `-SomenteInteracao` ao script `SCRIPTS/TESTAR_19_8_WINDOWS.ps1`, também inserido na suíte completa.
+- **Estado real: código publicado no GitHub, ainda NÃO compilado/testado no Windows nesta nova branch.** Manter máquina desconectada, emissões bloqueadas; não mesclar nem homologar.
+- Especificação detalhada em `DESENVOLVIMENTO/ESPECIFICACOES/TEXTO_TRANSFORMACOES_CURVAS_19_8.md`.
+- Próximo comando após revisar mudanças locais: `git fetch origin`; `git switch --track origin/feat/texto-direto-transformacoes-19-8`; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteInteracao`; depois `-Abrir` se PASS.

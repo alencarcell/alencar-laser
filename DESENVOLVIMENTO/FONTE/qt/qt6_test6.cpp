@@ -22,6 +22,7 @@
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
 #include <QContextMenuEvent>
+#include <array>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPainterPathStroker>
@@ -82,6 +83,8 @@
 #include <QButtonGroup>
 #include <QComboBox>
 #include <QLineEdit>
+#include <QFontMetrics>
+#include <QEvent>
 #include <QCheckBox>
 #include <QLabel>
 #include <QShortcut>
@@ -197,6 +200,14 @@ class QtEditorLab final:public QGraphicsView{
  bool shapeDragging_=false;
  QPointF shapeDragStart_{};
  std::vector<QGraphicsPathItem*> shapePreviewItems_;
+ // Alcas independentes dos dados; commit unico no mouseRelease.
+ bool transformDragging_=false;
+ int transformHandle_=-1; // 0..7 tamanho; 8..11 rotacao
+ QRectF transformBounds_;
+ QPointF transformAnchor_{};
+ double transformSx_=1.,transformSy_=1.,transformAngle_=0.;
+ std::vector<int> transformIds_;
+ std::vector<QGraphicsPathItem*> transformItems_;
  bool nativeContourPressing_=false;
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
  std::vector<Pt> pencilPoints_;
@@ -391,6 +402,165 @@ class QtEditorLab final:public QGraphicsView{
   nativeStyledKey_=selectedKey;
   if(all||selectionChanged)viewport()->update();
  }
+
+ std::vector<int> expandedSelection()const{
+  std::set<int> ids=selected,groups;
+  const auto& st=editor.state();
+  for(int id:ids){
+   auto it=st.objects.find(id);
+   if(it!=st.objects.end()&&it->second.group>0)groups.insert(it->second.group);
+  }
+  for(const auto& [id,meta]:st.objects)
+   if(meta.group>0&&groups.count(meta.group))ids.insert(id);
+  return {ids.begin(),ids.end()};
+ }
+ std::optional<QRectF> selectedBounds()const{
+  if(selected.empty()||tool!=Tool::Select||nativeMode_)return {};
+  const auto ids=expandedSelection();
+  const std::set<int> idsSet(ids.begin(),ids.end());
+  double minX=0.,minY=0.,maxX=0.,maxY=0.;bool has=false;
+  for(const auto& c:editor.state().doc.contours){
+   if(!idsSet.count(c.key.object))continue;
+   if(!editable(editor.state(),c.key.object))continue;
+   for(const auto& node:c.nodes){
+    const Pt p=node.p;
+    if(!has){minX=maxX=p.x;minY=maxY=p.y;has=true;}
+    else{minX=std::min(minX,p.x);minY=std::min(minY,p.y);
+         maxX=std::max(maxX,p.x);maxY=std::max(maxY,p.y);}
+   }
+  }
+  if(!has)return {};
+  return QRectF(QPointF(minX,minY),QPointF(maxX,maxY));
+ }
+ std::array<QPointF,12> selectionHandles(const QRectF& bounds)const{
+  const QPointF tl=viewportTransform().map(bounds.topLeft());
+  const QPointF br=viewportTransform().map(bounds.bottomRight());
+  const double x0=tl.x(),x1=br.x(),y0=tl.y(),y1=br.y();
+  const double cx=(x0+x1)*.5,cy=(y0+y1)*.5;
+  return {QPointF(x0,y0),QPointF(cx,y0),QPointF(x1,y0),
+   QPointF(x1,cy),QPointF(x1,y1),QPointF(cx,y1),
+   QPointF(x0,y1),QPointF(x0,cy),
+   QPointF(x0-17,y0-17),QPointF(x1+17,y0-17),
+   QPointF(x1+17,y1+17),QPointF(x0-17,y1+17)};
+ }
+ void paintSelectionHandles(QPainter* p)const{
+  if(tool!=Tool::Select||selected.empty()||nativeMode_)return;
+  auto bounds=selectedBounds();if(!bounds)return;
+  const QPointF topLeft=viewportTransform().map(bounds->topLeft());
+  const QPointF bottomRight=viewportTransform().map(bounds->bottomRight());
+  const QRectF pixel(topLeft,bottomRight);
+  const auto handles=selectionHandles(*bounds);
+  p->save();p->resetTransform();p->setBrush(Qt::NoBrush);
+  QPen edge(QColor(238,154,60),1,Qt::DashLine);edge.setCosmetic(true);p->setPen(edge);
+  p->drawRect(pixel.normalized());
+  for(int h=0;h<12;++h){
+   const QPointF point=handles[size_t(h)];
+   p->setPen(QPen(QColor("#182633"),1));
+   p->setBrush(h>=8?QColor("#49BCF4"):QColor("#F3F5F7"));
+   if(h>=8)p->drawEllipse(point,4.,4.);
+   else p->drawRect(QRectF(point-QPointF(4.,4.),QSizeF(8.,8.)));
+  }
+  p->restore();
+ }
+ void cancelSelectionTransform(){
+  for(auto* item:transformItems_)item->setTransform(QTransform());
+  transformItems_.clear();transformIds_.clear();
+  transformDragging_=false;transformHandle_=-1;
+  transformSx_=transformSy_=1.;transformAngle_=0.;
+  viewport()->update();
+ }
+ bool beginSelectionTransform(QPointF position){
+  if(tool!=Tool::Select||nativeMode_||selected.empty()||busy())return false;
+  const auto bounds=selectedBounds();if(!bounds)return false;
+  const auto handles=selectionHandles(*bounds);
+  int h=-1;double distance=11.;
+  for(int i=0;i<12;++i){
+   const double d=QLineF(position,handles[size_t(i)]).length();
+   if(d<distance){h=i;distance=d;}
+  }
+  if(h<0)return false;
+  transformIds_=expandedSelection();
+  for(int id:transformIds_){
+   if(!editable(editor.state(),id)){cancelSelectionTransform();return false;}
+   auto found=itemsByObject_.find(id);
+   if(found!=itemsByObject_.end())
+    transformItems_.insert(transformItems_.end(),found->second.begin(),found->second.end());
+  }
+  if(transformItems_.empty()){cancelSelectionTransform();return false;}
+  transformDragging_=true;transformHandle_=h;transformBounds_=*bounds;
+  transformAnchor_=h>=8?bounds->center():QPointF{};
+  transformSx_=transformSy_=1.;transformAngle_=0.;
+  return true;
+ }
+ void updateSelectionTransform(QPointF pointer,Qt::KeyboardModifiers mods){
+  if(!transformDragging_)return;
+  QTransform t;
+  if(transformHandle_>=8){
+   const QPointF pivot=transformBounds_.center();
+   const auto handles=selectionHandles(transformBounds_);
+   const QPointF initial=handles[size_t(transformHandle_)];
+   const QPointF center=viewportTransform().map(pivot);
+   const auto start=initial-center;
+   const auto now=pointer-center;
+   const double angle=std::atan2(now.y(),now.x())-std::atan2(start.y(),start.x());
+   transformAngle_=angle*180./std::numbers::pi;
+   if(mods.testFlag(Qt::ShiftModifier))
+    transformAngle_=std::round(transformAngle_/15.)*15.;
+   t.translate(pivot.x(),pivot.y());t.rotate(transformAngle_);t.translate(-pivot.x(),-pivot.y());
+  }else{
+   const double x0=transformBounds_.left(),x1=transformBounds_.right();
+   const double y0=transformBounds_.top(),y1=transformBounds_.bottom();
+   const double mx=(x0+x1)*.5,my=(y0+y1)*.5;
+   const bool center=mods.testFlag(Qt::ControlModifier);
+   const auto handles=selectionHandles(transformBounds_);
+   const QPointF oldPoint=mapToScene(handles[size_t(transformHandle_)].toPoint());
+   const QPointF moving=mapToScene(pointer.toPoint());
+   QPointF pivot;
+   switch(transformHandle_){
+    case 0:pivot={x1,y1};break;case 1:pivot={mx,y1};break;
+    case 2:pivot={x0,y1};break;case 3:pivot={x0,my};break;
+    case 4:pivot={x0,y0};break;case 5:pivot={mx,y0};break;
+    case 6:pivot={x1,y0};break;default:pivot={x1,my};break;
+   }
+   if(center)pivot=transformBounds_.center();
+   transformAnchor_=pivot;
+   const bool horizontal=transformHandle_!=1&&transformHandle_!=5;
+   const bool vertical=transformHandle_!=3&&transformHandle_!=7;
+   double sx=1.,sy=1.;
+   if(horizontal&&std::abs(oldPoint.x()-pivot.x())>1e-9)
+     sx=(moving.x()-pivot.x())/(oldPoint.x()-pivot.x());
+   if(vertical&&std::abs(oldPoint.y()-pivot.y())>1e-9)
+     sy=(moving.y()-pivot.y())/(oldPoint.y()-pivot.y());
+   sx=std::clamp(sx,.02,100.);sy=std::clamp(sy,.02,100.);
+   const bool corner=transformHandle_%2==0;
+   if(corner&&!mods.testFlag(Qt::ShiftModifier)){
+    const double uniform=std::abs(sx-1.)>=std::abs(sy-1.)?sx:sy;
+    sx=uniform;sy=uniform;
+   }
+   transformSx_=sx;transformSy_=sy;
+   t.translate(pivot.x(),pivot.y());t.scale(sx,sy);t.translate(-pivot.x(),-pivot.y());
+  }
+  for(auto* item:transformItems_)item->setTransform(t);
+  viewport()->update();
+ }
+ void finishSelectionTransform(){
+  if(!transformDragging_)return;
+  const int h=transformHandle_;
+  const auto ids=transformIds_;
+  const QPointF pivot=h>=8?transformBounds_.center():transformAnchor_;
+  const double sx=transformSx_,sy=transformSy_,angle=transformAngle_;
+  cancelSelectionTransform();
+  if(h>=8){
+   if(std::abs(angle)<.01)return;
+   editor.rotateObjects(ids,fromQt(pivot),angle);
+  }else{
+   if(std::abs(sx-1.)<1e-5&&std::abs(sy-1.)<1e-5)return;
+   editor.scaleObjects(ids,fromQt(pivot),sx,sy);
+  }
+  rebuild();
+  if(diagnosticEvent)diagnosticEvent(h>=8?"selection_rotated":"selection_scaled",int(ids.size()));
+  if(stateChanged)stateChanged();
+ }
  void clearShapePreview(){
   for(auto* item:shapePreviewItems_)item->setPos(0,0);
   shapePreviewItems_.clear();shapeDragging_=false;
@@ -503,7 +673,7 @@ public:
  void reportZoom(){if(zoomChanged)zoomChanged(currentZoom());}
  std::function<int()> drawingLayer;
  int targetLayer()const{return drawingLayer?drawingLayer():0;}
- bool busy()const{return draggingNode_.has_value()||shapeDragging_||strokeDrawing_||polylineDrawing_||marqueeActive_||nativePressing_||nativeContourPressing_;}
+ bool busy()const{return draggingNode_.has_value()||shapeDragging_||transformDragging_||strokeDrawing_||polylineDrawing_||marqueeActive_||nativePressing_||nativeContourPressing_;}
  bool nativeMode()const{return nativeMode_;}
  bool hasNativeDocument()const{return nativeSession_&&!nativeSession_->committed().contours.empty();}
  std::optional<Key> nativeSelected()const{return nativeSession_?nativeSession_->selected():std::nullopt;}
@@ -682,7 +852,7 @@ public:
  size_t directQueries()const{return picker_.directQueries();}
  void invalidateSelectionCache(){picker_.invalidate();}
  void rebuild(){
-  clearScissorHover();clearShapePreview();endChunkPreview();
+  clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
   clearPolyline();clearMarquee();scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
    auto* o=scene_.addPath(pathOf(c),QPen(layerColor(editor.state().objects.at(c.key.object).layer),0));o->setZValue(1);
@@ -818,6 +988,7 @@ public:
   if(nativeContourPressing_&&nativeSession_){nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(true);}
   if(nativePressing_&&nativeSession_){nativeSession_->cancel();nativePressing_=false;updateNativePaths(false);}
   if(shapeDragging_)clearShapePreview();
+  if(transformDragging_)cancelSelectionTransform();
   if(draggingNode_){endChunkPreview();draggingNode_.reset();viewport()->update();}
   if(strokeDrawing_){strokeDrawing_=false;pencilPoints_.clear();if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();}
   if(polylineDrawing_)clearPolyline();
@@ -896,8 +1067,9 @@ protected:
    p->setPen(Qt::NoPen);p->setBrush(selected.count(c.key.object)?QColor(239,109,25):layerColor(editor.state().objects.at(c.key.object).layer));
    p->drawEllipse(viewportTransform().map(toQt(c.nodes.front().p)),2,2);
   }
-  p->restore();
-  if(nativeMode_&&nativeSession_&&nativeSession_->selected()){
+   p->restore();
+   paintSelectionHandles(p);
+   if(nativeMode_&&nativeSession_&&nativeSession_->selected()){
    const auto* c=findNativeCurve(nativeSession_->visible(),*nativeSession_->selected());
    if(!c)return;
    const QTransform transform=viewportTransform();
@@ -961,8 +1133,9 @@ void mousePressEvent(QMouseEvent* e)override{
  }
  if(e->button()!=Qt::LeftButton){QGraphicsView::mousePressEvent(e);return;}
   if(nativeMode_){nativeMousePress(e);return;}
-  if(tool==Tool::Select){
-   auto hits=clickHits(e->position().toPoint());
+   if(tool==Tool::Select){
+    if(beginSelectionTransform(e->position())){e->accept();return;}
+    auto hits=clickHits(e->position().toPoint());
    if(hits.empty()){
     marqueeActive_=true;marqueeStart_=e->position();
    }
@@ -1112,7 +1285,8 @@ void mouseMoveEvent(QMouseEvent* e)override{
    e->accept();return;
   }
   if(busy())pendingInput_=clock_.nsecsElapsed();
-  if(marqueeActive_){showMarquee(e->position());e->accept();return;}
+   if(transformDragging_){updateSelectionTransform(e->position(),e->modifiers());e->accept();return;}
+   if(marqueeActive_){showMarquee(e->position());e->accept();return;}
   if(shapeDragging_){
    const QPointF delta=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
    for(auto* item:shapePreviewItems_)item->setPos(delta);
@@ -1179,7 +1353,8 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    }
    e->accept();return;
   }
-  if(marqueeActive_){finishMarquee(e->position(),e->modifiers());e->accept();return;}
+   if(transformDragging_){updateSelectionTransform(e->position(),e->modifiers());finishSelectionTransform();e->accept();return;}
+   if(marqueeActive_){finishMarquee(e->position(),e->modifiers());e->accept();return;}
   if(tool==Tool::Line&&polylineDrawing_){
    // Mantem gesto legada: arrastar logo no primeiro segmento cria uma linha.
    if(polylineStartedOnPress_&&QLineF(polylineDown_,e->position()).length()>4.){
@@ -1236,7 +1411,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    if(QLineF(first,last).length()>1e-5&&(tool==Tool::Line||(b.x()>a.x()&&b.y()>a.y()))){
     if(tool==Tool::Rectangle)lastCreated_=editor.rectangle(fromQt(a),b.x()-a.x(),b.y()-a.y(),targetLayer());
     else if(tool==Tool::Line)lastCreated_=editor.line(fromQt(first),fromQt(last),targetLayer());
-    else if(tool==Tool::Ellipse)lastCreated_=editor.ellipse(fromQt((a+b)*.5),(b.x()-a.x())*.5,(b.y()-a.y())*.5,64,targetLayer());
+    else if(tool==Tool::Ellipse)lastCreated_=editor.ellipse(fromQt((a+b)*.5),(b.x()-a.x())*.5,(b.y()-a.y())*.5,512,targetLayer());
     else if(tool==Tool::Polygon){double r=std::min(b.x()-a.x(),b.y()-a.y())*.5;if(r>1e-5)lastCreated_=editor.regularPolygon(fromQt((a+b)*.5),r,6,targetLayer());}
     ++toolCreates;rebuild();activate({lastCreated_,0});
     if(diagnosticEvent)diagnosticEvent("shape_created",1);
@@ -1348,8 +1523,9 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   if(e->key()==Qt::Key_Shift&&strokeDrawing_&&pendingPreview_){
    pendingPreview_->setPath(temporaryShape());viewport()->update();
   }
-  if(e->key()==Qt::Key_Escape){
-   if(polylineDrawing_){clearPolyline();e->accept();return;}
+   if(e->key()==Qt::Key_Escape){
+    if(transformDragging_){cancelSelectionTransform();e->accept();return;}
+    if(polylineDrawing_){clearPolyline();e->accept();return;}
    if(marqueeActive_){clearMarquee();e->accept();return;}
    if(!busy()){if(requestSelectTool)requestSelectTool();e->accept();return;}
    if(shapeDragging_){clearShapePreview();e->accept();return;}
@@ -1421,6 +1597,10 @@ public:
  QString projectPath,lastError;bool refreshing=false;
  std::optional<IntegratedProject> loadedProject_; // operações, origem e metadados adicionais preservados
  bool bezierToolActive_=false;
+ QLineEdit* inlineTextEntry_=nullptr;
+ Pt inlineTextAnchor_{};
+ double inlineTextHeightMm_=12.;
+ QFont inlineTextFont_{"Arial",12};
  bool darkTheme_=true;
  // Persistent local preferences and crash recovery; no automatic machine connection.
  alaser::RecoveryPolicy recoveryPolicy_;
@@ -1937,7 +2117,7 @@ public:
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Polygon);});
   compact(shapeGrid,4,0,"pencil","✏ Lápis","Traço livre (P), arraste o mouse; uma acao de desfazer",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Pencil);});
-  compact(shapeGrid,5,0,"text","T Texto","Texto vetorial (T), clique na mesa, escolha fonte e altura",
+  compact(shapeGrid,5,0,"text","T Texto","Texto transparente direto na mesa (T): Enter/Esc conclui",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Text);});
   buttons.at("select")->setChecked(true);
   auto future=[&](const QString& name,const QString& tip){
@@ -2443,7 +2623,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   view.stateChanged=[this]{if(uiPersistenceEnabled_)recoveryPolicy_.edited();refresh();};
   view.diagnosticEvent=[this](const QString& code,int count){captureEvent(code,count);};
   view.drawingLayer=[this]{return layers->currentData().toInt();};
-  view.requestTextAt=[this](Pt at){run([this,at]{insertVectorText(at);});};
+  view.requestTextAt=[this](Pt at){insertVectorText(at);};
   auto shortcut=[this](const QString& sequence,std::function<void()> fn){auto* sc=new QShortcut(QKeySequence(sequence),this);connect(sc,&QShortcut::activated,this,[this,fn]{run(fn);});};
   shortcut("Ctrl+Z",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(false);}else view.history(false);});
   shortcut("Ctrl+Y",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(true);}else view.history(true);});
@@ -2471,6 +2651,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   // Atalho Esc nao pode depender de run(): run() rejeita comandos durante gestos ativos.
   auto* cancelGesture=new QShortcut(QKeySequence("Esc"),this);
   connect(cancelGesture,&QShortcut::activated,this,[this]{
+   if(inlineTextEntry_){finishInlineText(true);return;}
    view.cancelCurrentGesture();
    if(buttons.count("select"))buttons.at("select")->click();
   });
@@ -2570,25 +2751,62 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const QString previous=projectPath;projectPath=chosen;
   try{save();}catch(...){projectPath=previous;throw;}
  }
+
+ bool eventFilter(QObject* object,QEvent* event)override{
+  if(inlineTextEntry_&&object==inlineTextEntry_){
+   if(event->type()==QEvent::ShortcutOverride){
+    auto* key=static_cast<QKeyEvent*>(event);
+    if(key->key()==Qt::Key_Escape){event->accept();return false;}
+   }
+   if(event->type()==QEvent::KeyPress){
+    auto* key=static_cast<QKeyEvent*>(event);
+    if(key->key()==Qt::Key_Escape){finishInlineText(true);return true;}
+   }
+  }
+  return QWidget::eventFilter(object,event);
+ }
+ void finishInlineText(bool commit){
+  if(!inlineTextEntry_)return;
+  QLineEdit* field=inlineTextEntry_;
+  const QString message=field->text();const Pt anchor=inlineTextAnchor_;
+  inlineTextEntry_=nullptr;
+  field->removeEventFilter(this);field->hide();field->deleteLater();
+  if(!commit||message.trimmed().isEmpty()){view.setFocus();return;}
+  try{
+   if(message.size()>100)throw std::runtime_error("Texto limitado a 100 caracteres");
+   auto outlines=vectorTextOutlines(message,inlineTextFont_,inlineTextHeightMm_,anchor);
+   const auto ids=view.editor.addContours(std::move(outlines),true,layers->currentData().toInt());
+   view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+   view.activate({ids.front(),0});recoveryPolicy_.edited();
+   captureEvent("vector_text_created");
+   status->setText(QString("Texto inserido na mesa: %1 contornos; Ctrl+Z desfaz.").arg(ids.size()));
+  }catch(const std::exception& ex){status->setText(QString::fromUtf8(ex.what()));}
+  view.setFocus();
+ }
  void insertVectorText(Pt at){
-  bool ok=false;
-  const QString message=QInputDialog::getText(this,"Texto vetorial","Digite o texto:",
-       QLineEdit::Normal,QString(),&ok);
-  if(!ok||message.trimmed().isEmpty())return;
-  if(message.size()>100)throw std::runtime_error("Texto limitado a 100 caracteres nesta candidata");
-  const double height=QInputDialog::getDouble(this,"Altura do texto",
-      "Altura dos contornos (mm):",12.,1.,150.,1,&ok);
-  if(!ok)return;
-  const QFont selected=QFontDialog::getFont(&ok,QFont("Arial",12),this,"Fonte do texto");
-  if(!ok)return;
-  auto shapes=vectorTextOutlines(message,selected,height,at);
-  const auto ids=view.editor.addContours(std::move(shapes),true,layers->currentData().toInt());
-  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
-  view.activate({ids.front(),0});
-  recoveryPolicy_.edited();
-  captureEvent("vector_text_created");
-  status->setText(QString("Texto convertido em %1 contornos; Ctrl+Z desfaz em uma acao.")
-     .arg(ids.size()));
+  if(inlineTextEntry_)finishInlineText(true);
+  if(view.busy()||layers->currentIndex()<0)return;
+  const auto layer=view.editor.state().layers.at(layers->currentData().toInt());
+  if(!layer.visible||layer.locked){
+   status->setText("Texto: camada deve estar visivel e desbloqueada.");return;
+  }
+  inlineTextAnchor_=at;
+  auto* field=new QLineEdit(view.viewport());
+  inlineTextEntry_=field;field->setObjectName("inlineTextEdit");
+  field->setMaxLength(100);field->setPlaceholderText("Digite texto...");
+  const int px=int(std::clamp(inlineTextHeightMm_*view.currentZoom(),12.,82.));
+  QFont font=inlineTextFont_;font.setPixelSize(px);field->setFont(font);
+  field->setFrame(false);
+  field->setStyleSheet("QLineEdit#inlineTextEdit { background:transparent; border:none;"
+     " color:#FFAA54; padding:0; selection-background-color:#996031; }");
+  QPoint point=view.mapFromScene(QPointF(at.x,at.y));
+  point.setX(std::clamp(point.x(),0,std::max(0,view.viewport()->width()-80)));
+  point.setY(std::clamp(point.y(),0,std::max(0,view.viewport()->height()-px-12)));
+  field->move(point);field->resize(std::max(80,view.viewport()->width()-point.x()-8),px+12);
+  field->installEventFilter(this);
+  connect(field,&QLineEdit::returnPressed,this,[this]{finishInlineText(true);});
+  field->show();field->raise();field->setFocus(Qt::MouseFocusReason);
+  status->setText("Texto direto: digite no desenho; Enter ou Esc conclui; vazio cancela.");
  }
  void openOther(){
   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
@@ -2779,7 +2997,7 @@ static QJsonObject integratedTest(const QString& csv,const QString& output){
  clickScene(w,overlap,Qt::AltModifier);check(v.active()&&v.active()->object==b,"Alt click did not reach second identity");
  clickScene(w,overlap,Qt::AltModifier);check(v.active()&&v.active()->object==a,"overlap cycle did not wrap");
  auto nearPixel=v.mapFromScene(overlap);int outside=int(std::ceil(8/v.viewport()->devicePixelRatioF()));QTest::mouseClick(v.viewport(),Qt::LeftButton,Qt::NoModifier,nearPixel-QPoint(0,outside));QApplication::processEvents();check(!v.active(),"outside pixel radius selected a contour");stage("overlap_exact_identity_and_cycle");
- int ellipse=draw("ellipse",{-820,-920},{-790,-900},64),polygon=draw("polygon",{-770,-920},{-740,-890},6);
+ int ellipse=draw("ellipse",{-820,-920},{-790,-900},512),polygon=draw("polygon",{-770,-920},{-740,-890},6);
  draw("line",{-720,-920},{-690,-900},2);
  // GUI multi-selection, group, transform, layer controls, and metadata-aware history.
  clickButton(w,"select");v.centerOn(-780,-905);QApplication::processEvents();auto ellipsePoint=toQt(get(v.editor.state().doc,{ellipse,0})->nodes[0].p);auto polygonPoint=toQt(get(v.editor.state().doc,{polygon,0})->nodes[0].p);
@@ -3269,6 +3487,95 @@ static QJsonObject newDrawingTools198Test(const QString& directory){
          {"text_tool_enabled",true},{"hardware_commands_sent",false}};
 }
 
+// Qt GUI: texto direto na mesa, proporcao, escala livre e rotacao.
+static QJsonObject inlineTransforms198Test(const QString& directory){
+ QDir().mkpath(directory);
+ LabWindow textWindow(Document{});textWindow.show();QApplication::processEvents();
+ auto& tv=textWindow.view;tv.setTransform(QTransform::fromScale(4.,4.));
+ tv.centerOn(QPointF(80,65));QApplication::processEvents();
+ clickButton(textWindow,"text");clickScene(textWindow,{80,65});
+ QLineEdit* entry=textWindow.findChild<QLineEdit*>("inlineTextEdit");
+ check(entry&&entry->isVisible(),"Texto nao apareceu dentro da mesa");
+ check(entry->parentWidget()==tv.viewport(),"Texto nao pertence a viewport");
+ check(entry->styleSheet().contains("background:transparent"),"Texto nao e transparente");
+ QTest::keyClicks(entry,"Teste");QApplication::processEvents();
+ check(tv.editor.state().doc.contours.empty(),"Texto em digitacao alterou o documento");
+ QTest::keyClick(entry,Qt::Key_Return);QApplication::processEvents();
+ check(!textWindow.findChild<QLineEdit*>("inlineTextEdit")||
+       !textWindow.findChild<QLineEdit*>("inlineTextEdit")->isVisible(),
+       "Campo de texto ficou aberto apos concluir");
+ check(!tv.editor.state().doc.contours.empty(),"Texto nao criou contornos vetoriais");
+ check(tv.editor.undoCount()==1,"Texto nao criou transacao unica");
+ pressKey(textWindow,Qt::Key_Z,Qt::ControlModifier);
+ check(tv.editor.state().doc.contours.empty(),"Undo do texto falhou");
+ LabWindow transformWindow(Document{});transformWindow.show();QApplication::processEvents();
+ auto& v=transformWindow.view;v.setTransform(QTransform::fromScale(5.,5.));
+ v.centerOn(QPointF(60,50));QApplication::processEvents();
+ const int id=v.editor.rectangle({40,40},20,10);v.rebuild();
+ clickButton(transformWindow,"select");clickScene(transformWindow,{50,40});
+ check(v.selected.count(id)>0,"Selecao do retangulo nao funcionou");
+ const auto before=v.editor.undoCount();
+ auto drag=[&](QPoint press,QPoint target,Qt::KeyboardModifiers mods=Qt::NoModifier){
+  QTest::mousePress(v.viewport(),Qt::LeftButton,mods,press);
+  const QPointF local(target),global(v.viewport()->mapToGlobal(target));
+  QMouseEvent moved(QEvent::MouseMove,local,global,Qt::NoButton,Qt::LeftButton,mods);
+  QApplication::sendEvent(v.viewport(),&moved);QApplication::processEvents();
+  QTest::mouseRelease(v.viewport(),Qt::LeftButton,mods,target);
+  QApplication::processEvents();
+ };
+ drag(v.mapFromScene({60,40}),v.mapFromScene({80,30}));
+ check(v.editor.undoCount()==before+1,"Escala nao criou um passo de undo");
+ const Contour* scaled=get(v.editor.state().doc,{id,0});
+ check(scaled!=nullptr,"Escala perdeu objeto");
+ double minX=1e20,minY=1e20,maxX=-1e20,maxY=-1e20;
+ for(const auto& n:scaled->nodes){
+  minX=std::min(minX,n.p.x);maxX=std::max(maxX,n.p.x);
+  minY=std::min(minY,n.p.y);maxY=std::max(maxY,n.p.y);
+ }
+ check(std::abs((maxX-minX)-40.)<1.,"Escala proporcional largura incorreta");
+ check(std::abs((maxY-minY)-20.)<1.,"Escala proporcional altura incorreta");
+ const auto stateScaled=stateText(v.editor.state());
+ const QPointF center=v.mapFromScene({60,40});
+ const QPointF rotateStart=v.mapFromScene({80,30})+QPointF(17,-17);
+ const QPointF d=rotateStart-center;
+ const QPointF rotateEnd=center+QPointF(-d.y(),d.x());
+ drag(rotateStart.toPoint(),rotateEnd.toPoint());
+ check(v.editor.undoCount()==before+2,"Rotacao nao criou passo de undo");
+ check(stateText(v.editor.state())!=stateScaled,"Rotacao nao alterou vertices");
+ pressKey(transformWindow,Qt::Key_Z,Qt::ControlModifier);
+ check(stateText(v.editor.state())==stateScaled,"Undo da rotacao nao restaurou desenho");
+ // Shift permite escala nao proporcional; Ctrl fixa o centro.
+ const int freeId=v.editor.rectangle({110,45},20,10);
+ v.clearSelection();v.rebuild();clickScene(transformWindow,{115,45});
+ check(v.selected.count(freeId)>0,"Retangulo de escala livre nao selecionado");
+ drag(v.mapFromScene({130,45}),v.mapFromScene({150,43}),Qt::ShiftModifier);
+ auto boundsFree=[&]()->QRectF{
+  const auto* c=get(v.editor.state().doc,{freeId,0});
+  check(c!=nullptr,"Retangulo transformado nao encontrado");
+  double x0=1e20,y0=1e20,x1=-1e20,y1=-1e20;
+  for(const auto& n:c->nodes){x0=std::min(x0,n.p.x);x1=std::max(x1,n.p.x);
+   y0=std::min(y0,n.p.y);y1=std::max(y1,n.p.y);}
+  return {QPointF(x0,y0),QPointF(x1,y1)};
+ };
+ const QRectF freeBounds=boundsFree();
+ check(freeBounds.width()>35.&&freeBounds.height()<16.,
+       "Shift nao liberou proporcao entre largura e altura");
+ // Teste independente de escala com ancora central.
+ v.clearSelection();v.activate({freeId,0});
+ const QRectF centerBefore=boundsFree();
+ const QPointF corner=centerBefore.topRight();
+ const QPointF target=corner+QPointF(10.,-6.);
+ drag(v.mapFromScene(corner),v.mapFromScene(target),Qt::ControlModifier|Qt::ShiftModifier);
+ const QRectF centerAfter=boundsFree();
+ check(QLineF(centerBefore.center(),centerAfter.center()).length()<0.8,
+       "Ctrl nao preservou o centro ao redimensionar");
+ transformWindow.grab().save(directory+"/TRANSFORMACOES_EDITOR_19_8.png");
+ textWindow.grab().save(directory+"/TEXTO_DIRETO_19_8.png");
+ return {{"status","PASS"},{"inline_text",true},{"transparent_overlay",true},
+  {"text_atomic_undo",true},{"scale_proportional",true},
+  {"rotation_handle",true},{"undo_rotate",true},{"shift_free_scale",true},
+  {"ctrl_center_scale",true},{"hardware_commands_sent",false}};
+}
 static QJsonObject editorMultitool198Test(const QString& directory){
  // Gesto multi-nos, fechamento e linha por arraste legada.
  LabWindow w(Document{});w.show();QApplication::processEvents();
@@ -3433,6 +3740,13 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--inline-transforms-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=inlineTransforms198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_TEXTO_TRANSFORMACOES_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--editor-multitool-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=editorMultitool198Test(out);}
