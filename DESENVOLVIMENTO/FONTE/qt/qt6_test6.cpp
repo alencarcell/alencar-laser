@@ -4193,6 +4193,80 @@ static QJsonObject layersUngroup198Test(const QString& directory){
   {"fill_preview_closed",true},{"legacy_mode_default",true},
   {"alaser_roundtrip",true},{"hardware_commands_sent",false}};
 }
+
+static QJsonObject previewRaster198Test(){
+ // Verificacao puramente em memoria de parity-fill, buracos, output e mascara.
+ sim198::raster::Settings scan;
+ scan.intervalMm=1.;scan.overscanMm=2.;scan.bidirectional=true;
+ Editor e(Document{});
+ const int outer=e.rectangle({0,0},10,10);
+ e.setLayerMode(0,"Fill");
+ sim198::Plan outerPlan;
+ sim198::raster::appendFill(outerPlan,e.state(),scan);
+ check(std::abs(outerPlan.cutMm-100.)<1e-6,
+       "Fill quadrado: 10 linhas de 10mm devem somar 100mm");
+ check(outerPlan.travelMm>0&&outerPlan.moves.front().from.x==0&&
+       outerPlan.moves.front().to.x<=-1.99,
+       "Overscan virtual nao apareceu como deslocamento sem laser");
+ const auto original=stateText(e.state());
+ const int inner=e.rectangle({3,3},4,4);
+ sim198::Plan holePlan;
+ sim198::raster::appendFill(holePlan,e.state(),scan);
+ check(std::abs(holePlan.cutMm-84.)<1e-6,
+       "Mesmo layer: vazado de 4x4 nao foi respeitado");
+ check(stateText(e.state())!=original,
+       "Fixture de vazado nao inseriu segundo contorno");
+ const auto beforeSimulation=stateText(e.state());
+ const auto beforeUndo=e.undoCount();
+ sim198::Plan again;
+ sim198::raster::appendFill(again,e.state(),scan);
+ check(std::abs(again.cutMm-holePlan.cutMm)<1e-9&&
+       beforeSimulation==stateText(e.state())&&e.undoCount()==beforeUndo,
+       "Previa Fill alterou estado/undo ou nao e deterministica");
+ e.setLayerPreviewFlags(0,false,false);
+ sim198::Plan disabled;
+ sim198::raster::appendFill(disabled,e.state(),scan);
+ check(disabled.moves.empty(),"Output Off ainda gerou hatch");
+ e.setLayerPreviewFlags(0,true,false);
+ e.addLayer(1001,"T1");
+ e.moveToLayer(outer,1001);
+ sim198::Plan guideFiltered;
+ sim198::raster::appendFill(guideFiltered,e.state(),scan);
+ check(guideFiltered.cutMm<84.,"Guia T1 nao foi excluida do hatch");
+ sim198::raster::Mask mask;
+ mask.width=4;mask.height=2;
+ mask.black={0,1,1,0, 0,0,1,0};
+ sim198::Plan imagePlan;
+ scan.intervalMm=10.;
+ sim198::raster::appendMask(imagePlan,mask,{0,0,40,20},scan);
+ check(std::abs(imagePlan.cutMm-30.)<1e-6,
+       "Imagem mascara 4x2: linhas P&B incorretas");
+ const auto imageOnePass=imagePlan.cutMm;
+ const auto imageTwice=sim198::repeated(imagePlan,2);
+ check(std::abs(imageTwice.cutMm-imageOnePass*2)<1e-8,
+       "Raster duas passagens: distancia incorreta");
+ bool bad=false;
+ try{
+  sim198::raster::Mask invalid{2,2,{1,0}};
+  sim198::Plan result;
+  sim198::raster::appendMask(result,invalid,{0,0,20,20},scan);
+ }catch(const std::exception&){bad=true;}
+ check(bad,"Raster aceitou mascara incompleta");
+ bad=false;
+ try{
+  auto largeScan=scan;largeScan.intervalMm=.05;
+  sim198::Plan result;
+  sim198::raster::appendMask(result,mask,{0,0,40,100},largeScan);
+ }catch(const std::exception&){bad=true;}
+ check(bad,"Raster acima de 1500 linhas nao foi limitado");
+ // Sem qualquer chamada a serial, TCP, G-code, CAM ou laser.
+ return {{"status","PASS"},{"fill_even_odd_holes",true},
+    {"overscan_rapid_only",true},{"output_off_excluded",true},
+    {"tool_layer_excluded",true},{"non_destructive_preview",true},
+    {"raster_binary_mask",true},{"image_two_passes",true},
+    {"size_limits_enforced",true},{"hardware_commands_sent",false}};
+}
+
 static QJsonObject previewMotion198Test(){
  // Sem inicializar janela ou transporte: apenas memoria e calculo.
  Editor model(Document{});
@@ -4825,6 +4899,13 @@ int main(int argc,char** argv){
   try{report=layersUngroup198Test(out);}
   catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile f(out+"/RESULTADO_CAMADAS_19_8.json");if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--simulation-raster-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=previewRaster198Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_PREVIA_RASTER_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
   f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--simulation-motion-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
