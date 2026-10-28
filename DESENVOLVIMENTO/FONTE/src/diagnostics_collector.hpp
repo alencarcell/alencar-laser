@@ -52,7 +52,7 @@ public:
    "scissor_no_hit","scissor_no_safe_span","scissor_continuous_span_removed",
    "vector_text_created","groups_ungrouped","layer_mode_visual_changed",
    "lightburn_geometry_imported","marquee_selected","pencil_stroke_created",
-   "tool_scissors_activated","tool_bezier_activated","image_trace_started",
+   "tool_scissors_activated","tool_bezier_activated","bezier_curve_created","image_trace_started",
    "image_trace_created","image_trace_cancelled"};
   if(std::find(allow.begin(),allow.end(),event)==allow.end())throw std::invalid_argument("unknown diagnostic event");
   if(objects<0)throw std::invalid_argument("negative item count");
