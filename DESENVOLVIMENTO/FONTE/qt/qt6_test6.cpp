@@ -819,7 +819,7 @@ public:
  }
  // Apenas objetos que trocam de estado visual devem ser modificados.
  // Evita milhares de chamadas setPen/setZValue em cada clique.
- static QColor layerColor(int id){
+  static QColor layerColor(int id){
   static const QColor colors[]={
    QColor("#788998"),QColor("#3A86FF"),QColor("#E63946"),QColor("#06D6A0"),
    QColor("#FFD166"),QColor("#F77F00"),QColor("#9B5DE5"),QColor("#00BBF9"),
@@ -838,8 +838,10 @@ public:
    if(it==itemsByObject_.end())continue;
    bool isSelected=selected.count(objectId)>0;
    for(auto* item:it->second){
-    item->setPen(QPen(isSelected?QColor(239,109,25):layerColor(editor.state().objects.at(objectId).layer),0));
-    item->setZValue(isSelected?9:1);
+     const auto& meta=editor.state().objects.at(objectId);
+     item->setPen(QPen(isSelected?QColor(239,109,25):layerColor(meta.layer),0));
+     // O pincel ja foi criado no rebuild pela geometria canonica (closed).
+     item->setZValue(isSelected?9:1);
     styleSetterCalls_+=2;
    }
   }
@@ -855,9 +857,14 @@ public:
   clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
   clearPolyline();clearMarquee();scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
-   auto* o=scene_.addPath(pathOf(c),QPen(layerColor(editor.state().objects.at(c.key.object).layer),0));o->setZValue(1);
-   auto m=editor.state().objects.at(c.key.object);auto layer=editor.state().layers.at(m.layer);
-   o->setVisible(layer.visible);objects_[c.key]=o;itemsByObject_[c.key.object].push_back(o);
+    const auto meta=editor.state().objects.at(c.key.object);
+    const auto layer=editor.state().layers.at(meta.layer);
+    auto* o=scene_.addPath(pathOf(c),QPen(layerColor(meta.layer),0));o->setZValue(1);
+    if(layer.mode=="Fill"&&c.closed){
+     QColor translucent=layerColor(meta.layer);translucent.setAlpha(115);
+     o->setBrush(QBrush(translucent));
+    }
+    o->setVisible(layer.visible);objects_[c.key]=o;itemsByObject_[c.key.object].push_back(o);
   }
   for(auto it=selected.begin();it!=selected.end();)if(!editable(editor.state(),*it))it=selected.erase(it);else ++it;
   if(active_&&(!get(editor.state().doc,*active_)||!editable(editor.state(),active_->object)))active_.reset();
@@ -1431,7 +1438,8 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   menu.addSeparator();
   QAction* duplicate=menu.addAction("Duplicar forma (+3 mm)");
   QAction* group=menu.addAction("Agrupar seleção");
-  QAction* ungroup=menu.addAction("Desagrupar seleção");
+  QAction* ungroup=menu.addAction("Desagrupar seleção (Ctrl+U)");
+  QAction* ungroupScissors=menu.addAction("Desagrupar e ativar Tesoura");
   QAction* remove=menu.addAction("Excluir selecionados (Delete)");
   duplicate->setEnabled(selected.size()==1);
   group->setEnabled(selected.size()>=2);
@@ -1441,6 +1449,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    if(it!=editor.state().objects.end()&&it->second.group>0)grouped=true;
   }
   ungroup->setEnabled(grouped);
+  ungroupScissors->setEnabled(grouped);
   remove->setEnabled(!selected.empty());
   menu.addSeparator();
   QAction* undo=menu.addAction("Desfazer (Ctrl+Z)");
@@ -1465,13 +1474,11 @@ void mouseReleaseEvent(QMouseEvent* e)override{
     selected.clear();active_.reset();rebuild();activate({id,0});
    }else if(picked==group&&selected.size()>=2){
     editor.group(std::vector<int>(selected.begin(),selected.end()));rebuild();
-   }else if(picked==ungroup&&grouped){
-    int groupId=0;
-    for(int id:selected){
-     auto it=editor.state().objects.find(id);
-     if(it!=editor.state().objects.end()&&it->second.group>0){groupId=it->second.group;break;}
-    }
-    if(groupId>0){editor.ungroup(groupId);rebuild();}
+   }else if((picked==ungroup||picked==ungroupScissors)&&grouped){
+    const int count=editor.ungroupSelection({selected.begin(),selected.end()});
+    rebuild();
+    if(diagnosticEvent)diagnosticEvent("groups_ungrouped",count);
+    if(picked==ungroupScissors&&requestToolChange)requestToolChange(Tool::Scissors);
    }else if(requestToolChange){
     if(picked==select)requestToolChange(Tool::Select);
     else if(picked==line)requestToolChange(Tool::Line);
@@ -1593,7 +1600,7 @@ public:
  // Sessão Bézier nativa (v5). Quando vazia, o editor opera só em polilinhas (compatível TESTE_6).
  std::unique_ptr<CurveDragSession> curves;
  std::map<QString,QPushButton*> buttons;
- QComboBox* layers;QLineEdit* layerName;QCheckBox* visible;QCheckBox* locked;QLabel* status;
+  QComboBox* layers;QLineEdit* layerName;QCheckBox* visible;QCheckBox* locked;QLabel* status;
  QString projectPath,lastError;bool refreshing=false;
  std::optional<IntegratedProject> loadedProject_; // operações, origem e metadados adicionais preservados
  bool bezierToolActive_=false;
@@ -1620,7 +1627,9 @@ public:
  QPlainTextEdit* machineConsole_=nullptr;
  QTcpSocket* wifi_=nullptr; // Qt event loop: nonblocking; no auto reconnect or discovery
  QLabel* transportHint_=nullptr;
- std::vector<QPushButton*> layerPalette_;
+  std::vector<QPushButton*> layerPalette_;
+  QComboBox* layerMode_=nullptr;
+  std::vector<QShortcut*> editingShortcuts_;
  bool machineConnected()const{return serial_.connected()||(wifi_&&wifi_->state()==QAbstractSocket::ConnectedState);}
  bool wifiConnected()const{return wifi_&&wifi_->state()==QAbstractSocket::ConnectedState;}
  size_t machineUpdates_=0;
@@ -2089,7 +2098,12 @@ public:
     b->setToolTip(title+" — "+tooltip);b->setFocusPolicy(Qt::NoFocus);
     buttons[id]=b;grid->addWidget(b,row,col);
     b->setCheckable(true);toolGroup->addButton(b);
-    connect(b,&QPushButton::clicked,this,[this,action]{run(action);});return b;
+    connect(b,&QPushButton::clicked,this,[this,action]{
+     // Mudanca de ferramenta nao pode deixar campo de texto vazio sobre a mesa.
+     if(inlineTextEntry_)
+      finishInlineText(!inlineTextEntry_->text().trimmed().isEmpty());
+     run(action);
+    });return b;
   };
   auto newGrid=[&](){auto* g=new QGridLayout;g->setSpacing(3);g->setAlignment(Qt::AlignHCenter);tools->addLayout(g);return g;};
   tools->addSpacing(4); // Barra compacta: ferramentas de edicao
@@ -2197,12 +2211,23 @@ public:
   layers=new QComboBox;layers->setObjectName("layers");layers->setMinimumWidth(160);inspector->addWidget(layers);
   visible=new QCheckBox("Visível");locked=new QCheckBox("Bloqueada");
   auto* flagRow=new QHBoxLayout;flagRow->addWidget(visible);flagRow->addWidget(locked);inspector->addLayout(flagRow);
-  layerName=new QLineEdit;layerName->setObjectName("layerName");layerName->setPlaceholderText("Nome da nova camada");
+   layerMode_=new QComboBox;
+   layerMode_->setObjectName("layer_mode");
+   layerMode_->addItem("Linha — contornos",QString("Line"));
+   layerMode_->addItem("Preenchimento — formas fechadas",QString("Fill"));
+   layerMode_->setToolTip("Apenas visualizacao editorial. Sem G-code, velocidade ou potencia.");
+   inspector->addWidget(titleLabel("MODO DA CAMADA ATIVA (PREVISUALIZACAO)"));
+   inspector->addWidget(layerMode_);
+   auto* fillNote=new QLabel("Linha percorre contornos; Preenchimento colore formas fechadas. Saida fisica bloqueada.");
+   fillNote->setObjectName("brandSub");fillNote->setWordWrap(true);inspector->addWidget(fillNote);
+   layerName=new QLineEdit;layerName->setObjectName("layerName");layerName->setPlaceholderText("Nome da nova camada");
   inspector->addWidget(layerName);
   auto* layerActions=new QHBoxLayout;layerActions->setSpacing(4);
   add(layerActions,"add_layer","Nova camada",[this]{
    int id=view.editor.state().layers.rbegin()->first+1;
-   view.editor.addLayer(id,layerName->text().toStdString());refresh();layers->setCurrentIndex(layers->findData(id));
+    const QString name=layerName->text().trimmed();
+    view.editor.addLayer(id,(name.isEmpty()?QString("Camada %1").arg(id):name).toStdString());
+    refresh();layers->setCurrentIndex(layers->findData(id));
   });inspector->addLayout(layerActions);
   addVertical(inspector,"move_layer","→ Enviar seleção para camada ativa",[this]{
    check(!bezierToolActive_,"Transferencia de camada: selecione polilinhas.");
@@ -2213,10 +2238,18 @@ public:
   inspector->addSpacing(12);inspector->addWidget(titleLabel("ORGANIZAÇÃO"));
   auto* groupRow=new QHBoxLayout;groupRow->setSpacing(5);
   add(groupRow,"group","Agrupar",[this]{view.editor.group(selection());view.rebuild();});
-  add(groupRow,"ungroup","Desagrupar",[this]{
-   check(!view.selected.empty(),"selecione um grupo");int g=view.editor.state().objects.at(*view.selected.begin()).group;
-   check(g>0,"seleção sem grupo");view.editor.ungroup(g);view.rebuild();
-  });inspector->addLayout(groupRow);
+   add(groupRow,"ungroup","Desagrupar (Ctrl+U)",[this]{
+    check(!bezierToolActive_,"Desagrupar: selecione formas poligonais.");
+    const int groups=view.editor.ungroupSelection(selection());
+    view.rebuild();captureEvent("groups_ungrouped",groups);
+    status->setText(QString("%1 grupo(s) desagrupado(s). Formas prontas para Tesoura (K).").arg(groups));
+   });inspector->addLayout(groupRow);
+  addVertical(inspector,"ungroup_scissors","Desagrupar → Tesoura (K)",[this]{
+   check(!bezierToolActive_,"Somente formas poligonais podem ser desagrupadas.");
+   const int count=view.editor.ungroupSelection(selection());
+   view.rebuild();captureEvent("groups_ungrouped",count);
+   QTimer::singleShot(0,this,[this]{if(buttons.count("scissors"))buttons.at("scissors")->click();});
+  });
   addVertical(inspector,"move","Mover +1 mm",[this]{view.editor.moveObjects(selection(),{1,0});view.rebuild();captureEvent("shapes_moved",int(selection().size()));});
   addVertical(inspector,"delete_shapes","Excluir formas selecionadas",[this]{
    check(!bezierToolActive_,"Para excluir uma curva nativa, use Ctrl+Delete no modo Bézier.");
@@ -2619,12 +2652,32 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   statusRow->addWidget(status,1);layout->addWidget(statusFrame);
   connect(layers,&QComboBox::currentIndexChanged,this,[this]{if(!refreshing)refreshFlags();});
   auto flags=[this]{if(!refreshing)run([this]{view.editor.setLayerFlags(layers->currentData().toInt(),visible->isChecked(),locked->isChecked());view.rebuild();});};
-  connect(visible,&QCheckBox::clicked,this,flags);connect(locked,&QCheckBox::clicked,this,flags);
+   connect(visible,&QCheckBox::clicked,this,flags);connect(locked,&QCheckBox::clicked,this,flags);
+   connect(layerMode_,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](int index){
+    if(refreshing||index<0||layers->currentIndex()<0)return;
+    const int id=layers->currentData().toInt();
+    const QString mode=layerMode_->itemData(index).toString();
+    run([this,id,mode]{
+     view.editor.setLayerMode(id,mode.toStdString());
+     view.rebuild();captureEvent("layer_mode_visual_changed");
+    });
+   });
   view.stateChanged=[this]{if(uiPersistenceEnabled_)recoveryPolicy_.edited();refresh();};
   view.diagnosticEvent=[this](const QString& code,int count){captureEvent(code,count);};
   view.drawingLayer=[this]{return layers->currentData().toInt();};
-  view.requestTextAt=[this](Pt at){insertVectorText(at);};
-  auto shortcut=[this](const QString& sequence,std::function<void()> fn){auto* sc=new QShortcut(QKeySequence(sequence),this);connect(sc,&QShortcut::activated,this,[this,fn]{run(fn);});};
+   view.requestTextAt=[this](Pt at){insertVectorText(at);};
+   connect(qApp,&QApplication::focusChanged,this,[this](QWidget* previous,QWidget* next){
+    if(!inlineTextEntry_||previous!=inlineTextEntry_||next==inlineTextEntry_)return;
+    QTimer::singleShot(0,this,[this]{
+     if(inlineTextEntry_&&QApplication::focusWidget()!=inlineTextEntry_)
+      finishInlineText(!inlineTextEntry_->text().trimmed().isEmpty());
+    });
+   });
+   auto shortcut=[this](const QString& sequence,std::function<void()> fn){
+    auto* sc=new QShortcut(QKeySequence(sequence),this);
+    editingShortcuts_.push_back(sc);
+    connect(sc,&QShortcut::activated,this,[this,fn]{run(fn);});
+   };
   shortcut("Ctrl+Z",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(false);}else view.history(false);});
   shortcut("Ctrl+Y",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(true);}else view.history(true);});
   shortcut("Ctrl+Shift+Z",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(true);}else view.history(true);});
@@ -2663,7 +2716,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   shortcut("T",[this]{buttons.at("text")->click();});
   shortcut("Ctrl+E",[this]{buttons.at("ellipse")->click();});
   shortcut("Ctrl+L",[this]{buttons.at("move_layer")->click();});
-  shortcut("Ctrl+D",[this]{buttons.at("duplicate_obj")->click();});
+   shortcut("Ctrl+D",[this]{buttons.at("duplicate_obj")->click();});
+   shortcut("Ctrl+U",[this]{buttons.at("ungroup")->click();});
+   shortcut("Ctrl+G",[this]{buttons.at("group")->click();});
   shortcut("Ctrl+0",[fit]{fit->click();});
   applyTheme();refresh();view.reportZoom();
   uiPersistenceEnabled_=isInteractive();
@@ -2700,8 +2755,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }
  }
  std::vector<int> selection()const{return {view.selected.begin(),view.selected.end()};}
- void run(const std::function<void()>& action){
-  if(view.busy()||(curves&&curves->dragging())){status->setText("Conclua ou cancele o arraste antes de outro comando.");return;}
+  void run(const std::function<void()>& action){
+   if(inlineTextEntry_)
+    finishInlineText(!inlineTextEntry_->text().trimmed().isEmpty());
+   if(view.busy()||(curves&&curves->dragging())){status->setText("Conclua ou cancele o arraste antes de outro comando.");return;}
   const auto generationBefore=view.editor.generation;
   try{action();lastError.clear();
    if(uiPersistenceEnabled_&&view.editor.generation!=generationBefore)recoveryPolicy_.edited();
@@ -2712,7 +2769,18 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }
   view.setFocus();
  }
- void refreshFlags(){refreshing=true;auto l=view.editor.state().layers.at(layers->currentData().toInt());visible->setChecked(l.visible);locked->setChecked(l.locked);refreshing=false;}
+  void refreshFlags(){
+   if(layers->currentIndex()<0)return;
+   refreshing=true;
+   const auto l=view.editor.state().layers.at(layers->currentData().toInt());
+   visible->setChecked(l.visible);locked->setChecked(l.locked);
+   if(layerMode_){
+    QSignalBlocker guard(layerMode_);
+    int modeIndex=layerMode_->findData(QString::fromStdString(l.mode));
+    layerMode_->setCurrentIndex(modeIndex<0?0:modeIndex);
+   }
+   refreshing=false;
+  }
  void refresh(){
   int current=layers->currentData().toInt();refreshing=true;layers->clear();for(const auto& [id,l]:view.editor.state().layers)layers->addItem(QString::fromStdString(l.name),id);
   int ix=layers->findData(current);layers->setCurrentIndex(ix<0?0:ix);refreshing=false;refreshFlags();
@@ -2765,12 +2833,13 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }
   return QWidget::eventFilter(object,event);
  }
- void finishInlineText(bool commit){
-  if(!inlineTextEntry_)return;
+  void finishInlineText(bool commit){
+   if(!inlineTextEntry_)return;
   QLineEdit* field=inlineTextEntry_;
   const QString message=field->text();const Pt anchor=inlineTextAnchor_;
-  inlineTextEntry_=nullptr;
-  field->removeEventFilter(this);field->hide();field->deleteLater();
+   inlineTextEntry_=nullptr;
+   field->removeEventFilter(this);field->hide();field->deleteLater();
+   for(QShortcut* shortcut:editingShortcuts_)shortcut->setEnabled(true);
   if(!commit||message.trimmed().isEmpty()){view.setFocus();return;}
   try{
    if(message.size()>100)throw std::runtime_error("Texto limitado a 100 caracteres");
@@ -2802,11 +2871,18 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   QPoint point=view.mapFromScene(QPointF(at.x,at.y));
   point.setX(std::clamp(point.x(),0,std::max(0,view.viewport()->width()-80)));
   point.setY(std::clamp(point.y(),0,std::max(0,view.viewport()->height()-px-12)));
-  field->move(point);field->resize(std::max(80,view.viewport()->width()-point.x()-8),px+12);
-  field->installEventFilter(this);
+   field->move(point);field->resize(100,px+12);
+   connect(field,&QLineEdit::textChanged,this,[this,field](const QString& text){
+    if(field!=inlineTextEntry_)return;
+    const int textPixels=QFontMetrics(field->font()).horizontalAdvance(text);
+    const int available=std::max(80,view.viewport()->width()-field->x()-8);
+    field->setFixedWidth(std::clamp(textPixels+44,80,available));
+   });
+   for(QShortcut* shortcut:editingShortcuts_)shortcut->setEnabled(false);
+   field->installEventFilter(this);
   connect(field,&QLineEdit::returnPressed,this,[this]{finishInlineText(true);});
   field->show();field->raise();field->setFocus(Qt::MouseFocusReason);
-  status->setText("Texto direto: digite no desenho; Enter ou Esc conclui; vazio cancela.");
+   status->setText("Texto direto: digite no desenho; Enter/Esc conclui; trocar ferramenta cancela campo vazio.");
  }
  void openOther(){
   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
@@ -3488,22 +3564,100 @@ static QJsonObject newDrawingTools198Test(const QString& directory){
 }
 
 // Qt GUI: texto direto na mesa, proporcao, escala livre e rotacao.
+// Qt 19.8: camadas persistentes, modo visual, grupos multiplos e Ctrl+U.
+static QJsonObject layersUngroup198Test(const QString& directory){
+ QDir().mkpath(directory);
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ auto& v=w.view;
+ const int a=v.editor.rectangle({20,20},15,15);
+ const int b=v.editor.rectangle({40,20},15,15);
+ const int c=v.editor.rectangle({70,20},15,15);
+ const int d=v.editor.rectangle({90,20},15,15);
+ v.editor.addLayer(2,"Gravacao");
+ w.refresh();w.layers->setCurrentIndex(w.layers->findData(2));
+ v.selected.insert(a);v.selected.insert(b);v.applySelectionStyles();
+ clickButton(w,"move_layer");
+ check(v.editor.state().objects.at(a).layer==2&&
+       v.editor.state().objects.at(b).layer==2,"Botao enviar selecao nao moveu camadas");
+ const auto geometryBefore=serialize(encode(v.editor.state().doc));
+ check(w.layerMode_!=nullptr,"Seletor de modo de camada nao foi criado");
+ w.layerMode_->setCurrentIndex(w.layerMode_->findData(QString("Fill")));
+ QApplication::processEvents();
+ v.rebuild();
+ check(v.editor.state().layers.at(2).mode=="Fill","Modo Fill nao persistiu no Editor");
+ check(v.pathItem({a,0})->brush().style()!=Qt::NoBrush,"Forma fechada nao teve preenchimento");
+ check(v.pathItem({c,0})->brush().style()==Qt::NoBrush,"Modo Linha indevidamente preenchido");
+ const int ga=v.editor.group({a,b});
+ const int gb=v.editor.group({c,d});
+ check(ga!=gb,"Os dois grupos receberam mesmo ID");
+ const auto beforeUngroup=v.editor.undoCount();
+ const int changed=v.editor.ungroupSelection({a,c});
+ check(changed==2&&v.editor.undoCount()==beforeUngroup+1,
+  "Desagrupar selecao deveria consumir uma operacao unica");
+ for(const int id:{a,b,c,d})
+  check(v.editor.state().objects.at(id).group==0,"Membro ficou agrupado");
+ check(serialize(encode(v.editor.state().doc))==geometryBefore,
+       "Desagrupar alterou geometria do desenho");
+ check(v.editor.state().objects.at(a).layer==2&&
+       v.editor.state().objects.at(c).layer==0,"Desagrupar alterou camadas");
+ v.rebuild();
+ check(v.editor.undo(),"Nao foi possivel desfazer desagrupamento");
+ check(v.editor.state().objects.at(a).group==ga&&
+       v.editor.state().objects.at(c).group==gb,"Desfazer nao restaurou agrupamento");
+ check(v.editor.redo(),"Nao foi possivel refazer desagrupamento");
+ check(v.editor.state().objects.at(a).group==0,"Refazer nao separou objetos");
+ // Gesto real da interface: Ctrl+U deve desagrupar novamente pela selecao.
+ const int g3=v.editor.group({a,b});
+ v.rebuild();v.clearSelection();v.selected.insert(a);
+ clickButton(w,"select");
+ const auto undoBeforeShortcut=v.editor.undoCount();
+ pressKey(w,Qt::Key_U,Qt::ControlModifier);
+ check(v.editor.state().objects.at(a).group==0&&
+       v.editor.state().objects.at(b).group==0,
+       "Ctrl+U nao desagrupou o objeto selecionado");
+ check(v.editor.undoCount()==undoBeforeShortcut+1,
+       "Ctrl+U nao foi atomico");
+ (void)g3;
+ auto actual=metadata(v.editor.state());
+ for(auto& layer:actual.at("layers").as_array()){
+  auto& row=layer.as_object();row.erase("mode");
+ }
+ const auto legacy=fromMetadata(v.editor.state().doc,actual);
+ check(legacy.layers.at(2).mode=="Line","Metadata antiga sem modo deixou de abrir");
+ QTemporaryDir temp(QDir(directory).filePath("camadas_XXXXXX"));
+ check(temp.isValid(),"Nao foi possivel criar diretorio de teste");
+ const QString file=temp.filePath("roundtrip.alaser");
+ (void)saveNative(file,v.editor.state());
+ const auto restored=editorStateForIntegratedProject(openNative(file));
+ check(restored.layers.at(2).mode=="Fill","Modo nao sobreviveu ao salvar/reabrir .alaser");
+ check(restored.objects.at(a).layer==2,"Transferencia de camada se perdeu no roundtrip");
+ w.grab().save(directory+"/CAMADAS_19_8.png");
+ return {{"status","PASS"},{"ungroup_two_groups_atomic",true},
+  {"ungroup_undo_redo",true},{"layer_transfer",true},
+  {"fill_preview_closed",true},{"legacy_mode_default",true},
+  {"alaser_roundtrip",true},{"hardware_commands_sent",false}};
+}
 static QJsonObject inlineTransforms198Test(const QString& directory){
  QDir().mkpath(directory);
  LabWindow textWindow(Document{});textWindow.show();QApplication::processEvents();
  auto& tv=textWindow.view;tv.setTransform(QTransform::fromScale(4.,4.));
  tv.centerOn(QPointF(80,65));QApplication::processEvents();
  clickButton(textWindow,"text");clickScene(textWindow,{80,65});
- QLineEdit* entry=textWindow.findChild<QLineEdit*>("inlineTextEdit");
+ QLineEdit* empty=textWindow.inlineTextEntry_;
+ check(empty&&empty->isVisible(),"Campo de texto vazio nao foi criado");
+ const auto beforeEmpty=stateText(tv.editor.state());
+ clickButton(textWindow,"select");QApplication::processEvents();
+ check(textWindow.inlineTextEntry_==nullptr,"Trocar ferramenta nao cancelou campo vazio");
+ check(stateText(tv.editor.state())==beforeEmpty,"Campo vazio alterou o desenho");
+ clickButton(textWindow,"text");clickScene(textWindow,{80,65});
+ QLineEdit* entry=textWindow.inlineTextEntry_;
  check(entry&&entry->isVisible(),"Texto nao apareceu dentro da mesa");
  check(entry->parentWidget()==tv.viewport(),"Texto nao pertence a viewport");
  check(entry->styleSheet().contains("background:transparent"),"Texto nao e transparente");
  QTest::keyClicks(entry,"Teste");QApplication::processEvents();
  check(tv.editor.state().doc.contours.empty(),"Texto em digitacao alterou o documento");
  QTest::keyClick(entry,Qt::Key_Return);QApplication::processEvents();
- check(!textWindow.findChild<QLineEdit*>("inlineTextEdit")||
-       !textWindow.findChild<QLineEdit*>("inlineTextEdit")->isVisible(),
-       "Campo de texto ficou aberto apos concluir");
+ check(textWindow.inlineTextEntry_==nullptr,"Campo de texto ficou ativo apos concluir");
  check(!tv.editor.state().doc.contours.empty(),"Texto nao criou contornos vetoriais");
  check(tv.editor.undoCount()==1,"Texto nao criou transacao unica");
  pressKey(textWindow,Qt::Key_Z,Qt::ControlModifier);
@@ -3740,6 +3894,12 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--layers-ungroup-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=layersUngroup198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_CAMADAS_19_8.json");if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--inline-transforms-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=inlineTransforms198Test(out);}

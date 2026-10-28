@@ -234,3 +234,18 @@ Registrar mudanças, testes e pendências.
 - **Estado real: código publicado no GitHub, ainda NÃO compilado/testado no Windows nesta nova branch.** Manter máquina desconectada, emissões bloqueadas; não mesclar nem homologar.
 - Especificação detalhada em `DESENVOLVIMENTO/ESPECIFICACOES/TEXTO_TRANSFORMACOES_CURVAS_19_8.md`.
 - Próximo comando após revisar mudanças locais: `git fetch origin`; `git switch --track origin/feat/texto-direto-transformacoes-19-8`; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteInteracao`; depois `-Abrir` se PASS.
+
+
+## 28/10/2026 — 19.8: Texto sem overlay, Desagrupar para Tesoura, Camadas Line/Fill (PR #7)
+
+- Relato: texto transparente vazio permanecia após Seleção; grupos bloqueavam Tesoura; pedidas camadas com atribuição de formas, Linha/Preenchimento.
+- Consulte a documentação LightBurn: Cuts/Layers Window, Grouping, Cut Settings Editor e Sub-Layers. A seleção de operações por cor e Ctrl+U são referências; Fill+Line antigo foi substituído por subcamadas.
+- Branch isolada `feat/camadas-preenchimento-desagrupar-19-8`, PR #7 em rascunho; **main e APLICATIVO intocados**.
+- Implementado na branch: troca de ferramenta e perda de foco encerram overlay de texto vazio sem escrever no documento; texto não vazio confirmado; largura de campo ajustável; atalhos de edição suspensos enquanto digita.
+- Editor::ungroupSelection desagrupa todos os grupos tocados pela seleção em um único undo, conserva geometria e ID; Ctrl+U, menu contextual e botão "Desagrupar → Tesoura" sem cortar automaticamente.
+- EditorState::Layer ganhou `mode` (Line/Fill), salvo em metadata `editor-meta-1`; leitura legada assume Line, com undo/redo. UI tem seletor de modo da camada; a paleta e o botão de envio já existentes transferem formas.
+- Prévia Fill só pinta formas fechadas semitransparentes. **Não representa parâmetros, hatch, raster real, potência, velocidade ou saída física; Line+Fill moderno requer projeto posterior de subcamadas.** Letras com vazados podem divergir; não produzir com base na prévia.
+- Testes: novo `--layers-ungroup-19-8-test` e `-SomenteCamadas`, integrado ao `-Abrir`; verificação de campo vazio adicionada a `--inline-transforms-19-8-test`.
+- Estado: **GitHub atualizado, verificação estrutural de delimitadores PASS, mas SEM compilação Windows / SEM mouse físico.** Não homologar até ambos testes focados, suíte integral e revisão com projetos reais.
+- Documentação: `DESENVOLVIMENTO/ESPECIFICACOES/CAMADAS_LINHA_FILL_DESAGRUPAR_19_8.md`.
+- Comandos sugeridos a partir da raiz após confirmar estado do Git: `git fetch origin`; `git switch --track origin/feat/camadas-preenchimento-desagrupar-19-8`; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteCamadas`, depois `-SomenteInteracao` e então `-Abrir` se ambos PASS. Em conflito de arquivos locais: preservar antes de atualizar.
