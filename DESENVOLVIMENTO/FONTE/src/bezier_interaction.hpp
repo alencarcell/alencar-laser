@@ -215,6 +215,32 @@ public:
   index_.reset();
   return created;
  }
+ // Converter arestas nativas retas em cubicas C1 por tangentes centradas.
+ // Nao se aplica a polilinhas da outra camada do editor.
+ bool smoothSelected(){
+  if(dragging()||!selected_)return false;
+  const Key key=*selected_;
+  bool found=false;bool hasLines=false;
+  for(const auto& c:committed().contours)if(c.key==key){
+   if(c.nodes.size()>3000)throw std::runtime_error("Suavizacao exige ate 3000 nos por curva.");
+   found=true;for(uint8_t edge:c.edgeKind)if(edge==0)hasLines=true;
+  }
+  if(!found||!hasLines)return false;
+  history_.change([&](CurveDocument& d){
+   for(auto& c:d.contours)if(c.key==key){
+    const size_t n=c.nodes.size();
+    for(size_t i=0;i<n;++i){
+     const Pt prev=c.nodes[i==0?(c.closed?n-1:0):i-1].anchor;
+     const Pt next=c.nodes[i+1<n?i+1:(c.closed?0:n-1)].anchor;
+     const Pt tangent=(next-prev)*(1./6.);
+     c.nodes[i].handleIn=c.nodes[i].anchor-tangent;
+     c.nodes[i].handleOut=c.nodes[i].anchor+tangent;
+    }
+    std::fill(c.edgeKind.begin(),c.edgeKind.end(),uint8_t(1));
+   }
+  });
+  index_.reset();return true;
+ }
  // Remove âncora do contorno selecionado.
  // Delega a removeCurveNode (política: ponte reta sobre o nó removido).
  bool deleteAnchor(int64_t nodeId){
