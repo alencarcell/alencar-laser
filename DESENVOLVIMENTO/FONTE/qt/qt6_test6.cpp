@@ -839,12 +839,8 @@ public:
    bool isSelected=selected.count(objectId)>0;
    for(auto* item:it->second){
      const auto& meta=editor.state().objects.at(objectId);
-     const auto& layer=editor.state().layers.at(meta.layer);
-     const QColor color=layerColor(meta.layer);
-     item->setPen(QPen(isSelected?QColor(239,109,25):color,0));
-     QColor fill=color;fill.setAlpha(115);
-     const bool closed=item->path().currentPosition()==item->path().elementAt(0);
-     item->setBrush(layer.mode=="Fill"&&closed?QBrush(fill):QBrush(Qt::NoBrush));
+     item->setPen(QPen(isSelected?QColor(239,109,25):layerColor(meta.layer),0));
+     // O pincel ja foi criado no rebuild pela geometria canonica (closed).
      item->setZValue(isSelected?9:1);
     styleSetterCalls_+=2;
    }
@@ -2102,7 +2098,12 @@ public:
     b->setToolTip(title+" — "+tooltip);b->setFocusPolicy(Qt::NoFocus);
     buttons[id]=b;grid->addWidget(b,row,col);
     b->setCheckable(true);toolGroup->addButton(b);
-    connect(b,&QPushButton::clicked,this,[this,action]{run(action);});return b;
+    connect(b,&QPushButton::clicked,this,[this,action]{
+     // Mudanca de ferramenta nao pode deixar campo de texto vazio sobre a mesa.
+     if(inlineTextEntry_)
+      finishInlineText(!inlineTextEntry_->text().trimmed().isEmpty());
+     run(action);
+    });return b;
   };
   auto newGrid=[&](){auto* g=new QGridLayout;g->setSpacing(3);g->setAlignment(Qt::AlignHCenter);tools->addLayout(g);return g;};
   tools->addSpacing(4); // Barra compacta: ferramentas de edicao
@@ -2658,8 +2659,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   view.stateChanged=[this]{if(uiPersistenceEnabled_)recoveryPolicy_.edited();refresh();};
   view.diagnosticEvent=[this](const QString& code,int count){captureEvent(code,count);};
   view.drawingLayer=[this]{return layers->currentData().toInt();};
-  view.requestTextAt=[this](Pt at){insertVectorText(at);};
-  auto shortcut=[this](const QString& sequence,std::function<void()> fn){auto* sc=new QShortcut(QKeySequence(sequence),this);connect(sc,&QShortcut::activated,this,[this,fn]{run(fn);});};
+   view.requestTextAt=[this](Pt at){insertVectorText(at);};
+   connect(qApp,&QApplication::focusChanged,this,[this](QWidget* previous,QWidget* next){
+    if(!inlineTextEntry_||previous!=inlineTextEntry_||next==inlineTextEntry_)return;
+    QTimer::singleShot(0,this,[this]{
+     if(inlineTextEntry_&&QApplication::focusWidget()!=inlineTextEntry_)
+      finishInlineText(!inlineTextEntry_->text().trimmed().isEmpty());
+    });
+   });
+   auto shortcut=[this](const QString& sequence,std::function<void()> fn){
+    auto* sc=new QShortcut(QKeySequence(sequence),this);
+    editingShortcuts_.push_back(sc);
+    connect(sc,&QShortcut::activated,this,[this,fn]{run(fn);});
+   };
   shortcut("Ctrl+Z",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(false);}else view.history(false);});
   shortcut("Ctrl+Y",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(true);}else view.history(true);});
   shortcut("Ctrl+Shift+Z",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(true);}else view.history(true);});
@@ -2737,8 +2749,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }
  }
  std::vector<int> selection()const{return {view.selected.begin(),view.selected.end()};}
- void run(const std::function<void()>& action){
-  if(view.busy()||(curves&&curves->dragging())){status->setText("Conclua ou cancele o arraste antes de outro comando.");return;}
+  void run(const std::function<void()>& action){
+   if(inlineTextEntry_)
+    finishInlineText(!inlineTextEntry_->text().trimmed().isEmpty());
+   if(view.busy()||(curves&&curves->dragging())){status->setText("Conclua ou cancele o arraste antes de outro comando.");return;}
   const auto generationBefore=view.editor.generation;
   try{action();lastError.clear();
    if(uiPersistenceEnabled_&&view.editor.generation!=generationBefore)recoveryPolicy_.edited();
@@ -2813,12 +2827,13 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }
   return QWidget::eventFilter(object,event);
  }
- void finishInlineText(bool commit){
-  if(!inlineTextEntry_)return;
+  void finishInlineText(bool commit){
+   if(!inlineTextEntry_)return;
   QLineEdit* field=inlineTextEntry_;
   const QString message=field->text();const Pt anchor=inlineTextAnchor_;
-  inlineTextEntry_=nullptr;
-  field->removeEventFilter(this);field->hide();field->deleteLater();
+   inlineTextEntry_=nullptr;
+   field->removeEventFilter(this);field->hide();field->deleteLater();
+   for(QShortcut* shortcut:editingShortcuts_)shortcut->setEnabled(true);
   if(!commit||message.trimmed().isEmpty()){view.setFocus();return;}
   try{
    if(message.size()>100)throw std::runtime_error("Texto limitado a 100 caracteres");
@@ -2850,11 +2865,18 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   QPoint point=view.mapFromScene(QPointF(at.x,at.y));
   point.setX(std::clamp(point.x(),0,std::max(0,view.viewport()->width()-80)));
   point.setY(std::clamp(point.y(),0,std::max(0,view.viewport()->height()-px-12)));
-  field->move(point);field->resize(std::max(80,view.viewport()->width()-point.x()-8),px+12);
-  field->installEventFilter(this);
+   field->move(point);field->resize(100,px+12);
+   connect(field,&QLineEdit::textChanged,this,[this,field](const QString& text){
+    if(field!=inlineTextEntry_)return;
+    const int textPixels=QFontMetrics(field->font()).horizontalAdvance(text);
+    const int available=std::max(80,view.viewport()->width()-field->x()-8);
+    field->setFixedWidth(std::clamp(textPixels+44,80,available));
+   });
+   for(QShortcut* shortcut:editingShortcuts_)shortcut->setEnabled(false);
+   field->installEventFilter(this);
   connect(field,&QLineEdit::returnPressed,this,[this]{finishInlineText(true);});
   field->show();field->raise();field->setFocus(Qt::MouseFocusReason);
-  status->setText("Texto direto: digite no desenho; Enter ou Esc conclui; vazio cancela.");
+   status->setText("Texto direto: digite no desenho; Enter/Esc conclui; trocar ferramenta cancela campo vazio.");
  }
  void openOther(){
   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
