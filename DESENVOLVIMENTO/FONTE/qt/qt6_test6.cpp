@@ -4373,10 +4373,22 @@ static QJsonObject refineCurvesTrace198Test(const QString& folder){
  }
  check(collector.records().size()==7,"Historico diagnostico incompleto");
  check(collector.counters().at("scissor_no_safe_span")==1,"Motivo da Tesoura nao contabilizado");
+ // A interface deve permitir criar/editar uma Bezier verdadeira, com handles.
+ CurveDragSession curves(CurveDocument{});
+ const Key curveKey=curves.addEditableCubic({0,0},{6,-10},{14,-10},{20,0},100);
+ check(curves.committed().contours.size()==1&&curves.undoCount()==1,
+   "Criacao Bezier nao foi persistida com Ctrl+Z");
+ const auto& cubic=curves.committed().contours[0];
+ check(cubic.key==curveKey&&cubic.edgeKind.size()==1&&cubic.edgeKind[0]==1,
+   "Nova curva nao possui aresta cubica nativa");
+ check(std::abs(cubicPoint(edgeAt(cubic,0),.5).y+7.5)<.01,
+   "Handles de Bezier nao controlam suavizacao");
+ check(curves.undo()&&curves.committed().contours.empty(),"Undo Bezier falhou");
+ check(curves.redo()&&curves.committed().contours.size()==1,"Redo Bezier falhou");
  traced.binary.save(folder+"/BINARIO_19_8.png");
  return {{"status","PASS"},{"r_nodes",double(textNodes)},
   {"hole_contours",int(o.size())},{"trace_contours",int(traced.contours.size())},
-  {"trace_nodes",double(nodes)},{"scissor_events",int(collector.records().size())},
+  {"trace_nodes",double(nodes)},{"scissor_events",int(collector.records().size())},{"native_cubic_created",true},
   {"hardware_commands_sent",false}};
 }
 
