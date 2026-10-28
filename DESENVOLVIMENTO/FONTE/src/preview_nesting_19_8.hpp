@@ -38,10 +38,12 @@ inline bool onSegment(Pt p,Pt a,Pt b){
         p.y>=std::min(a.y,b.y)-epsilon&&p.y<=std::max(a.y,b.y)+epsilon;
 }
 // 0 outside/on-boundary, 1 strictly inside (ray parity).
-inline bool pointStrictlyInside(Pt point,const Contour& polygon){
+inline bool pointStrictlyInside(Pt point,const Contour& polygon,
+                               std::size_t& checks,std::size_t maxChecks){
  if(!polygon.closed||polygon.nodes.size()<3)return false;
  bool inside=false;
  for(std::size_t i=0,j=polygon.nodes.size()-1;i<polygon.nodes.size();j=i++){
+  if(++checks>maxChecks)throw std::runtime_error("Limite de topologia virtual excedido");
   const Pt a=polygon.nodes[j].p,b=polygon.nodes[i].p;
   if(onSegment(point,a,b))return false;
   if((a.y>point.y)!=(b.y>point.y)){
@@ -68,7 +70,7 @@ inline bool strictlyContains(const Contour& outer,const Contour& inner,
  // If a self-intersection is supplied, caller is expected to inspect it:
  // this preview makes no promise about self-intersecting polygons.
  for(const auto& node:inner.nodes)
-  if(!pointStrictlyInside(node.p,outer))return false;
+  if(!pointStrictlyInside(node.p,outer,checks,maxChecks))return false;
  const std::size_t edges=inner.closed?inner.nodes.size():inner.nodes.size()-1;
  for(std::size_t i=0;i<edges;++i){
   const Pt a=inner.nodes[i].p;
@@ -78,6 +80,22 @@ inline bool strictlyContains(const Contour& outer,const Contour& inner,
     throw std::runtime_error("Topologia virtual complexa demais; limite de comparacoes");
    const Pt c=outer.nodes[j].p,d=outer.nodes[(j+1)%outer.nodes.size()].p;
    if(segmentsMeet(a,b,c,d))return false;
+  }
+ }
+ return true;
+}
+inline bool simpleClosed(const Contour& shape,
+                         std::size_t& checks,std::size_t maxChecks){
+ if(!shape.closed||shape.nodes.size()<3)return false;
+ const std::size_t n=shape.nodes.size();
+ for(std::size_t a=0;a<n;++a){
+  const Pt p=shape.nodes[a].p,q=shape.nodes[(a+1)%n].p;
+  if(std::hypot(p.x-q.x,p.y-q.y)<=epsilon)return false;
+  for(std::size_t b=a+1;b<n;++b){
+   if(b==a+1||(a==0&&b==n-1))continue;
+   if(++checks>maxChecks)throw std::runtime_error("Limite de contornos complexos excedido");
+   if(segmentsMeet(p,q,shape.nodes[b].p,shape.nodes[(b+1)%n].p))
+    return false;
   }
  }
  return true;
@@ -96,6 +114,13 @@ inline Constraints build(const std::vector<const Contour*>& shapes,
  std::size_t checks=0;
  for(std::size_t parent=0;parent<shapes.size();++parent){
   if(!shapes[parent]->closed)continue;
+  // Avoid O(nodes²) unless some other box can actually fit inside.
+  bool possible=false;
+  for(std::size_t child=0;child<shapes.size();++child)
+   if(parent!=child&&boundsStrictlyInside(boxes[child],boxes[parent])){
+    possible=true;break;
+   }
+  if(!possible||!simpleClosed(*shapes[parent],checks,maxChecks))continue;
   for(std::size_t child=0;child<shapes.size();++child){
    if(parent==child)continue;
    if(strictlyContains(*shapes[parent],*shapes[child],
