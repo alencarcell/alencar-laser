@@ -623,6 +623,13 @@ class QtEditorLab final:public QGraphicsView{
     rasterRect_.width()/rasterSource_.width(),rasterRect_.height()/rasterSource_.height()));
   rasterOverlay_->setOpacity(.72);
  }
+ void setRasterWidthMm(double width){
+  if(rasterSource_.isNull()||width<=0)return;
+  rasterRect_.setSize(QSizeF(width,width*rasterSource_.height()/rasterSource_.width()));
+  if(rasterOverlay_)
+   rasterOverlay_->setTransform(QTransform::fromScale(
+     rasterRect_.width()/rasterSource_.width(),rasterRect_.height()/rasterSource_.height()));
+ }
  void setRasterImage(const QImage& image){
   if(image.isNull())throw std::runtime_error("Imagem vazia");
   if(image.width()>10000||image.height()>10000)
@@ -2270,9 +2277,19 @@ public:
   }
   tools->addSpacing(5); // Importadores futuros desativados
   auto* fileGrid=newGrid();
-  for(const auto& data:std::vector<QString>{"SVG", "DXF", "Imagem", "LightBurn"}){
+  for(const auto& data:std::vector<QString>{"SVG", "DXF", "LightBurn"}){
    const int index=fileGrid->count();fileGrid->addWidget(future(data,"Importação de "+data),index,0);
   }
+  auto* importImageButton=new QPushButton("Imagem / Traçar…");
+  importImageButton->setObjectName("open_image_for_trace");
+  fileGrid->addWidget(importImageButton,fileGrid->count(),0);
+  connect(importImageButton,&QPushButton::clicked,this,[this]{
+   run([this]{
+    const QString file=QFileDialog::getOpenFileName(this,"Importar imagem para traçar",{},
+      "Imagens (*.png *.jpg *.jpeg *.bmp *.webp)");
+    if(!file.isEmpty())loadRasterFromFile(file);
+   });
+  });
   tools->addStretch();
   auto* tip=new QLabel("Arraste: mover forma\nDelete: excluir forma\nCtrl+arraste: mover curva Bézier\nScroll: zoom no cursor\nBotão central: mover tela\nCtrl+Z/Y: histórico");
   tip->setObjectName("brandSub");tip->setWordWrap(true);tip->hide();tools->addWidget(tip);
@@ -2808,6 +2825,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   view.diagnosticEvent=[this](const QString& code,int count){captureEvent(code,count);};
   view.drawingLayer=[this]{return layers->currentData().toInt();};
    view.requestTextAt=[this](Pt at){insertVectorText(at);};
+   view.requestTraceImage=[this]{traceImageDialog();};
    connect(qApp,&QApplication::focusChanged,this,[this](QWidget* previous,QWidget* next){
     if(!inlineTextEntry_||previous!=inlineTextEntry_||next==inlineTextEntry_)return;
     QTimer::singleShot(0,this,[this]{
