@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace alaser::sim198::motion {
@@ -44,6 +45,17 @@ inline double segmentAccel(double dx,double dy,bool line,const Settings& s){
  if(ux>1e-12)a=std::min(a,(line?s.cutAccelX:s.rapidAccelX)/ux);
  if(uy>1e-12)a=std::min(a,(line?s.cutAccelY:s.rapidAccelY)/uy);
  return a;
+}
+// Purely illustrative power behavior. NOT GRBL PWM simulation, not a command.
+inline double virtualPowerPercent(double nominalPercent,const std::string& mode,
+                                  double actualSpeedMmMin,double requestedSpeedMmMin){
+ if(!std::isfinite(nominalPercent)||nominalPercent<0||nominalPercent>100||
+    !std::isfinite(actualSpeedMmMin)||actualSpeedMmMin<0||
+    !std::isfinite(requestedSpeedMmMin)||requestedSpeedMmMin<=0||
+    (mode!="M3"&&mode!="M4"))
+  throw std::runtime_error("Parametros de potencia virtual invalidos");
+ if(mode=="M3")return nominalPercent; // constant, including zero-speed illustrative case
+ return nominalPercent*std::clamp(actualSpeedMmMin/requestedSpeedMmMin,0.0,1.0);
 }
 inline double startStopSeconds(double distance,double speed,double accel){
  if(!std::isfinite(distance)||distance<0||!(speed>0)||!(accel>0))
