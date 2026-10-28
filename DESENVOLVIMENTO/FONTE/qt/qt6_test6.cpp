@@ -4157,12 +4157,71 @@ static QJsonObject inlineTransforms198Test(const QString& directory){
  const QRectF centerAfter=boundsFree();
  check(QLineF(centerBefore.center(),centerAfter.center()).length()<0.8,
        "Ctrl nao preservou o centro ao redimensionar");
+ // Regressao visual do arraste (video real 28/10): quadro + alcas seguem a forma.
+ LabWindow dragWindow(Document{});dragWindow.show();QApplication::processEvents();
+ auto& dv=dragWindow.view;
+ dv.setTransform(QTransform::fromScale(5.,5.));dv.centerOn(QPointF(70,78));
+ const int dragId=dv.editor.rectangle({50,70},30,20);
+ dv.rebuild();dv.activate({dragId,0});QApplication::processEvents();
+ const auto initialRect=dv.selectionPreviewRect();
+ check(initialRect.has_value(),"Caixa inicial de selecao ausente");
+ const auto initialDoc=stateText(dv.editor.state());
+ const auto initialUndo=dv.editor.undoCount();
+ const QPoint bodyPress=dv.mapFromScene({57,70});
+ const QPoint bodyTarget=dv.mapFromScene({69,78});
+ QTest::mousePress(dv.viewport(),Qt::LeftButton,Qt::NoModifier,bodyPress);
+ QApplication::processEvents();
+ check(dv.busy(),"Nao iniciou o arraste pela linha do retangulo");
+ auto moveDrag=[&](QPoint at){
+  const QPointF local(at),global(dv.viewport()->mapToGlobal(at));
+  QMouseEvent event(QEvent::MouseMove,local,global,
+                    Qt::NoButton,Qt::LeftButton,Qt::NoModifier);
+  QApplication::sendEvent(dv.viewport(),&event);
+  QApplication::processEvents();
+ };
+ moveDrag(bodyTarget);
+ const auto movingRect=dv.selectionPreviewRect();
+ const QPointF shapeDelta=dv.mapToScene(bodyTarget)-dv.mapToScene(bodyPress);
+ check(movingRect&&QLineF(movingRect->topLeft(),
+       initialRect->topLeft()+shapeDelta).length()<.25,
+       "Moldura nao acompanhou a forma durante mouseMove");
+ check(stateText(dv.editor.state())==initialDoc&&dv.editor.undoCount()==initialUndo,
+       "Arraste alterou documento/undo antes do mouseRelease");
+ dragWindow.grab().save(directory+"/SELECAO_ARRASTE_DURANTE_MOVIMENTO.png");
+ QTest::mouseRelease(dv.viewport(),Qt::LeftButton,Qt::NoModifier,bodyTarget);
+ QApplication::processEvents();
+ const auto afterMove=dv.selectionPreviewRect();
+ check(afterMove&&QLineF(afterMove->topLeft(),movingRect->topLeft()).length()<.25,
+       "Caixa pulou de posicao ao soltar o mouse");
+ check(dv.editor.undoCount()==initialUndo+1,"Arraste nao gerou undo unico");
+ // Alca central: o mesmo comportamento sincronizado de preview.
+ const QPoint moveCenter=dv.mapFromScene(afterMove->center());
+ const QPoint moveCenterTo=dv.mapFromScene(afterMove->center()+QPointF(6,-4));
+ const auto beforeCenter=stateText(dv.editor.state());
+ QTest::mousePress(dv.viewport(),Qt::LeftButton,Qt::NoModifier,moveCenter);
+ QApplication::processEvents();moveDrag(moveCenterTo);
+ const auto centerMoving=dv.selectionPreviewRect();
+ const QPointF centerDelta=dv.mapToScene(moveCenterTo)-dv.mapToScene(moveCenter);
+ check(centerMoving&&QLineF(centerMoving->topLeft(),
+       afterMove->topLeft()+centerDelta).length()<.25,
+       "Alca central nao moveu moldura simultaneamente");
+ check(stateText(dv.editor.state())==beforeCenter,
+       "Alca central gravou geometria antes de soltar");
+ QTest::mouseRelease(dv.viewport(),Qt::LeftButton,Qt::NoModifier,moveCenterTo);
+ QApplication::processEvents();
+ check(dv.editor.undoCount()==initialUndo+2,"Alca central nao gerou undo unico");
+ pressKey(dragWindow,Qt::Key_Z,Qt::ControlModifier);
+ pressKey(dragWindow,Qt::Key_Z,Qt::ControlModifier);
+ check(stateText(dv.editor.state())==initialDoc,
+       "Undo dos arrastes nao restaurou estado original");
  transformWindow.grab().save(directory+"/TRANSFORMACOES_EDITOR_19_8.png");
  textWindow.grab().save(directory+"/TEXTO_DIRETO_19_8.png");
  return {{"status","PASS"},{"inline_text",true},{"transparent_overlay",true},
   {"text_atomic_undo",true},{"scale_proportional",true},
   {"rotation_handle",true},{"undo_rotate",true},{"shift_free_scale",true},
-  {"ctrl_center_scale",true},{"hardware_commands_sent",false}};
+  {"ctrl_center_scale",true},{"selection_preview_follows_drag",true},
+  {"selection_preview_center_handle",true},{"selection_preview_is_non_destructive",true},
+  {"selection_drag_undo",true},{"hardware_commands_sent",false}};
 }
 static QJsonObject editorMultitool198Test(const QString& directory){
  // Gesto multi-nos, fechamento e linha por arraste legada.
