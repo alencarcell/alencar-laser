@@ -81,6 +81,8 @@ inline void appendFill(Plan& out,const EditorState& state,const Settings& settin
   }
   if(!std::isfinite(ymin)||!std::isfinite(ymax))throw std::runtime_error("Fill invalido");
   const double range=ymax-ymin;
+  if(!std::isfinite(range)||range>10000)
+   throw std::runtime_error("Altura Fill virtual fora do limite");
   if(range<=0)continue;
   const double rows=std::ceil(range/settings.intervalMm);
   if(rows>1500)throw std::runtime_error("Fill ultrapassa 1500 linhas virtuais");
@@ -115,7 +117,8 @@ inline void appendMask(Plan& out,const Mask& mask,const Bounds& box,
     mask.black.size()!=std::size_t(mask.width)*std::size_t(mask.height))
   throw std::runtime_error("Mascara virtual invalida ou muito grande");
  if(!std::isfinite(box.x)||!std::isfinite(box.y)||!std::isfinite(box.width)||
-    !std::isfinite(box.height)||box.width<=0||box.height<=0)
+    !std::isfinite(box.height)||box.width<=0||box.height<=0||
+    box.width>10000||box.height>10000)
   throw std::runtime_error("Dimensoes da imagem virtual invalidas");
  const int rows=std::max(1,int(std::ceil(box.height/settings.intervalMm)));
  if(rows>1500)throw std::runtime_error("Imagem ultrapassa 1500 linhas virtuais");
