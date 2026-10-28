@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -60,6 +60,19 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteRefino) {
+        Write-Host 'REFINO: curvas de texto R/O, raster P&B e diagnosticos da Tesoura.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt de refinamento'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\refino'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --refine-curves-trace-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Texto R/O, imagem P&B e Tesoura' (Join-Path $destino 'RESULTADO_REFINO_19_8.json')
+        Write-Host 'Refino PASS nos testes sinteticos. Mouse real e imagem do cliente ainda necessarios.' -ForegroundColor Green
+        return
+    }
     if ($SomenteCasoReal) {
         Write-Host 'TESTE REAL: fecho duplicado Tesoura, alca central, paleta e LBRN2 arredondado.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test7_qt6
@@ -227,6 +240,10 @@ try {
     New-Item -ItemType Directory -Path $dirCasoReal -Force | Out-Null
     & $app --scissor-closures-19-8-test $fixture $dirCasoReal
     Checar-ResultadoQt 'Regressao caso real Tesoura/Alca/Paleta/LBRN2' (Join-Path $dirCasoReal 'RESULTADO_CASO_REAL_19_8.json')
+    $refino = Join-Path $destino 'refino'
+    New-Item -ItemType Directory -Path $refino -Force | Out-Null
+    & $app --refine-curves-trace-19-8-test $fixture $refino
+    Checar-ResultadoQt 'Curvas de texto, P&B, coleta Tesoura' (Join-Path $refino 'RESULTADO_REFINO_19_8.json')
     Write-Host 'BUILD E REGRESSOES AUTOMATIZADAS PASSARAM. AVALIACAO VISUAL AINDA NECESSARIA.' -ForegroundColor Green
     if ($Abrir) {
         Write-Host 'Abrindo editor em modo de desenvolvimento; mantenha o laser desconectado.' -ForegroundColor Yellow
