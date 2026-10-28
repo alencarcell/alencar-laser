@@ -3108,7 +3108,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     for(int y=0;y<bitmap.height();++y){
      QRgb* pixels=reinterpret_cast<QRgb*>(bitmap.scanLine(y));
      for(int x=0;x<bitmap.width();++x){
-      const QRgb rgb=pixels[x];const int grey=(54*qRed(rgb)+183*qGreen(rgb)+19*qBlue(rgb))/256;
+      const QRgb rgb=pixels[x];
+      const int luminance=(54*qRed(rgb)+183*qGreen(rgb)+19*qBlue(rgb))/256;
+      const int grey=255-((255-luminance)*qAlpha(rgb)+127)/255;
       pixels[x]=grey<=thr?qRgb(0,0,0):qRgb(255,255,255);
      }
     }
@@ -4237,9 +4239,9 @@ static QJsonObject traceEditor198Test(const QString& directory){
  // Curvas nativas: converter retas em Cubicas, preservar nos e desfazer.
  CurveDocument native;native.nextId=4;
  CurveContour curve;curve.key={1,0};curve.closed=false;
- curve.nodes={{{1,{0,0},{0,0},{0,0}}},
-              {{2,{10,6},{10,6},{10,6}}},
-              {{3,{20,0},{20,0},{20,0}}}};
+ curve.nodes={{1,{0,0},{0,0},{0,0}},
+              {2,{10,6},{10,6},{10,6}},
+              {3,{20,0},{20,0},{20,0}}};
  curve.edgeKind={0,0};native.contours.push_back(curve);
  validateCurve(native);
  CurveDragSession curves(native);curves.select({1,0});
