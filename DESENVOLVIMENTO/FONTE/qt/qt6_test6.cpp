@@ -184,6 +184,7 @@ class QtEditorLab final:public QGraphicsView{
  // A sessao e propriedade de LabWindow; QtEditorLab nunca a libera.
  CurveDragSession* nativeSession_=nullptr;
  bool nativeMode_=false;
+ bool fillPreview_=false; // Editor LightBurn mostra linhas por padrao.
  std::map<Key,QGraphicsPathItem*> nativeItems_;
  std::optional<CurveHit> nativeSelectedPart_;
  std::optional<Key> nativeStyledKey_;
@@ -695,6 +696,11 @@ public:
  std::function<void(double)> zoomChanged;
  double currentZoom()const{return std::hypot(transform().m11(),transform().m21());}
  void reportZoom(){if(zoomChanged)zoomChanged(currentZoom());}
+ bool fillPreview()const{return fillPreview_;}
+ void setFillPreview(bool enabled){
+  if(fillPreview_==enabled)return;
+  fillPreview_=enabled;rebuild();
+ }
  std::function<int()> drawingLayer;
  int targetLayer()const{return drawingLayer?drawingLayer():0;}
  bool busy()const{return draggingNode_.has_value()||shapeDragging_||transformDragging_||strokeDrawing_||polylineDrawing_||marqueeActive_||nativePressing_||nativeContourPressing_;}
@@ -884,7 +890,7 @@ public:
     const auto meta=editor.state().objects.at(c.key.object);
     const auto layer=editor.state().layers.at(meta.layer);
     auto* o=scene_.addPath(pathOf(c),QPen(layerColor(meta.layer),0));o->setZValue(1);
-    if(layer.mode=="Fill"&&c.closed){
+    if(fillPreview_&&layer.mode=="Fill"&&c.closed){
      QColor translucent=layerColor(meta.layer);translucent.setAlpha(115);
      o->setBrush(QBrush(translucent));
     }
@@ -2242,7 +2248,13 @@ public:
    layerMode_->setToolTip("Apenas visualizacao editorial. Sem G-code, velocidade ou potencia.");
    inspector->addWidget(titleLabel("MODO DA CAMADA ATIVA (PREVISUALIZACAO)"));
    inspector->addWidget(layerMode_);
-   auto* fillNote=new QLabel("Linha percorre contornos; Preenchimento colore formas fechadas. Saida fisica bloqueada.");
+   auto* showFill=new QCheckBox("Prévia de preenchimento (apenas visual)");
+   showFill->setObjectName("preview_fill");
+   showFill->setChecked(false);
+   showFill->setToolTip("Desligado por padrão como no LightBurn; não gera hatch de gravação.");
+   inspector->addWidget(showFill);
+   connect(showFill,&QCheckBox::toggled,this,[this](bool checked){view.setFillPreview(checked);});
+   auto* fillNote=new QLabel("Linha/Fill são configurações editoriais. A mesa mostra contornos por padrão; sem G-code.");
    fillNote->setObjectName("brandSub");fillNote->setWordWrap(true);inspector->addWidget(fillNote);
    layerName=new QLineEdit;layerName->setObjectName("layerName");layerName->setPlaceholderText("Nome da nova camada");
   inspector->addWidget(layerName);
@@ -2641,7 +2653,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     const QString color=shades.at(id%shades.size());
     b->setStyleSheet(QString("QPushButton { background:%1; color:white; border:1px solid #69717B; border-radius:4px; padding:1px; font-size:10px;} "
       "QPushButton:checked {border:3px solid #FFFFFF;} QPushButton:disabled {background:#41454D; color:#797D82;}").arg(color));
-    b->setToolTip(QString("Clique: ativar ou criar camada %1 | Shift+clique: criar se necessario e enviar selecao").arg(id));
+    b->setToolTip(QString("Clique: move seleção para camada %1; sem seleção, ativa. Shift+clique seleciona objetos desta camada.").arg(id));
     connect(b,&QPushButton::clicked,this,[this,id]{
      if(layers->findData(id)<0){
       run([this,id]{view.editor.addLayer(id,"Camada "+std::to_string(id));});
@@ -2649,10 +2661,18 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
      const int ix=layers->findData(id);
      if(ix<0)return;
      if(QApplication::keyboardModifiers().testFlag(Qt::ShiftModifier)){
+      if(bezierToolActive_){status->setText("Selecione polilinhas no modo Seleção.");return;}
+      view.clearSelection();
+      for(const auto& [obj,meta]:view.editor.state().objects)
+       if(meta.layer==id&&editable(view.editor.state(),obj))view.selected.insert(obj);
+      view.applySelectionStyles();view.viewport()->update();
+      layers->setCurrentIndex(ix);
+     }else if(!selection().empty()){
       run([this,id]{
-       check(!bezierToolActive_,"Somente polilinhas podem ser enviadas para camadas nesta versao.");
-       const auto ids=selection();check(!ids.empty(),"Selecione uma forma primeiro.");
-       view.editor.moveSelectionToLayer(ids,id);view.rebuild();captureEvent("objects_layer_changed",int(ids.size()));
+       check(!bezierToolActive_,"Mover camadas: polilinhas no modo Seleção.");
+       const auto ids=selection();
+       view.editor.moveSelectionToLayer(ids,id);view.rebuild();
+       captureEvent("objects_layer_changed",int(ids.size()));
        layers->setCurrentIndex(layers->findData(id));
       });
      }else layers->setCurrentIndex(ix);
@@ -3609,7 +3629,10 @@ static QJsonObject layersUngroup198Test(const QString& directory){
  QApplication::processEvents();
  v.rebuild();
  check(v.editor.state().layers.at(2).mode=="Fill","Modo Fill nao persistiu no Editor");
- check(v.pathItem({a,0})->brush().style()!=Qt::NoBrush,"Forma fechada nao teve preenchimento");
+ check(v.pathItem({a,0})->brush().style()==Qt::NoBrush,
+  "Editor deve mostrar contornos no padrao LightBurn");
+ v.setFillPreview(true);
+ check(v.pathItem({a,0})->brush().style()!=Qt::NoBrush,"Previa opcional nao preencheu forma fechada");
  check(v.pathItem({c,0})->brush().style()==Qt::NoBrush,"Modo Linha indevidamente preenchido");
  const int ga=v.editor.group({a,b});
  const int gb=v.editor.group({c,d});
