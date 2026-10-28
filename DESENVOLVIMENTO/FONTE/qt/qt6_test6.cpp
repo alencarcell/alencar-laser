@@ -2685,6 +2685,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   };
   auto* fileMenu=mainMenu->addMenu("Arquivo");
   command(fileMenu,"Abrir projeto...","open");
+  connect(fileMenu->addAction("Abrir imagem para traçar..."),&QAction::triggered,
+   this,[this]{run([this]{openImageForTracing();});});
   connect(fileMenu->addAction("Abrir último projeto (manual)"),&QAction::triggered,this,[this]{
    run([this]{
     const QString path=QSettings("AlencarLaser","DesktopBeta").value("files/lastProject").toString();
@@ -2834,6 +2836,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    if(buttons.count(id))buttons.at(id)->click();
   };
   view.toolWarning=[this](const QString& message){status->setText(message);};
+  view.requestTraceRaster=[this]{run([this]{traceRaster();});};
   // Atalho Esc nao pode depender de run(): run() rejeita comandos durante gestos ativos.
   auto* cancelGesture=new QShortcut(QKeySequence("Esc"),this);
   connect(cancelGesture,&QShortcut::activated,this,[this]{
@@ -2870,7 +2873,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(!mime||!mime->hasUrls()||mime->urls().size()!=1){e->ignore();return;}
   const QUrl url=mime->urls().first();
   const QString suffix=QFileInfo(url.toLocalFile()).suffix().toLower();
-  if(url.isLocalFile()&&(suffix=="alaser"||suffix=="lbrn2"))
+  if(url.isLocalFile()&&(suffix=="alaser"||suffix=="lbrn2"||
+      suffix=="png"||suffix=="jpg"||suffix=="jpeg"||suffix=="bmp"||suffix=="webp"))
    e->acceptProposedAction();
   else e->ignore();
  }
@@ -2879,9 +2883,15 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(!mime||!mime->hasUrls()||mime->urls().size()!=1){e->ignore();return;}
   const QUrl url=mime->urls().first();
   const QString suffix=QFileInfo(url.toLocalFile()).suffix().toLower();
-  if(!url.isLocalFile()||(suffix!="alaser"&&suffix!="lbrn2")){e->ignore();return;}
+  if(!url.isLocalFile()||(suffix!="alaser"&&suffix!="lbrn2"&&
+     suffix!="png"&&suffix!="jpg"&&suffix!="jpeg"&&suffix!="bmp"&&suffix!="webp")){
+   e->ignore();return;
+  }
   e->acceptProposedAction();
-  try{openFilePath(url.toLocalFile());}
+  try{
+   if(suffix=="alaser"||suffix=="lbrn2")openFilePath(url.toLocalFile());
+   else loadImageForTracing(url.toLocalFile());
+  }
   catch(const std::exception& error){
    QMessageBox::warning(this,"Arquivo nao importado",QString::fromUtf8(error.what())+
       "\n\nO desenho anterior foi preservado. Use Referencias para inspecionar o .lbrn2.");
@@ -3017,6 +3027,121 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   field->show();field->raise();field->setFocus(Qt::MouseFocusReason);
    status->setText("Texto direto: digite no desenho; Enter/Esc conclui; trocar ferramenta cancela campo vazio.");
  }
+
+ void loadImageForTracing(const QString& filePath){
+  const QImage image(filePath);
+  if(image.isNull())throw std::runtime_error("Nao foi possivel decodificar PNG/JPG/BMP/WebP.");
+  if(image.width()>1600||image.height()>1600||qint64(image.width())*image.height()>1500000)
+   throw std::runtime_error("Imagem acima do limite de 1600 px e 1,5 MP. Reduza fora do programa, sem perder o original.");
+  const double mm=120./std::max(image.width(),image.height());
+  const QPointF middle=view.mapToScene(view.viewport()->rect().center());
+  const Pt origin{middle.x()-image.width()*mm/2,middle.y()-image.height()*mm/2};
+  view.setTraceRaster(image,origin,mm);
+  captureEvent("raster_loaded_for_trace");
+  status->setText("Imagem na mesa (prévia temporária). Clique com botão direito → Traçar imagem. Original preservado.");
+ }
+ void openImageForTracing(){
+  const QString file=QFileDialog::getOpenFileName(this,"Imagem para rastreamento (não enviada ao laser)",{},
+    "Imagens (*.png *.jpg *.jpeg *.bmp *.webp);;Todos (*.*)");
+  if(!file.isEmpty())loadImageForTracing(file);
+ }
+ void traceRaster(){
+  if(!view.hasTraceRaster())throw std::runtime_error("Abra uma imagem para rastrear.");
+  if(view.busy())throw std::runtime_error("Conclua o gesto em andamento.");
+  const auto source=view.traceRasterImage();
+  const Pt origin=view.traceRasterOrigin();
+  const double ratio=view.traceRasterMmPerPixel();
+  QDialog dialog(this);dialog.setWindowTitle("Traçar imagem — Alencar Laser 19.8 (somente vetores)");
+  dialog.resize(660,560);
+  auto* col=new QVBoxLayout(&dialog);
+  auto* info=new QLabel("Preto e branco, contornos próximos aos pixels. Sem emissão, raster CAM ou G-code.");
+  info->setWordWrap(true);col->addWidget(info);
+  auto* automatic=new QCheckBox("Limiar automático (Otsu)");
+  automatic->setChecked(true);col->addWidget(automatic);
+  auto* cutoff=new QSlider(Qt::Horizontal);
+  cutoff->setObjectName("trace_threshold");cutoff->setRange(0,255);cutoff->setValue(128);
+  cutoff->setEnabled(false);col->addWidget(new QLabel("Limiar manual (0 a 255)"));col->addWidget(cutoff);
+  connect(automatic,&QCheckBox::toggled,cutoff,&QWidget::setDisabled);
+  auto* form=new QFormLayout;
+  auto* noise=new QSpinBox;noise->setObjectName("trace_min_area");
+  noise->setRange(1,50);noise->setValue(2);
+  form->addRow("Ignorar manchas menores que (px)",noise);
+  auto* optimize=new QDoubleSpinBox;optimize->setObjectName("trace_precision");
+  optimize->setRange(0.05,1.5);optimize->setDecimals(2);optimize->setSingleStep(0.1);optimize->setValue(0.45);
+  form->addRow("Simplificação máxima (pixels)",optimize);
+  col->addLayout(form);
+  auto* smallText=new QCheckBox("Preservar detalhes e letras pequenas");
+  smallText->setChecked(true);col->addWidget(smallText);
+  auto* preview=new QLabel;
+  preview->setObjectName("trace_preview");preview->setAlignment(Qt::AlignCenter);
+  preview->setMinimumHeight(220);preview->setStyleSheet("background:#F7F7F7;border:1px solid #777;");
+  col->addWidget(preview,1);
+  auto* summary=new QLabel("Clique em 'Atualizar prévia' para ver os contornos gerados.");
+  summary->setWordWrap(true);col->addWidget(summary);
+  auto settings=[&]{
+   rastertrace::Settings cfg;
+   cfg.autoThreshold=automatic->isChecked();cfg.threshold=cutoff->value();
+   cfg.minimumComponent=noise->value();cfg.simplifyPx=optimize->value();
+   cfg.protectSmallText=smallText->isChecked();
+   return cfg;
+  };
+  rastertrace::Result cached;
+  bool previewReady=false;
+  auto draw=[&]{
+   try{
+    cached=rastertrace::trace(source,origin,ratio,settings());
+    const QImage scaled=source.scaled(560,310,Qt::KeepAspectRatio,Qt::SmoothTransformation)
+      .convertToFormat(QImage::Format_ARGB32);
+    QImage bitmap=scaled;
+    const int thr=cached.threshold;
+    for(int y=0;y<bitmap.height();++y){
+     QRgb* pixels=reinterpret_cast<QRgb*>(bitmap.scanLine(y));
+     for(int x=0;x<bitmap.width();++x){
+      const QRgb rgb=pixels[x];const int grey=(54*qRed(rgb)+183*qGreen(rgb)+19*qBlue(rgb))/256;
+      pixels[x]=grey<=thr?qRgb(0,0,0):qRgb(255,255,255);
+     }
+    }
+    QPainter painter(&bitmap);painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(QColor("#B500E6"),1.2));painter.setBrush(Qt::NoBrush);
+    const double sx=double(bitmap.width())/source.width();
+    const double sy=double(bitmap.height())/source.height();
+    for(const auto& loop:cached.loops){
+     QPolygonF polygon;polygon.reserve(int(loop.size()));
+     for(Pt p:loop)polygon<<QPointF((p.x-origin.x)/ratio*sx,(p.y-origin.y)/ratio*sy);
+     painter.drawPolygon(polygon);
+    }
+    painter.end();preview->setPixmap(QPixmap::fromImage(bitmap));
+    summary->setText(QString("%1 contornos, %2 nós, %3 manchas descartadas, limiar %4. Traços violeta são a prévia.")
+     .arg(cached.loops.size()).arg(cached.nodes).arg(cached.ignored).arg(cached.threshold));
+    previewReady=true;
+   }catch(const std::exception& e){
+    previewReady=false;summary->setText(QString("Prévia indisponível: %1").arg(e.what()));
+   }
+  };
+  auto* refresh=new QPushButton("Atualizar prévia preto e branco");
+  refresh->setObjectName("trace_update_preview");
+  connect(refresh,&QPushButton::clicked,&dialog,draw);col->addWidget(refresh);
+  auto* buttonsBox=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
+  buttonsBox->button(QDialogButtonBox::Ok)->setText("Criar vetores (agrupados)");
+  connect(buttonsBox,&QDialogButtonBox::accepted,&dialog,&QDialog::accept);
+  connect(buttonsBox,&QDialogButtonBox::rejected,&dialog,&QDialog::reject);
+  col->addWidget(buttonsBox);
+  draw();
+  if(dialog.exec()!=QDialog::Accepted)return;
+  // Usar os parametros ATUAIS, mesmo que mudem depois da previa.
+  const auto result=rastertrace::trace(source,origin,ratio,settings());
+  if(result.loops.empty())throw std::runtime_error("Nenhum contorno na imagem. Ajuste o limiar.");
+  if(result.loops.size()>1000||result.nodes>50000)
+   throw std::runtime_error("Rastreamento com muitos vetores. Aumente a limpeza ou reduza a imagem.");
+  const auto ids=view.editor.addContours(result.loops,true,layers->currentData().toInt(),true);
+  view.clearTraceRaster();
+  view.clearSelection();view.invalidateSelectionCache();
+  view.activate({ids.front(),0});
+  recoveryPolicy_.edited();captureEvent("raster_trace_created",int(ids.size()));
+  status->setText(QString("Rastreamento: %1 contornos agrupados / %2 nós. Ctrl+Z desfaz; Ctrl+U desagrupa.")
+    .arg(ids.size()).arg(result.nodes));
+ }
+
  void openOther(){
   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
    projectPath,"Projetos de desenho (*.alaser *.lbrn2);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2)");
