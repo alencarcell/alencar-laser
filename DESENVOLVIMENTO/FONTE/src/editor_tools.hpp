@@ -13,7 +13,10 @@
 #include <numbers>
 
 namespace alaser {
-struct Layer {int id=0;std::string name;bool visible=true,locked=false;};
+struct Layer {
+ int id=0;std::string name;bool visible=true,locked=false;
+ std::string mode="Line"; // modo visual, nunca habilita CAM/laser
+};
 struct Meta {int layer=0,group=0;};
 struct EditorState {Document doc;std::map<int,Meta> objects;std::map<int,Layer> layers;int nextGroup=1;};
 inline size_t countNodes(const Document& d){size_t n=0;for(auto& c:d.contours)n+=c.nodes.size();return n;}
@@ -27,6 +30,8 @@ inline void validate(const EditorState& s){
  }
  if(s.doc.nextId<=maxId||s.doc.nextId<1)throw std::runtime_error("invalid next node id");
  if(s.layers.empty())throw std::runtime_error("no layers");
+ for(const auto& [id,layer]:s.layers)
+  if(layer.mode!="Line"&&layer.mode!="Fill")throw std::runtime_error("invalid layer mode");
  for(auto obj:objs){auto i=s.objects.find(obj);if(i==s.objects.end()||!s.layers.count(i->second.layer)||i->second.group<0)throw std::runtime_error("unregistered object/layer");}
  for(auto& [id,meta]:s.objects)if(!objs.count(id))throw std::runtime_error("metadata on missing object");
 }
@@ -358,8 +363,32 @@ public:
   change([&](EditorState& s){for(int i:ids)if(!editable(s,i))throw std::runtime_error("cannot group inaccessible object");for(int i:ids)s.objects.at(i).group=gid;s.nextGroup++;},false);return gid;
  }
  void ungroup(int groupId){change([&](EditorState& s){bool had=false;for(auto& [k,m]:s.objects)if(m.group==groupId){m.group=0;had=true;}if(!had)throw std::runtime_error("unknown group");},false);}
+ int ungroupSelection(const std::vector<int>& ids){
+  if(ids.empty())throw std::runtime_error("select a group to ungroup");
+  std::set<int> groups;
+  for(int id:ids){
+   auto it=current.objects.find(id);
+   if(it==current.objects.end()||!editable(current,id))
+    throw std::runtime_error("ungroup selection missing, locked or hidden");
+   if(it->second.group>0)groups.insert(it->second.group);
+  }
+  if(groups.empty())throw std::runtime_error("selection contains no group");
+  change([&](EditorState& s){
+   for(auto& [id,meta]:s.objects)if(groups.count(meta.group)){
+    if(!editable(s,id))throw std::runtime_error("group has locked or hidden member");
+    meta.group=0;
+   }
+  },false);
+  return int(groups.size());
+ }
  void addLayer(int id,std::string name){change([&](EditorState& s){if(id<0||s.layers.count(id)||name.empty())throw std::runtime_error("invalid new layer");s.layers[id]={id,name,true,false};},false);}
  void setLayerFlags(int id,bool visible,bool locked){change([&](EditorState& s){if(!s.layers.count(id))throw std::runtime_error("missing layer");s.layers.at(id).visible=visible;s.layers.at(id).locked=locked;},false);}
+ void setLayerMode(int id,const std::string& mode){
+  if(mode!="Line"&&mode!="Fill")throw std::runtime_error("invalid layer mode");
+  auto it=current.layers.find(id);if(it==current.layers.end())throw std::runtime_error("missing layer");
+  if(it->second.mode==mode)return;
+  change([&](EditorState& s){s.layers.at(id).mode=mode;},false);
+ }
  void moveToLayer(int object,int layer){change([&](EditorState& s){if(!editable(s,object)||!s.layers.count(layer)||s.layers.at(layer).locked)throw std::runtime_error("invalid layer move");s.objects.at(object).layer=layer;},false);}
  void moveSelectionToLayer(const std::vector<int>& ids,int layer){
   change([&](EditorState& s){if(ids.empty()||!s.layers.count(layer)||s.layers.at(layer).locked||!s.layers.at(layer).visible)throw std::runtime_error("invalid target layer");
@@ -406,14 +435,18 @@ public:
 };
 inline boost::json::object metadata(const EditorState& s){
  using namespace boost::json;object m;m["schema"]="editor-meta-1";m["nextGroup"]=s.nextGroup;array layers;
- for(auto&[id,l]:s.layers)layers.push_back(object{{"id",id},{"name",l.name},{"visible",l.visible},{"locked",l.locked}});
+ for(auto&[id,l]:s.layers)layers.push_back(object{{"id",id},{"name",l.name},{"visible",l.visible},{"locked",l.locked},{"mode",l.mode}});
  m["layers"]=std::move(layers);array objects;
  for(auto&[id,o]:s.objects)objects.push_back(object{{"id",id},{"layer",o.layer},{"group",o.group}});
  m["objects"]=std::move(objects);return m;
 }
 inline EditorState fromMetadata(Document d,const boost::json::value& v){
  EditorState s;s.doc=std::move(d);const auto& m=v.as_object();if(m.at("schema").as_string()!="editor-meta-1")throw std::runtime_error("metadata schema unsupported");s.nextGroup=int(m.at("nextGroup").as_int64());
- for(const auto& item:m.at("layers").as_array()){const auto& x=item.as_object();int id=int(x.at("id").as_int64());if(s.layers.count(id))throw std::runtime_error("duplicate layer");s.layers[id]={id,std::string(x.at("name").as_string()),x.at("visible").as_bool(),x.at("locked").as_bool()};}
+ for(const auto& item:m.at("layers").as_array()){const auto& x=item.as_object();int id=int(x.at("id").as_int64());if(s.layers.count(id))throw std::runtime_error("duplicate layer");const auto* mode=x.if_contains("mode");
+   const std::string layerMode=(mode&&mode->is_string())?
+    std::string(mode->as_string()):"Line";
+   s.layers[id]={id,std::string(x.at("name").as_string()),
+    x.at("visible").as_bool(),x.at("locked").as_bool(),layerMode};}
  for(const auto& item:m.at("objects").as_array()){const auto& x=item.as_object();int id=int(x.at("id").as_int64());if(s.objects.count(id))throw std::runtime_error("duplicate object meta");s.objects[id]={int(x.at("layer").as_int64()),int(x.at("group").as_int64())};}
  validate(s);return s;
 }
