@@ -162,6 +162,21 @@ public:
  const CurveDocument& visible()const{return preview_?*preview_:history_.document();}
  std::optional<Key> selected()const{return selected_;}
  bool dragging()const{return dragging_.has_value()||contourMoving_.has_value();}
+ // Nova curva cúbica nativa com âncoras/alças e Ctrl+Z na mesma sessão.
+ Key addEditableCubic(Pt a,Pt out,Pt in,Pt b,int objectId){
+  if(dragging()||objectId<=0||dist(a,b)<1e-6)
+   throw std::runtime_error("invalid cubic creation");
+  const Key key{objectId,0};
+  history_.change([&](CurveDocument& d){
+   for(const auto& c:d.contours)if(c.key==key)
+    throw std::runtime_error("duplicate native curve object");
+   CurveContour c;c.key=key;c.closed=false;c.edgeKind={1};
+   c.nodes.push_back({d.nextId++,a,a,out});
+   c.nodes.push_back({d.nextId++,b,in,b});
+   d.contours.push_back(std::move(c));
+  });
+  selected_=key;index_.reset();return key;
+ }
  void select(Key key){
   if(dragging())throw std::runtime_error("cannot select while dragging");
   for(auto& c:history_.document().contours)if(c.key==key){selected_=key;return;}
