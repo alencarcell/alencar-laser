@@ -1,9 +1,11 @@
 #pragma once
 // Preview-only nearest-neighbor route heuristic. NO CAM, G-code or machine writes.
 // Respects ordered layer groups and output filtering, does not edit source geometry.
-// Unlike LightBurn's planner, no group priorities, inside-first, corner heuristics
-// or collision checking. Closed contours may start at any EXISTING vertex.
+// Unlike LightBurn, this DOES NOT implement groups/priority/corner heuristics,
+// collision avoidance or GRBL scheduling. Closed curves start at existing vertices.
+// Optional inner-first applies only to strictly nested paths within SAME layer.
 #include "preview_sim_19_8.hpp"
+#include "preview_nesting_19_8.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -14,8 +16,10 @@
 namespace alaser::sim198::route {
 struct Choice {std::size_t contourIndex=0;std::size_t startIndex=0;bool reverse=false;};
 inline Plan nearestNeighborLines(const EditorState& state,std::size_t cap=300000,
-                                  std::size_t maxContours=1500){
+                                  std::size_t maxContours=1500,bool innerFirst=true,
+                                  std::size_t* nestingConstraints=nullptr){
  Plan out;
+ if(nestingConstraints)*nestingConstraints=0;
  std::map<int,std::vector<const Contour*>> groups;
  for(const auto& contour:state.doc.contours){
   if(contour.nodes.size()<2)continue;
@@ -45,6 +49,10 @@ inline Plan nearestNeighborLines(const EditorState& state,std::size_t cap=300000
  };
  for(const auto& [layer,paths]:groups){
   const bool optimize=state.layers.at(layer).optimizeTravel;
+  // An opt-out must preserve source order exactly; do not impose nesting.
+  const bool constrain=optimize&&innerFirst;
+  const auto deps=constrain?nesting::build(paths):nesting::Constraints{};
+  if(nestingConstraints)*nestingConstraints+=deps.nestedPairs;
   std::vector<bool> used(paths.size(),false);
   for(std::size_t n=0;n<paths.size();++n){
    double best=std::numeric_limits<double>::infinity();
@@ -53,6 +61,12 @@ inline Plan nearestNeighborLines(const EditorState& state,std::size_t cap=300000
     chosen={n,0,false}; // Preserva ordem, orientacao e inicio originais.
    }else for(std::size_t j=0;j<paths.size();++j){
     if(used[j])continue;
+    // Parents cannot be scheduled until all their strict descendants are cut.
+    if(constrain){
+     bool blocked=false;
+     for(std::size_t child:deps.children[j])if(!used[child]){blocked=true;break;}
+     if(blocked)continue;
+    }
     const Contour& c=*paths[j];
     // Open lines allow endpoint reversal; closed paths can start at any node.
     const std::size_t options=c.closed?c.nodes.size():2;
@@ -66,6 +80,8 @@ inline Plan nearestNeighborLines(const EditorState& state,std::size_t cap=300000
      }
     }
    }
+   if(optimize&&!std::isfinite(best))
+    throw std::runtime_error("Rota virtual: nenhuma forma elegivel na ordenacao interna");
    const Contour& c=*paths.at(chosen.contourIndex);
    used[chosen.contourIndex]=true;
    const std::size_t count=c.nodes.size();
