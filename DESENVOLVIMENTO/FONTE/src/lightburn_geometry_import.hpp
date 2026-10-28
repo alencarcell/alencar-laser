@@ -12,6 +12,7 @@
 #include <cmath>
 #include <numbers>
 #include <set>
+#include <map>
 #include <stdexcept>
 #include <vector>
 
@@ -20,12 +21,14 @@ struct GeometryShape {
  std::vector<Pt> points;
  int layer=0;
  bool closed=true;
+ int group=0;
 };
 struct ParseNode{
  QString type;
  QTransform xform;
  double w=0,h=0,radius=0;
  int cutIndex=0;
+ int vertId=-1,primId=-1;
  QString vertList,primList;
  std::vector<ParseNode> children;
 };
@@ -56,6 +59,14 @@ inline ParseNode readShape(QXmlStreamReader& xml,int depth,int& seen){
  const auto attrs=xml.attributes();
  ParseNode node;
  node.type=attrs.value("Type").toString();
+ auto sharedId=[&](const char* key)->int{
+  const auto raw=attrs.value(QLatin1String(key));
+  if(raw.isEmpty())return -1;
+  bool ok=false;const int id=raw.toString().toInt(&ok);
+  if(!ok||id<0)throw std::runtime_error("Identificador compartilhado LBRN2 invalido");
+  return id;
+ };
+ node.vertId=sharedId("VertID");node.primId=sharedId("PrimID");
  node.w=attrDouble(attrs,"W");
  node.h=attrDouble(attrs,"H");
  node.radius=attrDouble(attrs,"Cr");
@@ -84,6 +95,37 @@ inline ParseNode readShape(QXmlStreamReader& xml,int depth,int& seen){
   }else xml.skipCurrentElement();
  }
  return node;
+}
+
+inline void gatherSharedGeometry(const ParseNode& n,
+      std::map<int,QString>& verts,std::map<int,QString>& prims){
+ if(n.type=="Path"){
+  auto add=[&](int id,const QString& value,std::map<int,QString>& definitions){
+   if(id<0||value.isEmpty())return;
+   const auto [it,inserted]=definitions.emplace(id,value);
+   if(!inserted&&it->second!=value)
+    throw std::runtime_error("LBRN2 referencia compartilhada tem duas definicoes distintas");
+  };
+  add(n.vertId,n.vertList,verts);
+  add(n.primId,n.primList,prims);
+ }
+ for(const auto& child:n.children)gatherSharedGeometry(child,verts,prims);
+}
+inline void resolveSharedGeometry(ParseNode& n,
+      const std::map<int,QString>& verts,const std::map<int,QString>& prims){
+ if(n.type=="Path"){
+  if(n.vertList.isEmpty()){
+   auto it=verts.find(n.vertId);
+   if(it==verts.end())throw std::runtime_error("LBRN2 VertID referenciado sem VertList");
+   n.vertList=it->second;
+  }
+  if(n.primList.isEmpty()){
+   auto it=prims.find(n.primId);
+   if(it==prims.end())throw std::runtime_error("LBRN2 PrimID referenciado sem PrimList");
+   n.primList=it->second;
+  }
+ }
+ for(auto& child:n.children)resolveSharedGeometry(child,verts,prims);
 }
 struct PackedVertex {
  Pt p{};
@@ -132,6 +174,21 @@ inline std::vector<PackedVertex> decodeVertices(const QString& encoded){
 }
 inline std::pair<std::vector<Pt>,bool> decodePath(const ParseNode& n){
  const auto vertices=decodeVertices(n.vertList);
+ // Compactacao real LightBurn 2.x: vertices em ordem, ligados por linha.
+ // LineClosed fecha o ultimo no ao primeiro; LineOpen mantem aberto.
+ // Os controles de Bezier sem PrimList nao sao interpretados como cubicas.
+ const QString type=n.primList.trimmed();
+ if(type=="LineClosed"||type=="LineOpen"){
+  const bool closed=type=="LineClosed";
+  std::vector<Pt> points;
+  points.reserve(vertices.size());
+  for(const auto& vertex:vertices)points.push_back(vertex.p);
+  if(closed&&points.size()>=2&&dist(points.front(),points.back())<1e-7)
+   points.pop_back();
+  if(points.size()<(closed?3U:2U))
+   throw std::runtime_error("Path LineOpen/LineClosed com poucos vertices");
+  return {std::move(points),closed};
+ }
  static const QRegularExpression primitive(R"(([LB])(\d+)\s+(\d+))");
  auto it=primitive.globalMatch(n.primList);
  std::vector<Pt> points;
@@ -173,12 +230,15 @@ inline std::pair<std::vector<Pt>,bool> decodePath(const ParseNode& n){
 }
 
 inline void flatten(const ParseNode& n,const QTransform& parent,
-                    std::vector<GeometryShape>& result){
+                    std::vector<GeometryShape>& result,
+                    int& nextGroup,int inheritedGroup=0){
  // A composicao Qt opera com coordenadas como vetores linha:
  // transformacao local PRIMEIRO, grupo pai DEPOIS.
  const QTransform total=n.xform*parent;
  if(n.type=="Group"){
-  for(const auto& c:n.children)flatten(c,total,result);
+  // EditorState suporta um nivel de agrupamento. Preservar grupo externo.
+  const int group=inheritedGroup>0?inheritedGroup:nextGroup++;
+  for(const auto& c:n.children)flatten(c,total,result,nextGroup,group);
   return;
  }
  if(!n.children.empty())throw std::runtime_error("Forma com filhos inesperados");
@@ -208,7 +268,7 @@ inline void flatten(const ParseNode& n,const QTransform& parent,
     throw std::runtime_error("Path fora dos limites seguros");
    p={q.x(),q.y()};
   }
-  result.push_back({std::move(pts),n.cutIndex,converted.second});
+  result.push_back({std::move(pts),n.cutIndex,converted.second,inheritedGroup});
   return;
  }else if(n.type=="Ellipse"){
   constexpr int steps=384;
@@ -223,7 +283,7 @@ inline void flatten(const ParseNode& n,const QTransform& parent,
    throw std::runtime_error("Posicao transformada fora dos limites seguros");
   p={q.x(),q.y()};
  }
- result.push_back({std::move(pts),n.cutIndex,true});
+ result.push_back({std::move(pts),n.cutIndex,true,inheritedGroup});
 }
 inline ImportResult readGeometry(const QString& path){
  QFile file(path);
@@ -247,8 +307,15 @@ inline ImportResult readGeometry(const QString& path){
   else xml.skipCurrentElement(); // ignorar metadados de corte; NUNCA carregar configuracao da maquina
  }
  if(xml.hasError())throw std::runtime_error(("XML LightBurn invalido: "+xml.errorString()).toStdString());
+ // Algumas formas reutilizam o PrimID/VertID de outra Shape e nao repetem
+ // PrimList/VertList. Resolver DEPOIS do XML completo para aceitar referencias
+ // anteriores ou posteriores, inclusive em Group/Children aninhados.
+ std::map<int,QString> sharedVertices,sharedPrimitives;
+ for(const auto& root:roots)gatherSharedGeometry(root,sharedVertices,sharedPrimitives);
+ for(auto& root:roots)resolveSharedGeometry(root,sharedVertices,sharedPrimitives);
  std::vector<GeometryShape> shapes;
- for(const auto& root:roots)flatten(root,QTransform(),shapes);
+ int nextGroup=1;
+ for(const auto& root:roots)flatten(root,QTransform(),shapes,nextGroup);
  if(shapes.empty())throw std::runtime_error("Projeto sem formas vetoriais compativeis");
  if(shapes.size()>30000)throw std::runtime_error("Limite de objetos excedido");
  // Construir documento isolado diretamente, sem registrar uma copia integral
@@ -265,8 +332,9 @@ inline ImportResult readGeometry(const QString& path){
   Contour contour;contour.key={++object,0};contour.closed=shape.closed;
   for(Pt p:shape.points)contour.nodes.push_back({state.doc.nextId++,p});
   state.doc.contours.push_back(std::move(contour));
-  state.objects[object]={shape.layer,0};
+  state.objects[object]={shape.layer,shape.group};
  }
+ state.nextGroup=nextGroup;
  validate(state);
  return ImportResult(std::move(state),int(shapes.size()));
 }
