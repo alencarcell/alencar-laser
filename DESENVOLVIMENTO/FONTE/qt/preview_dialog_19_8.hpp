@@ -114,7 +114,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  optimizeTravel->setToolTip("Vizinho mais proximo; reordena apenas Line, nao garante a rota global mais curta. Sem modificar o projeto.");
  auto* useLayerFeeds=new QCheckBox("Utilizar velocidades virtuais salvas por camada");
  useLayerFeeds->setChecked(true);
- useLayerFeeds->setToolTip("Potencia/M3/M4 permanecem apenas registrados; passes de cada camada ainda nao alteram a estimativa.");
+ useLayerFeeds->setToolTip("Velocidade e passes de cada camada influenciam a simulacao. Potencia/M3/M4 continuam apenas registrados.");
  column->addWidget(optimizeTravel);column->addWidget(useLayerFeeds);
  auto* stats=new QLabel;stats->setWordWrap(true);column->addWidget(stats);
  auto* canvas=new QLabel;canvas->setMinimumHeight(280);
@@ -221,7 +221,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
     raster::appendMask(combined,mask,{imageBounds.x(),imageBounds.y(),
                        imageBounds.width(),imageBounds.height()},scan);
    }
-   shown=repeated(combined,passes->value());
+   shown=repeatedByLayer(combined,source,passes->value());
    const auto layerSpeed=[&](int id){
     const auto it=source.layers.find(id);
     return useLayerFeeds->isChecked()&&it!=source.layers.end()?
@@ -238,7 +238,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
      "tempo c/ aceleracao %4 s | grupos %5 | "
      "Fill omitido %6, Saida off %7, T1/T2 %8. "
      "Rota linha original %9 mm, otimizada %10 mm (heuristica). "
-     "Fill e imagem: demonstrativos. M3/M4 e potencia salvos, sem emissao.")
+     "Passes por camada e globais simulados. M3/M4 e potencia salvos, sem emissao.")
      .arg(shown.cutMm,0,'f',1).arg(shown.travelMm,0,'f',1)
      .arg(nominal,0,'f',1).arg(timeline.totalSeconds,0,'f',1)
      .arg(qulonglong(timeline.runs)).arg(qulonglong(shown.ignoredFill))
@@ -263,7 +263,8 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"experimental",true},{"machine_commands_sent",false},
    {"model","kinematic-start-stop-angular-runs-12deg"},
    {"notes","Experimental Line, vector Fill, binary image. Simplified scan, no GRBL/LightBurn equivalence"},
-   {"passes",passes->value()},
+   {"global_passes",passes->value()},
+   {"layer_passes_applied",true},
    {"route_heuristic_enabled",optimizeTravel->isChecked()},
    {"line_travel_original_mm",sourcePlan.travelMm},
    {"layer_feed_enabled",useLayerFeeds->isChecked()},
