@@ -387,7 +387,7 @@ public:
   },false);
   return int(groups.size());
  }
- void addLayer(int id,std::string name){change([&](EditorState& s){if(id<0||s.layers.count(id)||name.empty())throw std::runtime_error("invalid new layer");s.layers[id]={id,name,true,false};},false);}
+ void addLayer(int id,std::string name){change([&](EditorState& s){if(id<0||s.layers.count(id)||name.empty())throw std::runtime_error("invalid new layer");s.layers[id]={id,name,true,false,"Line",!(id==1001||id==1002),false};},false);}
  void setLayerFlags(int id,bool visible,bool locked){change([&](EditorState& s){if(!s.layers.count(id))throw std::runtime_error("missing layer");s.layers.at(id).visible=visible;s.layers.at(id).locked=locked;},false);}
  void setLayerPreviewFlags(int id,bool output,bool air){
   if(!current.layers.count(id))throw std::runtime_error("missing layer");
