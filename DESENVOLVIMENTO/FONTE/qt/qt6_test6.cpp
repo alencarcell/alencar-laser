@@ -2790,7 +2790,25 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* statusRow=new QHBoxLayout(statusFrame);statusRow->setContentsMargins(12,4,12,4);
   status=new QLabel;status->setObjectName("status");status->setMinimumHeight(24);
   statusRow->addWidget(status,1);layout->addWidget(statusFrame);
-  connect(layers,&QComboBox::currentIndexChanged,this,[this]{if(!refreshing)refreshFlags();});
+  connect(layers,&QComboBox::currentIndexChanged,this,[this]{
+   if(refreshing||layers->currentIndex()<0)return;
+   const int target=layers->currentData().toInt();
+   if(!bezierToolActive_&&!selection().empty()){
+    const auto ids=selection();
+    bool changed=false;
+    for(int id:ids){
+     const auto it=view.editor.state().objects.find(id);
+     if(it!=view.editor.state().objects.end()&&it->second.layer!=target){changed=true;break;}
+    }
+    if(changed)run([this,ids,target]{
+     view.editor.moveSelectionToLayer(ids,target);
+     view.rebuild();captureEvent("objects_layer_changed",int(ids.size()));
+     status->setText(QString("%1 forma(s) transferida(s) para a camada %2.")
+      .arg(ids.size()).arg(target));
+    });
+   }
+   refreshFlags();
+  });
   auto flags=[this]{if(!refreshing)run([this]{view.editor.setLayerFlags(layers->currentData().toInt(),visible->isChecked(),locked->isChecked());view.rebuild();});};
    connect(visible,&QCheckBox::clicked,this,flags);connect(locked,&QCheckBox::clicked,this,flags);
    connect(layerMode_,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](int index){
