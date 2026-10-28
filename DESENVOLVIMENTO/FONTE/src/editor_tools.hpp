@@ -16,7 +16,10 @@ namespace alaser {
 struct Layer {
  int id=0;std::string name;bool visible=true,locked=false;
  std::string mode="Line"; // modo editorial: Line ou Fill
- bool output=true,air=false; // controle de PREVIA, nunca autorizacao de emissao
+ bool output=true,air=false; // controle editorial, nunca autorizacao de emissao
+ double speedMmMin=3000.0,powerPercent=20.0; // valores virtuais, NUNCA hardware
+ int passes=1;
+ std::string powerMode="M4"; // M4=dinamica / M3=constante (somente metadados)
 };
 struct Meta {int layer=0,group=0;};
 struct EditorState {Document doc;std::map<int,Meta> objects;std::map<int,Layer> layers;int nextGroup=1;};
@@ -33,6 +36,11 @@ inline void validate(const EditorState& s){
  if(s.layers.empty())throw std::runtime_error("no layers");
  for(const auto& [id,layer]:s.layers)
   if(layer.mode!="Line"&&layer.mode!="Fill")throw std::runtime_error("invalid layer mode");
+  else if(!std::isfinite(layer.speedMmMin)||layer.speedMmMin<10||layer.speedMmMin>100000||
+          !std::isfinite(layer.powerPercent)||layer.powerPercent<0||layer.powerPercent>100||
+          layer.passes<1||layer.passes>20||
+          (layer.powerMode!="M3"&&layer.powerMode!="M4"))
+   throw std::runtime_error("invalid layer simulation parameters");
  for(auto obj:objs){auto i=s.objects.find(obj);if(i==s.objects.end()||!s.layers.count(i->second.layer)||i->second.group<0)throw std::runtime_error("unregistered object/layer");}
  for(auto& [id,meta]:s.objects)if(!objs.count(id))throw std::runtime_error("metadata on missing object");
 }
@@ -395,6 +403,22 @@ public:
   if(current.layers.at(id).output==output&&current.layers.at(id).air==air)return;
   change([&](EditorState& st){st.layers.at(id).output=output;st.layers.at(id).air=air;},false);
  }
+ void setLayerProcess(int id,double speedMmMin,double powerPercent,int passes,const std::string& powerMode){
+  if(!current.layers.count(id))throw std::runtime_error("missing layer");
+  if(!std::isfinite(speedMmMin)||speedMmMin<10||speedMmMin>100000||
+     !std::isfinite(powerPercent)||powerPercent<0||powerPercent>100||
+     passes<1||passes>20||(powerMode!="M3"&&powerMode!="M4"))
+   throw std::runtime_error("invalid virtual process settings");
+  if(id==1001||id==1002)throw std::runtime_error("tool layers cannot carry laser process");
+  const auto& l=current.layers.at(id);
+  if(l.speedMmMin==speedMmMin&&l.powerPercent==powerPercent&&
+     l.passes==passes&&l.powerMode==powerMode)return;
+  change([&](EditorState& state){
+   auto& layer=state.layers.at(id);
+   layer.speedMmMin=speedMmMin;layer.powerPercent=powerPercent;
+   layer.passes=passes;layer.powerMode=powerMode;
+  },false);
+ }
  void setLayerMode(int id,const std::string& mode){
   if(mode!="Line"&&mode!="Fill")throw std::runtime_error("invalid layer mode");
   auto it=current.layers.find(id);if(it==current.layers.end())throw std::runtime_error("missing layer");
@@ -447,7 +471,9 @@ public:
 };
 inline boost::json::object metadata(const EditorState& s){
  using namespace boost::json;object m;m["schema"]="editor-meta-1";m["nextGroup"]=s.nextGroup;array layers;
- for(auto&[id,l]:s.layers)layers.push_back(object{{"id",id},{"name",l.name},{"visible",l.visible},{"locked",l.locked},{"mode",l.mode},{"output",l.output},{"air",l.air}});
+ for(auto&[id,l]:s.layers)layers.push_back(object{{"id",id},{"name",l.name},{"visible",l.visible},{"locked",l.locked},{"mode",l.mode},{"output",l.output},{"air",l.air},
+   {"speedMmMin",l.speedMmMin},{"powerPercent",l.powerPercent},
+   {"passes",l.passes},{"powerMode",l.powerMode}});
  m["layers"]=std::move(layers);array objects;
  for(auto&[id,o]:s.objects)objects.push_back(object{{"id",id},{"layer",o.layer},{"group",o.group}});
  m["objects"]=std::move(objects);return m;
@@ -460,7 +486,11 @@ inline EditorState fromMetadata(Document d,const boost::json::value& v){
    s.layers[id]={id,std::string(x.at("name").as_string()),
     x.at("visible").as_bool(),x.at("locked").as_bool(),layerMode,
     id==1001||id==1002?false:(x.if_contains("output")?x.at("output").as_bool():true),
-    x.if_contains("air")?x.at("air").as_bool():false};}
+    x.if_contains("air")?x.at("air").as_bool():false,
+    x.if_contains("speedMmMin")?x.at("speedMmMin").to_number<double>():3000.0,
+    x.if_contains("powerPercent")?x.at("powerPercent").to_number<double>():20.0,
+    x.if_contains("passes")?int(x.at("passes").as_int64()):1,
+    x.if_contains("powerMode")?std::string(x.at("powerMode").as_string()):"M4"};}
  for(const auto& item:m.at("objects").as_array()){const auto& x=item.as_object();int id=int(x.at("id").as_int64());if(s.objects.count(id))throw std::runtime_error("duplicate object meta");s.objects[id]={int(x.at("layer").as_int64()),int(x.at("group").as_int64())};}
  validate(s);return s;
 }
