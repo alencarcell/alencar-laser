@@ -1187,6 +1187,20 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   QAction* scissors=menu.addAction("Tesoura (K)");
   QAction* pencil=menu.addAction("Desenho livre (P)");
   QAction* textTool=menu.addAction("Texto (T)");
+  QAction* rectangle=menu.addAction("Retangulo (Ctrl+R)");
+  QAction* ellipse=menu.addAction("Elipse (Ctrl+E)");
+  QAction* polygon=menu.addAction("Poligono");
+  QMenu* modify=menu.addMenu("Organizar e transformar");
+  QAction* duplicate=modify->addAction("Duplicar objeto");
+  QAction* group=modify->addAction("Agrupar selecao");
+  QAction* ungroup=modify->addAction("Desagrupar");
+  QAction* rotate=modify->addAction("Girar 90 graus");
+  QAction* mirror=modify->addAction("Espelhar horizontalmente");
+  duplicate->setEnabled(selected.size()==1);
+  group->setEnabled(selected.size()>=2);
+  ungroup->setEnabled(!selected.empty());
+  rotate->setEnabled(!selected.empty());
+  mirror->setEnabled(!selected.empty());
   QAction* action=menu.exec(e->globalPos());
   if(action==all)selectAllEditable();
   else if(action==del)deleteSelectedShapes();
@@ -1197,6 +1211,14 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   else if(requestToolbarTool&&action==scissors)requestToolbarTool("scissors");
   else if(requestToolbarTool&&action==pencil)requestToolbarTool("pencil");
   else if(requestToolbarTool&&action==textTool)requestToolbarTool("text");
+  else if(requestToolbarTool&&action==rectangle)requestToolbarTool("rectangle");
+  else if(requestToolbarTool&&action==ellipse)requestToolbarTool("ellipse");
+  else if(requestToolbarTool&&action==polygon)requestToolbarTool("polygon");
+  else if(requestToolbarTool&&action==duplicate)requestToolbarTool("duplicate_obj");
+  else if(requestToolbarTool&&action==group)requestToolbarTool("group");
+  else if(requestToolbarTool&&action==ungroup)requestToolbarTool("ungroup");
+  else if(requestToolbarTool&&action==rotate)requestToolbarTool("rotate_90");
+  else if(requestToolbarTool&&action==mirror)requestToolbarTool("mirror_horizontal");
   e->accept();
  }
  void keyReleaseEvent(QKeyEvent* e)override{
