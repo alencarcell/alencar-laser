@@ -2433,7 +2433,6 @@ public:
     run([this,tid]{
      if(!view.editor.state().layers.count(tid)){
       view.editor.addLayer(tid,tid==1001?"T1 · Guias":"T2 · Molduras");
-      view.editor.setLayerPreviewFlags(tid,false,false);
      }
      refresh();layers->setCurrentIndex(layers->findData(tid));
     });
