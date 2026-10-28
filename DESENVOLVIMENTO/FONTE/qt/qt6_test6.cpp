@@ -819,7 +819,7 @@ public:
  }
  // Apenas objetos que trocam de estado visual devem ser modificados.
  // Evita milhares de chamadas setPen/setZValue em cada clique.
- static QColor layerColor(int id){
+  static QColor layerColor(int id){
   static const QColor colors[]={
    QColor("#788998"),QColor("#3A86FF"),QColor("#E63946"),QColor("#06D6A0"),
    QColor("#FFD166"),QColor("#F77F00"),QColor("#9B5DE5"),QColor("#00BBF9"),
@@ -838,8 +838,14 @@ public:
    if(it==itemsByObject_.end())continue;
    bool isSelected=selected.count(objectId)>0;
    for(auto* item:it->second){
-    item->setPen(QPen(isSelected?QColor(239,109,25):layerColor(editor.state().objects.at(objectId).layer),0));
-    item->setZValue(isSelected?9:1);
+     const auto& meta=editor.state().objects.at(objectId);
+     const auto& layer=editor.state().layers.at(meta.layer);
+     const QColor color=layerColor(meta.layer);
+     item->setPen(QPen(isSelected?QColor(239,109,25):color,0));
+     QColor fill=color;fill.setAlpha(115);
+     const bool closed=item->path().currentPosition()==item->path().elementAt(0);
+     item->setBrush(layer.mode=="Fill"&&closed?QBrush(fill):QBrush(Qt::NoBrush));
+     item->setZValue(isSelected?9:1);
     styleSetterCalls_+=2;
    }
   }
@@ -855,9 +861,14 @@ public:
   clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
   clearPolyline();clearMarquee();scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
-   auto* o=scene_.addPath(pathOf(c),QPen(layerColor(editor.state().objects.at(c.key.object).layer),0));o->setZValue(1);
-   auto m=editor.state().objects.at(c.key.object);auto layer=editor.state().layers.at(m.layer);
-   o->setVisible(layer.visible);objects_[c.key]=o;itemsByObject_[c.key.object].push_back(o);
+    const auto meta=editor.state().objects.at(c.key.object);
+    const auto layer=editor.state().layers.at(meta.layer);
+    auto* o=scene_.addPath(pathOf(c),QPen(layerColor(meta.layer),0));o->setZValue(1);
+    if(layer.mode=="Fill"&&c.closed){
+     QColor translucent=layerColor(meta.layer);translucent.setAlpha(115);
+     o->setBrush(QBrush(translucent));
+    }
+    o->setVisible(layer.visible);objects_[c.key]=o;itemsByObject_[c.key.object].push_back(o);
   }
   for(auto it=selected.begin();it!=selected.end();)if(!editable(editor.state(),*it))it=selected.erase(it);else ++it;
   if(active_&&(!get(editor.state().doc,*active_)||!editable(editor.state(),active_->object)))active_.reset();
@@ -1593,7 +1604,7 @@ public:
  // Sessão Bézier nativa (v5). Quando vazia, o editor opera só em polilinhas (compatível TESTE_6).
  std::unique_ptr<CurveDragSession> curves;
  std::map<QString,QPushButton*> buttons;
- QComboBox* layers;QLineEdit* layerName;QCheckBox* visible;QCheckBox* locked;QLabel* status;
+  QComboBox* layers;QLineEdit* layerName;QCheckBox* visible;QCheckBox* locked;QLabel* status;
  QString projectPath,lastError;bool refreshing=false;
  std::optional<IntegratedProject> loadedProject_; // operações, origem e metadados adicionais preservados
  bool bezierToolActive_=false;
@@ -1620,7 +1631,9 @@ public:
  QPlainTextEdit* machineConsole_=nullptr;
  QTcpSocket* wifi_=nullptr; // Qt event loop: nonblocking; no auto reconnect or discovery
  QLabel* transportHint_=nullptr;
- std::vector<QPushButton*> layerPalette_;
+  std::vector<QPushButton*> layerPalette_;
+  QComboBox* layerMode_=nullptr;
+  std::vector<QShortcut*> editingShortcuts_;
  bool machineConnected()const{return serial_.connected()||(wifi_&&wifi_->state()==QAbstractSocket::ConnectedState);}
  bool wifiConnected()const{return wifi_&&wifi_->state()==QAbstractSocket::ConnectedState;}
  size_t machineUpdates_=0;
@@ -2197,12 +2210,23 @@ public:
   layers=new QComboBox;layers->setObjectName("layers");layers->setMinimumWidth(160);inspector->addWidget(layers);
   visible=new QCheckBox("Visível");locked=new QCheckBox("Bloqueada");
   auto* flagRow=new QHBoxLayout;flagRow->addWidget(visible);flagRow->addWidget(locked);inspector->addLayout(flagRow);
-  layerName=new QLineEdit;layerName->setObjectName("layerName");layerName->setPlaceholderText("Nome da nova camada");
+   layerMode_=new QComboBox;
+   layerMode_->setObjectName("layer_mode");
+   layerMode_->addItem("Linha — contornos",QString("Line"));
+   layerMode_->addItem("Preenchimento — formas fechadas",QString("Fill"));
+   layerMode_->setToolTip("Apenas visualizacao editorial. Sem G-code, velocidade ou potencia.");
+   inspector->addWidget(titleLabel("MODO DA CAMADA ATIVA (PREVISUALIZACAO)"));
+   inspector->addWidget(layerMode_);
+   auto* fillNote=new QLabel("Linha percorre contornos; Preenchimento colore formas fechadas. Saida fisica bloqueada.");
+   fillNote->setObjectName("brandSub");fillNote->setWordWrap(true);inspector->addWidget(fillNote);
+   layerName=new QLineEdit;layerName->setObjectName("layerName");layerName->setPlaceholderText("Nome da nova camada");
   inspector->addWidget(layerName);
   auto* layerActions=new QHBoxLayout;layerActions->setSpacing(4);
   add(layerActions,"add_layer","Nova camada",[this]{
    int id=view.editor.state().layers.rbegin()->first+1;
-   view.editor.addLayer(id,layerName->text().toStdString());refresh();layers->setCurrentIndex(layers->findData(id));
+    const QString name=layerName->text().trimmed();
+    view.editor.addLayer(id,(name.isEmpty()?QString("Camada %1").arg(id):name).toStdString());
+    refresh();layers->setCurrentIndex(layers->findData(id));
   });inspector->addLayout(layerActions);
   addVertical(inspector,"move_layer","→ Enviar seleção para camada ativa",[this]{
    check(!bezierToolActive_,"Transferencia de camada: selecione polilinhas.");
@@ -2213,10 +2237,12 @@ public:
   inspector->addSpacing(12);inspector->addWidget(titleLabel("ORGANIZAÇÃO"));
   auto* groupRow=new QHBoxLayout;groupRow->setSpacing(5);
   add(groupRow,"group","Agrupar",[this]{view.editor.group(selection());view.rebuild();});
-  add(groupRow,"ungroup","Desagrupar",[this]{
-   check(!view.selected.empty(),"selecione um grupo");int g=view.editor.state().objects.at(*view.selected.begin()).group;
-   check(g>0,"seleção sem grupo");view.editor.ungroup(g);view.rebuild();
-  });inspector->addLayout(groupRow);
+   add(groupRow,"ungroup","Desagrupar (Ctrl+U)",[this]{
+    check(!bezierToolActive_,"Desagrupar: selecione formas poligonais.");
+    const int groups=view.editor.ungroupSelection(selection());
+    view.rebuild();captureEvent("groups_ungrouped",groups);
+    status->setText(QString("%1 grupo(s) desagrupado(s). Formas prontas para Tesoura (K).").arg(groups));
+   });inspector->addLayout(groupRow);
   addVertical(inspector,"move","Mover +1 mm",[this]{view.editor.moveObjects(selection(),{1,0});view.rebuild();captureEvent("shapes_moved",int(selection().size()));});
   addVertical(inspector,"delete_shapes","Excluir formas selecionadas",[this]{
    check(!bezierToolActive_,"Para excluir uma curva nativa, use Ctrl+Delete no modo Bézier.");
@@ -2619,7 +2645,16 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   statusRow->addWidget(status,1);layout->addWidget(statusFrame);
   connect(layers,&QComboBox::currentIndexChanged,this,[this]{if(!refreshing)refreshFlags();});
   auto flags=[this]{if(!refreshing)run([this]{view.editor.setLayerFlags(layers->currentData().toInt(),visible->isChecked(),locked->isChecked());view.rebuild();});};
-  connect(visible,&QCheckBox::clicked,this,flags);connect(locked,&QCheckBox::clicked,this,flags);
+   connect(visible,&QCheckBox::clicked,this,flags);connect(locked,&QCheckBox::clicked,this,flags);
+   connect(layerMode_,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](int index){
+    if(refreshing||index<0||layers->currentIndex()<0)return;
+    const int id=layers->currentData().toInt();
+    const QString mode=layerMode_->itemData(index).toString();
+    run([this,id,mode]{
+     view.editor.setLayerMode(id,mode.toStdString());
+     view.rebuild();captureEvent("layer_mode_visual_changed");
+    });
+   });
   view.stateChanged=[this]{if(uiPersistenceEnabled_)recoveryPolicy_.edited();refresh();};
   view.diagnosticEvent=[this](const QString& code,int count){captureEvent(code,count);};
   view.drawingLayer=[this]{return layers->currentData().toInt();};
@@ -2663,7 +2698,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   shortcut("T",[this]{buttons.at("text")->click();});
   shortcut("Ctrl+E",[this]{buttons.at("ellipse")->click();});
   shortcut("Ctrl+L",[this]{buttons.at("move_layer")->click();});
-  shortcut("Ctrl+D",[this]{buttons.at("duplicate_obj")->click();});
+   shortcut("Ctrl+D",[this]{buttons.at("duplicate_obj")->click();});
+   shortcut("Ctrl+U",[this]{buttons.at("ungroup")->click();});
+   shortcut("Ctrl+G",[this]{buttons.at("group")->click();});
   shortcut("Ctrl+0",[fit]{fit->click();});
   applyTheme();refresh();view.reportZoom();
   uiPersistenceEnabled_=isInteractive();
@@ -2712,7 +2749,18 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }
   view.setFocus();
  }
- void refreshFlags(){refreshing=true;auto l=view.editor.state().layers.at(layers->currentData().toInt());visible->setChecked(l.visible);locked->setChecked(l.locked);refreshing=false;}
+  void refreshFlags(){
+   if(layers->currentIndex()<0)return;
+   refreshing=true;
+   const auto l=view.editor.state().layers.at(layers->currentData().toInt());
+   visible->setChecked(l.visible);locked->setChecked(l.locked);
+   if(layerMode_){
+    QSignalBlocker guard(layerMode_);
+    int modeIndex=layerMode_->findData(QString::fromStdString(l.mode));
+    layerMode_->setCurrentIndex(modeIndex<0?0:modeIndex);
+   }
+   refreshing=false;
+  }
  void refresh(){
   int current=layers->currentData().toInt();refreshing=true;layers->clear();for(const auto& [id,l]:view.editor.state().layers)layers->addItem(QString::fromStdString(l.name),id);
   int ix=layers->findData(current);layers->setCurrentIndex(ix<0?0:ix);refreshing=false;refreshFlags();
