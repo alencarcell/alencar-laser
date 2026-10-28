@@ -2151,7 +2151,8 @@ public:
  }
  LabWindow(Document doc,CurveDocument curveDoc=CurveDocument{}):view(std::move(doc)){
   setAcceptDrops(true);
-  view.setAcceptDrops(false);view.viewport()->setAcceptDrops(false);
+  view.setAcceptDrops(true);view.viewport()->setAcceptDrops(true);
+  view.viewport()->installEventFilter(this);
   if(!curveDoc.contours.empty())curves=std::make_unique<CurveDragSession>(std::move(curveDoc));
   view.attachNative(curves.get());
   darkTheme_=QSettings("AlencarLaser","DesktopBeta").value("workspace/darkTheme",true).toBool();
@@ -3013,7 +3014,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   e->acceptProposedAction();
   try{
    if(suffix=="alaser"||suffix=="lbrn2")openFilePath(url.toLocalFile());
-   else loadRasterFromFile(url.toLocalFile());
+   else{
+    loadRasterFromFile(url.toLocalFile());
+    QTimer::singleShot(0,this,[this]{traceImageDialog();});
+   }
   }
   catch(const std::exception& error){
    QMessageBox::warning(this,"Arquivo nao importado",QString::fromUtf8(error.what())+
@@ -3140,6 +3144,27 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
  }
 
  bool eventFilter(QObject* object,QEvent* event)override{
+  if(object==view.viewport()){
+   if(event->type()==QEvent::DragEnter){
+    dragEnterEvent(static_cast<QDragEnterEvent*>(event));return true;
+   }
+   if(event->type()==QEvent::DragMove){
+    auto* drag=static_cast<QDragMoveEvent*>(event);
+    if(drag->mimeData()&&drag->mimeData()->hasUrls()){
+     const auto urls=drag->mimeData()->urls();
+     if(urls.size()==1&&urls.first().isLocalFile()){
+      const QString suffix=QFileInfo(urls.first().toLocalFile()).suffix().toLower();
+      if(QStringList{"alaser","lbrn2","png","jpg","jpeg","bmp","webp"}.contains(suffix)){
+       drag->acceptProposedAction();return true;
+      }
+     }
+    }
+    drag->ignore();return true;
+   }
+   if(event->type()==QEvent::Drop){
+    dropEvent(static_cast<QDropEvent*>(event));return true;
+   }
+  }
   if(inlineTextEntry_&&object==inlineTextEntry_){
    if(event->type()==QEvent::ShortcutOverride){
     auto* key=static_cast<QKeyEvent*>(event);
@@ -3304,6 +3329,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
   connect(actions,&QDialogButtonBox::accepted,&dlg,&QDialog::accept);
   connect(actions,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
+  // Prévia Otsu em preto/branco ao abrir. Nenhuma conversao gravada.
+  previewButton->click();
   if(dlg.exec()!=QDialog::Accepted||!prepared){captureEvent("image_trace_cancelled");return;}
   const QRectF anchor=view.rasterBounds();
   auto contours=std::move(prepared->contours);
