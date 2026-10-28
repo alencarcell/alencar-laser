@@ -382,3 +382,10 @@ Registrar mudanças, testes e pendências.
 - Documento: `DESENVOLVIMENTO/ESPECIFICACOES/CAMADAS_COMPACTAS_M3_M4_ROTA_19_8.md`.
 - **ATENÇÃO: APENAS Código publicado na branch experimental e inspecionado estaticamente neste turno; compilação Qt6 Windows não executada após estas mudanças.** A aprovação do usuário para simulação cinemática anterior não cobre camadas/M3/M4/otimizador. A main, base e APLICATIVO continuam preservados.
 - Próxima validação: `git status --short`; `git pull --ff-only origin feat/refino-curvas-rastreio-diagnosticos-19-8` somente se seguro; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteSimulacao`; depois `-SomenteInteracao` e `-Abrir` sem hardware. Não realizar G-code, ligação física, movimento/disparo nem alteração firmware.
+
+### Complemento — opção de rota no próprio editor da camada
+
+- Atendendo à solicitação de ter otimização também dentro da janela de duplo clique, `Layer.optimizeTravel` foi persistido como preferência booleana (padrao true em projeto legado).
+- `qt/layer_settings_19_8.hpp` agora tem checkbox de autorização da heurística por camada. A opção global da prévia é o interruptor principal; se a camada optar por não otimizar, `preview_route_19_8.hpp` preserva ordem e orientação originais dos seus contornos.
+- `--layer-route-19-8-test` ganhou regressão de OFF sem reordenação, ON com redução no caso preparado e metadata legado com default ON.
+- Foram realizadas **41 de 41 verificações estáticas de integração no GitHub** (presença de símbolos e restrições de envio físico), mas **não foi executado o teste Windows de compilação/GUI nesta rodada**. Estas verificações não equivalem a PASS da nova candidata.
