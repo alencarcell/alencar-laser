@@ -113,7 +113,9 @@ try {
         Checar-ResultadoQt 'Previa virtual cinemática' (Join-Path $destino 'RESULTADO_PREVIA_MOVIMENTO_19_8.json')
         & $app --simulation-raster-19-8-test $fixture $destino
         Checar-ResultadoQt 'Previa virtual Fill e imagem P&B' (Join-Path $destino 'RESULTADO_PREVIA_RASTER_19_8.json')
-        Write-Host 'SIMULACAO (MOVIMENTO + RASTER) PASS sintetico; sem habilitar G-code ou controle fisico.' -ForegroundColor Green
+        & $app --layer-route-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Camadas compactas, parametros e rota heuristica' (Join-Path $destino 'RESULTADO_CAMADA_ROTA_19_8.json')
+        Write-Host 'SIMULACAO (MOVIMENTO + RASTER + CAMADAS/ROTA) PASS sintetico; controle fisico bloqueado.' -ForegroundColor Green
         return
     }
     if ($SomenteRefino) {
@@ -289,6 +291,8 @@ try {
     Checar-ResultadoQt 'Simulacao cinemática 19.8' (Join-Path $dirSim 'RESULTADO_PREVIA_MOVIMENTO_19_8.json')
     & $app --simulation-raster-19-8-test $fixture $dirSim
     Checar-ResultadoQt 'Simulacao Fill e bitmap P&B 19.8' (Join-Path $dirSim 'RESULTADO_PREVIA_RASTER_19_8.json')
+    & $app --layer-route-19-8-test $fixture $dirSim
+    Checar-ResultadoQt 'Configuracao por camada e rota 19.8' (Join-Path $dirSim 'RESULTADO_CAMADA_ROTA_19_8.json')
     $dirInteracao = Join-Path $destino 'interacao'
     New-Item -ItemType Directory -Path $dirInteracao -Force | Out-Null
     & $app --inline-transforms-19-8-test $fixture $dirInteracao
