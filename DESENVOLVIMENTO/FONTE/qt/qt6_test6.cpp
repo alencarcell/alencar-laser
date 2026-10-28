@@ -3993,7 +3993,7 @@ static QJsonObject lightburnImport198Test(const QString& directory){
  check(std::abs(nested.nodes[0].p.x-100.)<1e-8&&
        std::abs(nested.nodes[0].p.y-202.)<1e-8,"transformacao de grupo incorreta");
  const auto& ellipse=imported.state.doc.contours.at(2);
- check(ellipse.nodes.size()==96,"elipse nao foi convertida para pontos");
+ check(ellipse.nodes.size()==384,"elipse nao foi convertida para 384 pontos");
  const auto& path=imported.state.doc.contours.at(3);
  check(!path.closed&&path.nodes.size()==3&&std::abs(path.nodes[0].p.x-8.)<1e-8,
        "Path com segmentos retos ou XForm incorreto");
@@ -4020,7 +4020,7 @@ static QJsonObject lightburnImport198Test(const QString& directory){
  QApplication::sendEvent(&w,&drag);
  check(drag.isAccepted(),"janela nao aceita arrastar .lbrn2");
  return {{"status","PASS"},{"rect_transform",true},{"group_transform",true},
-         {"ellipse_96_segments",true},{"path_lines",true},{"path_bezier",true},{"layers",true},{"unsupported_path_rejected",true},
+         {"ellipse_384_segments",true},{"path_lines",true},{"path_bezier",true},{"layers",true},{"unsupported_path_rejected",true},
          {"drag_enter_lbrn2",true},{"hardware_commands_sent",false}};
 }
 
