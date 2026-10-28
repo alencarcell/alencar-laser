@@ -207,6 +207,8 @@ class QtEditorLab final:public QGraphicsView{
  // Prévia de movimento: usa QGraphicsItem::pos, sem alterar geometria canônica.
  bool shapeDragging_=false;
  QPointF shapeDragStart_{};
+ QPointF shapePreviewDelta_{};
+ std::optional<QRectF> shapePreviewBounds_;
  std::vector<QGraphicsPathItem*> shapePreviewItems_;
  // Alcas independentes dos dados; commit unico no mouseRelease.
  bool transformDragging_=false;
@@ -215,6 +217,7 @@ class QtEditorLab final:public QGraphicsView{
  QPointF transformAnchor_{};
  double transformSx_=1.,transformSy_=1.,transformAngle_=0.;
  QPointF transformMoveDelta_{};
+ QTransform selectionPreviewTransform_{};
  std::vector<int> transformIds_;
  std::vector<QGraphicsPathItem*> transformItems_;
  bool nativeContourPressing_=false;
@@ -441,6 +444,14 @@ class QtEditorLab final:public QGraphicsView{
   if(!has)return {};
   return QRectF(QPointF(minX,minY),QPointF(maxX,maxY));
  }
+ // Mesmo preview visual dos itens: sem alteracao dos nos antes de mouseRelease.
+ std::optional<QRectF> selectionDisplayBounds()const{
+  if(shapeDragging_&&shapePreviewBounds_)
+   return shapePreviewBounds_->translated(shapePreviewDelta_);
+  if(transformDragging_)
+   return selectionPreviewTransform_.mapRect(transformBounds_);
+  return selectedBounds();
+ }
  std::array<QPointF,13> selectionHandles(const QRectF& bounds)const{
   const QPointF tl=viewportTransform().map(bounds.topLeft());
   const QPointF br=viewportTransform().map(bounds.bottomRight());
@@ -455,7 +466,7 @@ class QtEditorLab final:public QGraphicsView{
  }
  void paintSelectionHandles(QPainter* p)const{
   if(tool!=Tool::Select||selected.empty()||nativeMode_)return;
-  auto bounds=selectedBounds();if(!bounds)return;
+  auto bounds=selectionDisplayBounds();if(!bounds)return;
   const QPointF topLeft=viewportTransform().map(bounds->topLeft());
   const QPointF bottomRight=viewportTransform().map(bounds->bottomRight());
   const QRectF pixel(topLeft,bottomRight);
@@ -481,6 +492,7 @@ class QtEditorLab final:public QGraphicsView{
   transformItems_.clear();transformIds_.clear();
   transformDragging_=false;transformHandle_=-1;
   transformSx_=transformSy_=1.;transformAngle_=0.;transformMoveDelta_={};
+  selectionPreviewTransform_=QTransform();
   viewport()->update();
  }
  bool beginSelectionTransform(QPointF position){
@@ -568,6 +580,7 @@ class QtEditorLab final:public QGraphicsView{
    transformSx_=sx;transformSy_=sy;
    t.translate(pivot.x(),pivot.y());t.scale(sx,sy);t.translate(-pivot.x(),-pivot.y());
   }
+  selectionPreviewTransform_=t;
   for(auto* item:transformItems_)item->setTransform(t);
   viewport()->update();
  }
@@ -596,6 +609,8 @@ class QtEditorLab final:public QGraphicsView{
  void clearShapePreview(){
   for(auto* item:shapePreviewItems_)item->setPos(0,0);
   shapePreviewItems_.clear();shapeDragging_=false;
+  shapePreviewDelta_={};shapePreviewBounds_.reset();
+  viewport()->update();
  }
  void beginShapePreview(QPointF origin){
   clearShapePreview();
@@ -611,6 +626,9 @@ class QtEditorLab final:public QGraphicsView{
    if(it!=itemsByObject_.end())shapePreviewItems_.insert(shapePreviewItems_.end(),it->second.begin(),it->second.end());
   }
   if(shapePreviewItems_.empty())return;
+  shapePreviewBounds_=selectedBounds();
+  if(!shapePreviewBounds_){clearShapePreview();return;}
+  shapePreviewDelta_={};
   shapeDragStart_=origin;shapeDragging_=true;
  }
  void drawRasterOverlay(){
@@ -759,6 +777,8 @@ public:
   return nativeSelectedPart_->nodeId;
  }
  size_t nativeItemCount()const{return nativeItems_.size();}
+ // Interface somente-leitura para verificar desenho da moldura em teste.
+ std::optional<QRectF> selectionPreviewRect()const{return selectionDisplayBounds();}
  QPainterPath nativeItemPath(Key key)const{return nativeItems_.at(key)->path();}
  // A sessao deve estar viva durante todo o periodo em que estiver anexada.
  void attachNative(CurveDragSession* session){
@@ -1377,8 +1397,10 @@ void mouseMoveEvent(QMouseEvent* e)override{
    if(transformDragging_){updateSelectionTransform(e->position(),e->modifiers());e->accept();return;}
    if(marqueeActive_){showMarquee(e->position());e->accept();return;}
   if(shapeDragging_){
-   const QPointF delta=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
-   for(auto* item:shapePreviewItems_)item->setPos(delta);
+   shapePreviewDelta_=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
+   for(auto* item:shapePreviewItems_)item->setPos(shapePreviewDelta_);
+   // drawForeground desenha moldura/alcas; invalida tambem essa camada.
+   viewport()->update();
    ++frameUpdates;e->accept();return;
   }
   if(draggingNode_&&active_){
