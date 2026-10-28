@@ -1438,7 +1438,8 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   menu.addSeparator();
   QAction* duplicate=menu.addAction("Duplicar forma (+3 mm)");
   QAction* group=menu.addAction("Agrupar seleção");
-  QAction* ungroup=menu.addAction("Desagrupar seleção");
+  QAction* ungroup=menu.addAction("Desagrupar seleção (Ctrl+U)");
+  QAction* ungroupScissors=menu.addAction("Desagrupar e ativar Tesoura");
   QAction* remove=menu.addAction("Excluir selecionados (Delete)");
   duplicate->setEnabled(selected.size()==1);
   group->setEnabled(selected.size()>=2);
@@ -1448,6 +1449,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    if(it!=editor.state().objects.end()&&it->second.group>0)grouped=true;
   }
   ungroup->setEnabled(grouped);
+  ungroupScissors->setEnabled(grouped);
   remove->setEnabled(!selected.empty());
   menu.addSeparator();
   QAction* undo=menu.addAction("Desfazer (Ctrl+Z)");
@@ -1472,13 +1474,11 @@ void mouseReleaseEvent(QMouseEvent* e)override{
     selected.clear();active_.reset();rebuild();activate({id,0});
    }else if(picked==group&&selected.size()>=2){
     editor.group(std::vector<int>(selected.begin(),selected.end()));rebuild();
-   }else if(picked==ungroup&&grouped){
-    int groupId=0;
-    for(int id:selected){
-     auto it=editor.state().objects.find(id);
-     if(it!=editor.state().objects.end()&&it->second.group>0){groupId=it->second.group;break;}
-    }
-    if(groupId>0){editor.ungroup(groupId);rebuild();}
+   }else if((picked==ungroup||picked==ungroupScissors)&&grouped){
+    const int count=editor.ungroupSelection({selected.begin(),selected.end()});
+    rebuild();
+    if(diagnosticEvent)diagnosticEvent("groups_ungrouped",count);
+    if(picked==ungroupScissors&&requestToolChange)requestToolChange(Tool::Scissors);
    }else if(requestToolChange){
     if(picked==select)requestToolChange(Tool::Select);
     else if(picked==line)requestToolChange(Tool::Line);
@@ -2244,6 +2244,12 @@ public:
     view.rebuild();captureEvent("groups_ungrouped",groups);
     status->setText(QString("%1 grupo(s) desagrupado(s). Formas prontas para Tesoura (K).").arg(groups));
    });inspector->addLayout(groupRow);
+  addVertical(inspector,"ungroup_scissors","Desagrupar → Tesoura (K)",[this]{
+   check(!bezierToolActive_,"Somente formas poligonais podem ser desagrupadas.");
+   const int count=view.editor.ungroupSelection(selection());
+   view.rebuild();captureEvent("groups_ungrouped",count);
+   QTimer::singleShot(0,this,[this]{if(buttons.count("scissors"))buttons.at("scissors")->click();});
+  });
   addVertical(inspector,"move","Mover +1 mm",[this]{view.editor.moveObjects(selection(),{1,0});view.rebuild();captureEvent("shapes_moved",int(selection().size()));});
   addVertical(inspector,"delete_shapes","Excluir formas selecionadas",[this]{
    check(!bezierToolActive_,"Para excluir uma curva nativa, use Ctrl+Delete no modo Bézier.");
