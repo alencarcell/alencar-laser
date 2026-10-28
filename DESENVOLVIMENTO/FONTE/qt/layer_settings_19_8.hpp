@@ -2,6 +2,7 @@
 // Layer editor: local simulation metadata ONLY. M3/M4 here never becomes a
 // controller command. No G-code, serial, power, or air-control calls.
 #include "editor_tools.hpp"
+#include "preview_motion_19_8.hpp"
 #include <QDialog>
 #include <QFormLayout>
 #include <QVBoxLayout>
@@ -60,6 +61,27 @@ inline std::optional<Layer> edit(QWidget* parent,const Layer& original){
  optimize->setChecked(original.optimizeTravel);
  optimize->setToolTip("Heuristica de vizinho proximo, sem alterar o desenho; exige habilitar otimizacao global na previa.");
  column->addWidget(optimize);
+ auto* powerExample=new QLabel;powerExample->setObjectName("layer_settings_power_example");
+ powerExample->setWordWrap(true);
+ column->addWidget(powerExample);
+ auto updateExample=[&]{
+  const auto code=powerMode->currentData().toString().toStdString();
+  const double pct=sim198::motion::virtualPowerPercent(
+     power->value(),code,speed->value()/2.,speed->value());
+  powerExample->setText(QString(
+    "Exemplo matematico apenas: a 50%% da velocidade definida, "
+    "potencia ilustrativa %1%% (nominal %2%%, modo %3). "
+    "Nao representa PWM, energia real nem perfuracao.")
+    .arg(pct,0,'f',1).arg(power->value(),0,'f',1)
+    .arg(QString::fromStdString(code)));
+ };
+ QObject::connect(power,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+    &window,[&](double){updateExample();});
+ QObject::connect(speed,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+    &window,[&](double){updateExample();});
+ QObject::connect(powerMode,QOverload<int>::of(&QComboBox::currentIndexChanged),
+    &window,[&](int){updateExample();});
+ updateExample();
  auto* note=new QLabel(
   "M3 nao e 'modo de perfuracao': e o modo de potencia constante. "
   "M4 e o modo de potencia dinamica. Os dois precisam de GRBL compatível "
