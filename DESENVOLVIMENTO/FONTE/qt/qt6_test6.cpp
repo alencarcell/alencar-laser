@@ -982,7 +982,29 @@ void mousePressEvent(QMouseEvent* e)override{
   if(tool==Tool::Scissors){
    updateScissorHover(e->position().toPoint());
    if(!scissorHover_){
-    if(toolWarning)toolWarning("Tesoura: aproxime do trecho entre cruzamentos ate a linha ficar laranja.");
+    // Diagnostico localizado: nao remove fragmentos quando nao existe intervalo seguro.
+    const auto hits=clickHits(e->position().toPoint());
+    QString reason;
+    if(hits.empty()){
+     reason="Tesoura: nenhuma linha proxima (9 px). Amplie e posicione sobre o contorno.";
+     if(diagnosticEvent)diagnosticEvent("scissor_no_hit",1);
+    }else{
+     bool grouped=false,locked=false,hidden=false;
+     for(const auto& hit:hits){
+      auto it=editor.state().objects.find(hit.key.object);
+      if(it==editor.state().objects.end())continue;
+      grouped|=it->second.group>0;
+      auto layer=editor.state().layers.find(it->second.layer);
+      if(layer!=editor.state().layers.end()){
+       locked|=layer->second.locked;hidden|=!layer->second.visible;
+      }
+     }
+     if(grouped)reason="Tesoura: forma agrupada; desagrupe para recortar.";
+     else if(locked||hidden)reason="Tesoura: objeto em camada bloqueada ou oculta.";
+     else reason="Tesoura: contorno encontrado, mas sem trecho seguro; verifique vertice, tangencia, sobreposicao ou geometria composta.";
+     if(diagnosticEvent)diagnosticEvent("scissor_no_safe_span",1);
+    }
+    if(toolWarning)toolWarning(reason);
     e->accept();return;
    }
    try{
