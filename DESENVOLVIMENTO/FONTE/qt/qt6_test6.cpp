@@ -3574,9 +3574,15 @@ static QJsonObject layersUngroup198Test(const QString& directory){
  const int c=v.editor.rectangle({70,20},15,15);
  const int d=v.editor.rectangle({90,20},15,15);
  v.editor.addLayer(2,"Gravacao");
- v.editor.moveSelectionToLayer({a,b},2);
+ w.refresh();w.layers->setCurrentIndex(w.layers->findData(2));
+ v.selected.insert(a);v.selected.insert(b);v.applySelectionStyles();
+ clickButton(w,"move_layer");
+ check(v.editor.state().objects.at(a).layer==2&&
+       v.editor.state().objects.at(b).layer==2,"Botao enviar selecao nao moveu camadas");
  const auto geometryBefore=serialize(encode(v.editor.state().doc));
- v.editor.setLayerMode(2,"Fill");
+ check(w.layerMode_!=nullptr,"Seletor de modo de camada nao foi criado");
+ w.layerMode_->setCurrentIndex(w.layerMode_->findData(QString("Fill")));
+ QApplication::processEvents();
  v.rebuild();
  check(v.editor.state().layers.at(2).mode=="Fill","Modo Fill nao persistiu no Editor");
  check(v.pathItem({a,0})->brush().style()!=Qt::NoBrush,"Forma fechada nao teve preenchimento");
