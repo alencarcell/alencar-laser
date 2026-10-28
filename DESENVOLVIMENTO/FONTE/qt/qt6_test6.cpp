@@ -960,7 +960,9 @@ void mousePressEvent(QMouseEvent* e)override{
   if(nativeMode_){nativeMousePress(e);return;}
   if(tool==Tool::Select){
    auto hits=clickHits(e->position().toPoint());
-   if(hits.empty())clearSelection();
+   if(hits.empty()){
+    marqueeActive_=true;marqueeStart_=e->position();
+   }
    else {Key chosen=hits.front().key;
     if(e->modifiers().testFlag(Qt::AltModifier)&&active_){auto it=std::find_if(hits.begin(),hits.end(),[&](const auto& h){return h.key==*active_;});if(it!=hits.end())chosen=hits[(size_t(it-hits.begin())+1)%hits.size()].key;}
     if(e->modifiers().testFlag(Qt::ShiftModifier)){if(selected.count(chosen.object))selected.erase(chosen.object);else selected.insert(chosen.object);activate(chosen,false);}
@@ -1083,6 +1085,7 @@ void mouseMoveEvent(QMouseEvent* e)override{
    e->accept();return;
   }
   if(busy())pendingInput_=clock_.nsecsElapsed();
+  if(marqueeActive_){showMarquee(e->position());e->accept();return;}
   if(shapeDragging_){
    const QPointF delta=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
    for(auto* item:shapePreviewItems_)item->setPos(delta);
@@ -1149,6 +1152,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    }
    e->accept();return;
   }
+  if(marqueeActive_){finishMarquee(e->position(),e->modifiers());e->accept();return;}
   if(shapeDragging_){
    const QPointF delta=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
    clearShapePreview();
@@ -1233,6 +1237,12 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    if(e->key()==Qt::Key_Z){history(e->modifiers().testFlag(Qt::ShiftModifier));e->accept();return;}
    if(e->key()==Qt::Key_Y){history(true);e->accept();return;}
   }
+  if(e->modifiers()==Qt::ControlModifier&&e->key()==Qt::Key_A&&tool==Tool::Select&&!nativeMode_){
+   selectAllVisible();e->accept();return;
+  }
+  if(e->modifiers()==(Qt::ControlModifier|Qt::ShiftModifier)&&e->key()==Qt::Key_I&&tool==Tool::Select&&!nativeMode_){
+   invertSelection();e->accept();return;
+  }
   if(e->key()==Qt::Key_Delete&&tool==Tool::Select&&!nativeMode_){
    deleteSelectedShapes();e->accept();return;
   }
@@ -1241,6 +1251,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   }
   if(e->key()==Qt::Key_Escape){
    if(polylineDrawing_){clearPolyline();e->accept();return;}
+   if(marqueeActive_){clearMarquee();e->accept();return;}
    if(!busy()){if(requestSelectTool)requestSelectTool();e->accept();return;}
    if(shapeDragging_){clearShapePreview();e->accept();return;}
    if(draggingNode_&&active_){
