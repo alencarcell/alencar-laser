@@ -44,11 +44,14 @@ inline Plan nearestNeighborLines(const EditorState& state,std::size_t cap=300000
   current=next;
  };
  for(const auto& [layer,paths]:groups){
+  const bool optimize=state.layers.at(layer).optimizeTravel;
   std::vector<bool> used(paths.size(),false);
   for(std::size_t n=0;n<paths.size();++n){
    double best=std::numeric_limits<double>::infinity();
    Choice chosen;
-   for(std::size_t j=0;j<paths.size();++j){
+   if(!optimize){
+    chosen={n,0,false}; // Preserva ordem, orientacao e inicio originais.
+   }else for(std::size_t j=0;j<paths.size();++j){
     if(used[j])continue;
     const Contour& c=*paths[j];
     // Open lines allow endpoint reversal; closed paths can start at any node.
