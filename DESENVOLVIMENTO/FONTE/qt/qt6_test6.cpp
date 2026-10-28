@@ -17,6 +17,7 @@
 #include "bezier_interaction.hpp"
 #include "raster_trace_19_8.hpp"
 #include "preview_dialog_19_8.hpp"
+#include "layer_settings_19_8.hpp"
 #include "render_chunks.hpp"
 #include <QApplication>
 #include <QGraphicsView>
@@ -2419,11 +2420,12 @@ public:
   auto* layersTab=new QWidget;
   auto* inspector=new QVBoxLayout(layersTab);inspector->setContentsMargins(8,8,8,8);inspector->setSpacing(6);
   inspector->addWidget(titleLabel("CAMADAS E VISIBILIDADE"));
-  auto* activeHelp=new QLabel("Em uso | S: saída virtual · V: ver · A: ar (sem comando físico)");
+  auto* activeHelp=new QLabel("CAMADA                                      S   V   A");
+  activeHelp->setToolTip("S=Saida virtual | V=Visibilidade | A=Ar (apenas referencia). Duplo clique na camada edita parametros.");
   activeHelp->setWordWrap(true);activeHelp->setObjectName("brandSub");inspector->addWidget(activeHelp);
   auto* activeBox=new QWidget;activeBox->setObjectName("activeLayerList");
   activeLayerRows_=new QVBoxLayout(activeBox);activeLayerRows_->setContentsMargins(0,0,0,0);
-  activeLayerRows_->setSpacing(3);inspector->addWidget(activeBox);
+  activeLayerRows_->setSpacing(1);inspector->addWidget(activeBox);
   auto* toolLayerRow=new QHBoxLayout;
   for(int tid:{1001,1002}){
    auto* b=new QPushButton(tid==1001?"T1 · Guia":"T2 · Moldura");
@@ -3051,6 +3053,21 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    }
    refreshing=false;
   }
+ void configureLayerSettings(int id){
+  auto found=view.editor.state().layers.find(id);
+  if(found==view.editor.state().layers.end())return;
+  if(id==1001||id==1002){
+   status->setText("T1/T2 sao camadas de guia, sem parametros de gravacao.");
+   return;
+  }
+  const auto edited=alaser::layerui198::edit(this,found->second);
+  if(!edited)return;
+  run([this,id,edited]{
+   view.editor.configureLayer(id,*edited);
+   view.rebuild();
+  });
+  status->setText("Camada atualizada para a simulacao; M3/M4 e potencia NAO enviados ao laser.");
+ }
  void refresh(){
   int current=layers->currentData().toInt();refreshing=true;layers->clear();for(const auto& [id,l]:view.editor.state().layers)layers->addItem(QString::fromStdString(l.name),id);
   int ix=layers->findData(current);layers->setCurrentIndex(ix<0?0:ix);refreshing=false;refreshFlags();
@@ -3068,19 +3085,34 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     if(!count.count(id)&&id!=1001&&id!=1002)continue;
     const bool tool=id==1001||id==1002;
     auto* row=new QWidget;row->setObjectName(QString("layer_row_%1").arg(id));
-    auto* line=new QHBoxLayout(row);line->setContentsMargins(0,0,0,0);line->setSpacing(3);
-    auto* label=new QPushButton(QString("%1 (%2)").arg(QString::fromStdString(layer.name)).arg(count[id]));
+    auto* line=new QHBoxLayout(row);line->setContentsMargins(1,0,1,0);line->setSpacing(2);
+    row->setFixedHeight(26);
+    const QString fullName=QString::fromStdString(layer.name);
+    auto* label=new QPushButton;
     label->setObjectName(QString("layer_select_%1").arg(id));
-    label->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Preferred);
+    label->setProperty("layer_config_id",id);
+    label->installEventFilter(this);
+    label->setFlat(true);
+    label->setText(label->fontMetrics().elidedText(
+      QString("%1 · %2").arg(fullName).arg(count.at(id)),Qt::ElideRight,132));
+    label->setToolTip(fullName+" — duplo clique para velocidade, potencia e M3/M4");
+    label->setFixedHeight(24);
+    label->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
+    label->setStyleSheet("QPushButton {text-align:left; padding:1px 3px;"
+                         " border:0; font-size:11px;} QPushButton:hover {background:#59616C;}");
     line->addWidget(label,1);
     connect(label,&QPushButton::clicked,this,[this,id]{
      const int ix=layers->findData(id);if(ix>=0)layers->setCurrentIndex(ix);
     });
     auto flag=[&](const char* text,bool checked,const QString& tip){
-     auto* box=new QCheckBox(QString::fromLatin1(text));box->setChecked(checked);
+     auto* box=new QCheckBox;box->setChecked(checked);
      box->setObjectName(QString("layer_%1_%2").arg(QString::fromLatin1(text)).arg(id));
-     box->setToolTip(tip);box->setStyleSheet("QCheckBox {padding:0; spacing:2px;}");
-     line->addWidget(box);return box;
+     box->setAccessibleName(QString::fromLatin1(text)+" — "+tip);
+     box->setToolTip(tip);
+     box->setFixedSize(20,20);
+     box->setStyleSheet("QCheckBox {padding:0; margin:0; spacing:0;}"
+                        "QCheckBox::indicator {width:14px;height:14px;}");
+     line->addWidget(box,0,Qt::AlignCenter);return box;
     };
     auto* output=flag("S",!tool&&layer.output,"Saída apenas na simulação");
     auto* show=flag("V",layer.visible,"Visibilidade da camada no editor");
@@ -3144,6 +3176,12 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
  }
 
  bool eventFilter(QObject* object,QEvent* event)override{
+  if(event->type()==QEvent::MouseButtonDblClick&&
+     object->property("layer_config_id").isValid()){
+   const int id=object->property("layer_config_id").toInt();
+   QTimer::singleShot(0,this,[this,id]{configureLayerSettings(id);});
+   return true;
+  }
   if(object==view.viewport()){
    if(event->type()==QEvent::DragEnter){
     dragEnterEvent(static_cast<QDragEnterEvent*>(event));return true;
