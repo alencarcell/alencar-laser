@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal)
+param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -135,6 +135,13 @@ try {
         New-Item -ItemType Directory -Path $destino -Force | Out-Null
         & $app --lbrn2-import-test $fixture $destino
         Checar-ResultadoQt 'Importacao LBRN2' (Join-Path $destino 'RESULTADO_IMPORTACAO_LBRN2.json')
+        if (-not [string]::IsNullOrWhiteSpace($ArquivoLbrn2)) {
+            if (-not (Test-Path -LiteralPath $ArquivoLbrn2 -PathType Leaf)) {
+                throw "Arquivo LBRN2 informado nao encontrado: $ArquivoLbrn2"
+            }
+            & $app --lbrn2-file-19-8-test $ArquivoLbrn2 $destino
+            Checar-ResultadoQt 'LBRN2 real enviado' (Join-Path $destino 'RESULTADO_LBRN2_REAL_19_8.json')
+        }
         Write-Host 'Teste de importacao passou. Teste completo ainda necessario.' -ForegroundColor Green
         return
     }
@@ -192,6 +199,13 @@ try {
     $dirImportacao = Join-Path $destino 'importacao'
     & $app --lbrn2-import-test $fixture $dirImportacao
     Checar-ResultadoQt 'Importacao geometrica LBRN2' (Join-Path $dirImportacao 'RESULTADO_IMPORTACAO_LBRN2.json')
+    if (-not [string]::IsNullOrWhiteSpace($ArquivoLbrn2)) {
+        if (-not (Test-Path -LiteralPath $ArquivoLbrn2 -PathType Leaf)) {
+            throw "Arquivo LBRN2 informado nao encontrado: $ArquivoLbrn2"
+        }
+        & $app --lbrn2-file-19-8-test $ArquivoLbrn2 $dirImportacao
+        Checar-ResultadoQt 'LBRN2 real enviado' (Join-Path $dirImportacao 'RESULTADO_LBRN2_REAL_19_8.json')
+    }
     $dirDesenho = Join-Path $destino 'desenho'
     New-Item -ItemType Directory -Path $dirDesenho -Force | Out-Null
     & $app --drawing-tools-19-8-test $fixture $dirDesenho
