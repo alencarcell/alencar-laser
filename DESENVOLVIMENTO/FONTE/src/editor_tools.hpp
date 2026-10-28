@@ -419,6 +419,29 @@ public:
    layer.passes=passes;layer.powerMode=powerMode;
   },false);
  }
+ // Single undo transaction for the layer settings dialog. Never sends machine data.
+ void configureLayer(int id,const Layer& desired){
+  if(!current.layers.count(id)||id==1001||id==1002)
+   throw std::runtime_error("invalid layer configuration target");
+  if(desired.name.empty()||desired.name.size()>200||
+     (desired.mode!="Line"&&desired.mode!="Fill")||
+     !std::isfinite(desired.speedMmMin)||desired.speedMmMin<10||desired.speedMmMin>100000||
+     !std::isfinite(desired.powerPercent)||desired.powerPercent<0||desired.powerPercent>100||
+     desired.passes<1||desired.passes>20||
+     (desired.powerMode!="M3"&&desired.powerMode!="M4"))
+   throw std::runtime_error("invalid virtual layer configuration");
+  const auto& present=current.layers.at(id);
+  if(present.name==desired.name&&present.mode==desired.mode&&
+     present.speedMmMin==desired.speedMmMin&&
+     present.powerPercent==desired.powerPercent&&present.passes==desired.passes&&
+     present.powerMode==desired.powerMode)return;
+  change([&](EditorState& state){
+   auto& item=state.layers.at(id);
+   item.name=desired.name;item.mode=desired.mode;
+   item.speedMmMin=desired.speedMmMin;item.powerPercent=desired.powerPercent;
+   item.passes=desired.passes;item.powerMode=desired.powerMode;
+  },false);
+ }
  void setLayerMode(int id,const std::string& mode){
   if(mode!="Line"&&mode!="Fill")throw std::runtime_error("invalid layer mode");
   auto it=current.layers.find(id);if(it==current.layers.end())throw std::runtime_error("missing layer");
