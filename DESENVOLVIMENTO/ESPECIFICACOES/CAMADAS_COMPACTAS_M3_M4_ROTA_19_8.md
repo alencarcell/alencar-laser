@@ -57,3 +57,10 @@ Se passar, testar `-SomenteInteracao` e `-Abrir`, **sem máquina conectada**. Ao
 3. Testar desempenho em milhares de contornos; limite de 1.500 evita busca quadrática excessiva.
 4. Calibrar velocidade, aceleração e timing com relatórios do LightBurn; implementar modelagem de potência M4 separada e sujeita a validação física futura.
 5. Nenhum acionamento físico M3/M4 ou gravador CAM antes de autorização e homologação independente.
+
+## Revisao da mesma rodada — otimizacao configuravel em cada camada
+
+- O Cut Settings Editor experimental ganhou o checkbox **"Permitir otimizar rota desta camada na previa"**. Esse campo e agora guardado em `Layer.optimizeTravel` (padrao `true` para projetos antigos), com Undo/Redo e persistencia `.alaser`.
+- O checkbox global de otimização da prévia precisa estar marcado para a heurística atuar. Se a camada desabilitar seu próprio checkbox, `preview_route_19_8.hpp` preserva a ordem e a direção originais dos contornos dessa camada, embora outras camadas possam ser reordenadas.
+- O teste `--layer-route-19-8-test` agora confere: OFF mantem distância de viagem original; ON reduz distância da fixture; JSON salva e reabre OFF; remover a chave em metadata legada restaura default ON.
+- Não equivale ao planejador completo do LightBurn; continuam pendentes otimização por contorno interno, agrupamentos e prioridades.
