@@ -2257,9 +2257,11 @@ public:
   [[maybe_unused]] auto* bezier=compact(editorGrid,2,0,"bezier","⌁ Bézier","Editar âncoras e alças Bézier nativas",
    [this]{if(!curves){status->setText("Abra um projeto com curvas v5.");return;}
      bezierToolActive_=true;view.enableNative(true);
+     captureEvent("tool_bezier_activated");
      status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
   compact(editorGrid,3,0,"scissors","✂ Tesoura","Ao aproximar, marca em laranja o trecho entre cruzamentos; clique remove tudo (K). Bézier nativa indisponivel.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
+     captureEvent("tool_scissors_activated");
      status->setText("Tesoura: passe o mouse sobre um trecho; destaque laranja = corte completo. Ctrl+Z desfaz.");});
   tools->addSpacing(5); // Ferramentas de desenho
   auto* shapeGrid=newGrid();
