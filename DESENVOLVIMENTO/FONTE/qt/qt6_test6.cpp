@@ -2523,6 +2523,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* enableCapture=new QCheckBox("Ativar coleta nesta sessão");
   enableCapture->setObjectName("diagnostics_enable");
   collectionLayout->addWidget(enableCapture);
+  auto* instructions=new QLabel("Teste da Tesoura: ative a coleta, clique em um trecho que falha, "
+   "clique em outro que funciona e exporte o JSON. O relatório registra causa, "
+   "ID da forma e segmento, mas não coordenadas.");
+  instructions->setWordWrap(true);collectionLayout->addWidget(instructions);
   collectorSummary_=new QLabel;collectorSummary_->setWordWrap(true);collectionLayout->addWidget(collectorSummary_);
   collectorLog_=new QPlainTextEdit;collectorLog_->setReadOnly(true);collectorLog_->setMaximumBlockCount(110);
   collectorLog_->setObjectName("diagnostics_events");collectorLog_->setPlaceholderText("Eventos aparecerão aqui após ativar a coleta.");
