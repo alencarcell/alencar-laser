@@ -196,6 +196,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    scan.bidirectional=bidirectional->isChecked();
    Plan combined=optimizeTravel->isChecked()?
       route::nearestNeighborLines(source):sourcePlan;
+   const double optimizedLineTravelMm=combined.travelMm;
    if(enableFill->isChecked()){
     raster::appendFill(combined,source,scan);
     combined.ignoredFill=0; // Fill vetorial incluido; contornos abertos nao geram hatch.
@@ -243,7 +244,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
      .arg(nominal,0,'f',1).arg(timeline.totalSeconds,0,'f',1)
      .arg(qulonglong(timeline.runs)).arg(qulonglong(shown.ignoredFill))
      .arg(qulonglong(shown.ignoredDisabled)).arg(qulonglong(shown.ignoredTool))
-     .arg(sourcePlan.travelMm,0,'f',1).arg(combined.travelMm,0,'f',1));
+     .arg(sourcePlan.travelMm,0,'f',1).arg(optimizedLineTravelMm,0,'f',1));
    play->setEnabled(!shown.moves.empty()&&timeline.totalSeconds>0);
    render();
   }catch(const std::exception& e){
@@ -267,6 +268,8 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"layer_passes_applied",true},
    {"route_heuristic_enabled",optimizeTravel->isChecked()},
    {"line_travel_original_mm",sourcePlan.travelMm},
+   {"line_travel_optimized_mm",optimizeTravel->isChecked()?
+      route::nearestNeighborLines(source).travelMm:sourcePlan.travelMm},
    {"layer_feed_enabled",useLayerFeeds->isChecked()},
    {"layer_parameters_are_not_machine_commands",true},
    {"fill_simulation_enabled",enableFill->isChecked()},
