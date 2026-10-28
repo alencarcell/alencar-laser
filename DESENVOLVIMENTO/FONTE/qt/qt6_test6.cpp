@@ -20,6 +20,8 @@
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QGraphicsPathItem>
+#include <QGraphicsRectItem>
+#include <QContextMenuEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPainterPathStroker>
@@ -198,6 +200,10 @@ class QtEditorLab final:public QGraphicsView{
  bool nativeContourPressing_=false;
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
  std::vector<Pt> pencilPoints_;
+ bool polylineDrawing_=false;
+ std::vector<Pt> polylinePoints_;
+ QPointF polylineCursor_{};
+ QGraphicsPathItem* polylinePreview_=nullptr;
  QGraphicsPathItem* pendingPreview_=nullptr;
  ScissorSpanPlanner scissorPlanner_;
  uint64_t scissorIndexVersion_=std::numeric_limits<uint64_t>::max();
@@ -252,6 +258,38 @@ class QtEditorLab final:public QGraphicsView{
  }
 
  int lastCreated_=0;
+ Pt snapPolyline(Pt at,bool shift)const{
+  if(!shift||polylinePoints_.empty())return at;
+  const Pt last=polylinePoints_.back();
+  const double dx=at.x-last.x,dy=at.y-last.y,length=std::hypot(dx,dy);
+  if(length<1e-9)return at;
+  const double step=std::numbers::pi/4.;
+  const double angle=std::round(std::atan2(dy,dx)/step)*step;
+  return {last.x+length*std::cos(angle),last.y+length*std::sin(angle)};
+ }
+ void redrawPolyline(){
+  if(!polylinePreview_||polylinePoints_.empty())return;
+  QPainterPath path;path.moveTo(toQt(polylinePoints_.front()));
+  for(size_t i=1;i<polylinePoints_.size();++i)path.lineTo(toQt(polylinePoints_[i]));
+  path.lineTo(polylineCursor_);polylinePreview_->setPath(path);
+ }
+ void clearPolyline(){
+  polylineDrawing_=false;polylinePoints_.clear();
+  if(polylinePreview_){scene_.removeItem(polylinePreview_);delete polylinePreview_;polylinePreview_=nullptr;}
+  viewport()->update();
+ }
+ void finishPolyline(bool closed){
+  if(!polylineDrawing_)return;
+  auto points=std::move(polylinePoints_);clearPolyline();
+  if(points.size()<2||(closed&&points.size()<3))return;
+  try{
+   lastCreated_=editor.addContour(std::move(points),closed,targetLayer());
+   ++toolCreates;rebuild();activate({lastCreated_,0});
+   if(diagnosticEvent)diagnosticEvent(closed?"polyline_closed":"polyline_created",1);
+   if(stateChanged)stateChanged();
+  }catch(const std::exception& ex){if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));}
+ }
+
  QElapsedTimer clock_;qint64 pendingInput_=-1;
  double nativePxPerMm()const{
   auto m=viewportTransform();return std::max(1e-9,std::min(
@@ -389,7 +427,7 @@ public:
  void reportZoom(){if(zoomChanged)zoomChanged(currentZoom());}
  std::function<int()> drawingLayer;
  int targetLayer()const{return drawingLayer?drawingLayer():0;}
- bool busy()const{return draggingNode_.has_value()||shapeDragging_||strokeDrawing_||nativePressing_||nativeContourPressing_;}
+ bool busy()const{return draggingNode_.has_value()||shapeDragging_||strokeDrawing_||polylineDrawing_||nativePressing_||nativeContourPressing_;}
  bool nativeMode()const{return nativeMode_;}
  bool hasNativeDocument()const{return nativeSession_&&!nativeSession_->committed().contours.empty();}
  std::optional<Key> nativeSelected()const{return nativeSession_?nativeSession_->selected():std::nullopt;}
@@ -569,7 +607,7 @@ public:
  void invalidateSelectionCache(){picker_.invalidate();}
  void rebuild(){
   clearScissorHover();clearShapePreview();endChunkPreview();
-  scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
+  clearPolyline();scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
    auto* o=scene_.addPath(pathOf(c),QPen(layerColor(editor.state().objects.at(c.key.object).layer),0));o->setZValue(1);
    auto m=editor.state().objects.at(c.key.object);auto layer=editor.state().layers.at(m.layer);
@@ -687,9 +725,13 @@ public:
   scissorPreview_->setAcceptedMouseButtons(Qt::NoButton);
   viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
  }
- void setTool(Tool t){if(!busy()){
-  clearScissorHover();nativeMode_=false;tool=t;viewport()->setCursor(Qt::ArrowCursor);viewport()->update();
- }}
+ void setTool(Tool t){
+  if(polylineDrawing_&&t!=Tool::Line)finishPolyline(false);
+  if(!busy()){
+   clearScissorHover();nativeMode_=false;tool=t;
+   viewport()->setCursor(Qt::ArrowCursor);viewport()->update();
+  }
+ }
  QPointF constrainedCorner(QPointF first,QPointF last,bool shift)const{
   if(!shift||(tool!=Tool::Rectangle&&tool!=Tool::Ellipse))return last;
   const double dx=last.x()-first.x(),dy=last.y()-first.y();
@@ -702,6 +744,7 @@ public:
   if(shapeDragging_)clearShapePreview();
   if(draggingNode_){endChunkPreview();draggingNode_.reset();viewport()->update();}
   if(strokeDrawing_){strokeDrawing_=false;pencilPoints_.clear();if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();}
+  if(polylineDrawing_)clearPolyline();
  }
  void history(bool redo){if(busy())return;if(redo?editor.redo():editor.undo()){
   active_.reset();selected.clear();rebuild();if(diagnosticEvent)diagnosticEvent(redo?"redo":"undo",1);
@@ -1536,15 +1579,15 @@ public:
   for(const QString& logoPath:logoCandidates){
    QPixmap original(logoPath);
    if(original.isNull())continue;
-   brand->setPixmap(original.scaled(248,68,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+   brand->setPixmap(original.scaled(162,42,Qt::KeepAspectRatio,Qt::SmoothTransformation));
    brand->setToolTip("Logo oficial Alencar Laser: "+logoPath);
-   brand->setFixedHeight(70);
+   brand->setFixedHeight(44);
    break;
   }
   if(brand->pixmap().isNull())
    brand->setToolTip("Logo oficial ainda nao encontrada. Instale em DADOS/LOGO/logo_alencar_laser.png.");
   identity->addWidget(brand);
-  auto* subtitle=new QLabel("Estúdio Qt 6  •  TESTE_19.8  •  Persistência + recuperação + ícones");subtitle->setObjectName("brandSub");identity->addWidget(subtitle);
+  auto* subtitle=new QLabel("TESTE_19.8 • Candidata");subtitle->setObjectName("brandSub");subtitle->hide();identity->addWidget(subtitle);
   headerRow->addLayout(identity);headerRow->addStretch();
   auto* safety=new QLabel("● MÁQUINA DESCONECTADA   |   EMISSÃO BLOQUEADA");
   safety->setObjectName("machineState");safety->setToolTip("Leitura GRBL opcional; sem comandos de movimento ou laser.");
@@ -1649,7 +1692,7 @@ public:
      status->setText("Tesoura: passe o mouse sobre um trecho; destaque laranja = corte completo. Ctrl+Z desfaz.");});
   tools->addSpacing(5); // Ferramentas de desenho
   auto* shapeGrid=newGrid();
-  compact(shapeGrid,0,0,"line","╱ Linha","Desenhar linha",
+  compact(shapeGrid,0,0,"line","╱ Linha contínua","Clique cria nós, clique na origem fecha, botão direito termina, Esc cancela, Shift restringe a 45 graus",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Line);});
   compact(shapeGrid,1,0,"rectangle","▭ Retâng.","Desenhar retângulo",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Rectangle);});
