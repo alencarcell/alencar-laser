@@ -2897,7 +2897,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(!mime||!mime->hasUrls()||mime->urls().size()!=1){e->ignore();return;}
   const QUrl url=mime->urls().first();
   const QString suffix=QFileInfo(url.toLocalFile()).suffix().toLower();
-  if(url.isLocalFile()&&(suffix=="alaser"||suffix=="lbrn2"))
+  if(url.isLocalFile()&&(suffix=="alaser"||suffix=="lbrn2"||suffix=="png"||suffix=="jpg"||suffix=="jpeg"||suffix=="bmp"||suffix=="webp"))
    e->acceptProposedAction();
   else e->ignore();
  }
@@ -2906,9 +2906,13 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(!mime||!mime->hasUrls()||mime->urls().size()!=1){e->ignore();return;}
   const QUrl url=mime->urls().first();
   const QString suffix=QFileInfo(url.toLocalFile()).suffix().toLower();
-  if(!url.isLocalFile()||(suffix!="alaser"&&suffix!="lbrn2")){e->ignore();return;}
+  if(!url.isLocalFile()||(suffix!="alaser"&&suffix!="lbrn2"&&suffix!="png"&&
+    suffix!="jpg"&&suffix!="jpeg"&&suffix!="bmp"&&suffix!="webp")){e->ignore();return;}
   e->acceptProposedAction();
-  try{openFilePath(url.toLocalFile());}
+  try{
+   if(suffix=="alaser"||suffix=="lbrn2")openFilePath(url.toLocalFile());
+   else loadRasterFromFile(url.toLocalFile());
+  }
   catch(const std::exception& error){
    QMessageBox::warning(this,"Arquivo nao importado",QString::fromUtf8(error.what())+
       "\n\nO desenho anterior foi preservado. Use Referencias para inspecionar o .lbrn2.");
