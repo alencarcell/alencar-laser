@@ -738,6 +738,7 @@ public:
   return nativeSelectedPart_->nodeId;
  }
  size_t nativeItemCount()const{return nativeItems_.size();}
+ void refreshNativeAppearance(){updateNativePaths(true);viewport()->update();}
  QPainterPath nativeItemPath(Key key)const{return nativeItems_.at(key)->path();}
  // A sessao deve estar viva durante todo o periodo em que estiver anexada.
  void attachNative(CurveDragSession* session){
@@ -2215,9 +2216,10 @@ public:
   compact(editorGrid,1,0,"nodes","✎ Nós","Editar nós das polilinhas",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Nodes);});
   [[maybe_unused]] auto* bezier=compact(editorGrid,2,0,"bezier","⌁ Bézier","Editar âncoras e alças Bézier nativas",
-   [this]{if(!curves){status->setText("Abra um projeto com curvas v5.");return;}
+   [this]{if(!curves||!view.hasNativeDocument()){
+      status->setText("Este projeto contém polilinhas, não curvas Bézier nativas. A ferramenta não altera automaticamente o contorno.");return;}
      bezierToolActive_=true;view.enableNative(true);
-     status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
+     status->setText("Bézier nativa: selecione um contorno, arraste alças; Editar → Suavizar converte arestas retas.");});
   compact(editorGrid,3,0,"scissors","✂ Tesoura","Ao aproximar, marca em laranja o trecho entre cruzamentos; clique remove tudo (K). Bézier nativa indisponivel.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
      status->setText("Tesoura: passe o mouse sobre um trecho; destaque laranja = corte completo. Ctrl+Z desfaz.");});
@@ -2700,6 +2702,15 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* editMenu=mainMenu->addMenu("Editar");
   command(editMenu,"Desfazer","undo");command(editMenu,"Refazer","redo");command(editMenu,"Duplicar seleção","duplicate_obj");
   command(editMenu,"Excluir formas selecionadas","delete_shapes");
+  connect(editMenu->addAction("Suavizar curva Bézier nativa selecionada"),&QAction::triggered,
+    this,[this]{run([this]{
+     check(curves&&view.nativeMode(),"Bézier: abra o modo Bézier com uma curva nativa e selecione uma forma.");
+     check(curves->selected().has_value(),"Clique no contorno Bézier antes de suavizar.");
+     check(curves->smoothSelected(),"A curva selecionada ja nao tem segmentos retos para suavizar.");
+     view.refreshNativeAppearance();recoveryPolicy_.edited();
+     captureEvent("bezier_native_smoothed");
+     status->setText("Curva Bézier suavizada: alças tangentes ativas. Ctrl+Z desfaz.");
+    });});
   command(editMenu,"Selecionar (Esc / V)","select");command(editMenu,"Tesoura (K)","scissors");
   auto* arrangeMenu=mainMenu->addMenu("Organizar");
   command(arrangeMenu,"Agrupar","group");command(arrangeMenu,"Desagrupar","ungroup");
