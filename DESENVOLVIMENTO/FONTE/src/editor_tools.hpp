@@ -15,7 +15,8 @@
 namespace alaser {
 struct Layer {
  int id=0;std::string name;bool visible=true,locked=false;
- std::string mode="Line"; // modo visual, nunca habilita CAM/laser
+ std::string mode="Line"; // modo editorial: Line ou Fill
+ bool output=true,air=false; // controle de PREVIA, nunca autorizacao de emissao
 };
 struct Meta {int layer=0,group=0;};
 struct EditorState {Document doc;std::map<int,Meta> objects;std::map<int,Layer> layers;int nextGroup=1;};
@@ -388,6 +389,12 @@ public:
  }
  void addLayer(int id,std::string name){change([&](EditorState& s){if(id<0||s.layers.count(id)||name.empty())throw std::runtime_error("invalid new layer");s.layers[id]={id,name,true,false};},false);}
  void setLayerFlags(int id,bool visible,bool locked){change([&](EditorState& s){if(!s.layers.count(id))throw std::runtime_error("missing layer");s.layers.at(id).visible=visible;s.layers.at(id).locked=locked;},false);}
+ void setLayerPreviewFlags(int id,bool output,bool air){
+  if(!current.layers.count(id))throw std::runtime_error("missing layer");
+  if(id==1001||id==1002)output=false;
+  if(current.layers.at(id).output==output&&current.layers.at(id).air==air)return;
+  change([&](EditorState& st){st.layers.at(id).output=output;st.layers.at(id).air=air;},false);
+ }
  void setLayerMode(int id,const std::string& mode){
   if(mode!="Line"&&mode!="Fill")throw std::runtime_error("invalid layer mode");
   auto it=current.layers.find(id);if(it==current.layers.end())throw std::runtime_error("missing layer");
@@ -440,7 +447,7 @@ public:
 };
 inline boost::json::object metadata(const EditorState& s){
  using namespace boost::json;object m;m["schema"]="editor-meta-1";m["nextGroup"]=s.nextGroup;array layers;
- for(auto&[id,l]:s.layers)layers.push_back(object{{"id",id},{"name",l.name},{"visible",l.visible},{"locked",l.locked},{"mode",l.mode}});
+ for(auto&[id,l]:s.layers)layers.push_back(object{{"id",id},{"name",l.name},{"visible",l.visible},{"locked",l.locked},{"mode",l.mode},{"output",l.output},{"air",l.air}});
  m["layers"]=std::move(layers);array objects;
  for(auto&[id,o]:s.objects)objects.push_back(object{{"id",id},{"layer",o.layer},{"group",o.group}});
  m["objects"]=std::move(objects);return m;
@@ -451,7 +458,9 @@ inline EditorState fromMetadata(Document d,const boost::json::value& v){
    const std::string layerMode=(mode&&mode->is_string())?
     std::string(mode->as_string()):"Line";
    s.layers[id]={id,std::string(x.at("name").as_string()),
-    x.at("visible").as_bool(),x.at("locked").as_bool(),layerMode};}
+    x.at("visible").as_bool(),x.at("locked").as_bool(),layerMode,
+    id==1001||id==1002?false:(x.if_contains("output")?x.at("output").as_bool():true),
+    x.if_contains("air")?x.at("air").as_bool():false};}
  for(const auto& item:m.at("objects").as_array()){const auto& x=item.as_object();int id=int(x.at("id").as_int64());if(s.objects.count(id))throw std::runtime_error("duplicate object meta");s.objects[id]={int(x.at("layer").as_int64()),int(x.at("group").as_int64())};}
  validate(s);return s;
 }
