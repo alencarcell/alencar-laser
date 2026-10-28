@@ -23,6 +23,7 @@
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
 #include <QGraphicsPixmapItem>
+#include <QImageReader>
 #include <QSlider>
 #include <QContextMenuEvent>
 #include <array>
@@ -3099,7 +3100,13 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   status->setText(QString("Curva Bézier nativa %1 criada. Arraste os pontos azuis das alças e âncoras; Shift+clique insere nós; Ctrl+Z desfaz.").arg(key.object));
  }
  void loadRasterFromFile(const QString& file){
-  QImage image(file);
+  QImageReader reader(file);reader.setAutoTransform(true);
+  const QSize size=reader.size();
+  if(!size.isValid()||size.width()>10000||size.height()>10000)
+   throw std::runtime_error("Imagem sem tamanho valido ou acima de 10000 pixels");
+  if(size.width()>1600||size.height()>1600)
+   reader.setScaledSize(size.scaled(1600,1600,Qt::KeepAspectRatio));
+  const QImage image=reader.read();
   if(image.isNull())throw std::runtime_error("Imagem nao suportada (PNG/JPG/BMP/WebP)");
   view.setRasterImage(image);
   status->setText("Imagem importada. Clique direito na mesa > Tracar imagem (Alt+T).");
