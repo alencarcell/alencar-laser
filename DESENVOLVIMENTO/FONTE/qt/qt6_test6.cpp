@@ -2217,7 +2217,8 @@ public:
   });
   add(quickRow,"preview_virtual","Prévia virtual",[this]{
    alaser::sim198::showPreviewDialog(this,view.editor.state(),
-       workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight);
+       workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight,
+       view.rasterImage(),view.rasterBounds());
   })->setToolTip("Simular caminhos Line e tempo nominal. Nenhum envio físico.");
   quickRow->addStretch();
   // Referências em SOMENTE LEITURA: sem mutação no Editor, sem movimento e sem G-code.
