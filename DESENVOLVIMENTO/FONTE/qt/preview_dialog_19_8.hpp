@@ -20,6 +20,11 @@
 #include <QColor>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QFileDialog>
+#include <QSaveFile>
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QMessageBox>
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -80,7 +85,13 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  auto* showTravel=new QCheckBox("Mostrar viagens em vermelho");showTravel->setChecked(true);
  controls->addWidget(play);controls->addWidget(speed);controls->addWidget(timeLabel);
  controls->addStretch();controls->addWidget(showTravel);column->addLayout(controls);
- auto* close=new QPushButton("Fechar previsualizacao");column->addWidget(close);
+ auto* footer=new QHBoxLayout;
+ auto* exportReport=new QPushButton("Exportar relatorio JSON");
+ exportReport->setObjectName("preview_export_report");
+ exportReport->setToolTip("Apenas metricas e hipoteses, sem coordenadas do desenho");
+ auto* close=new QPushButton("Fechar previsualizacao");
+ footer->addWidget(exportReport);footer->addStretch();footer->addWidget(close);
+ column->addLayout(footer);
  QObject::connect(close,&QPushButton::clicked,&dialog,&QDialog::accept);
  QTimer clock(&dialog);clock.setInterval(60);
  QElapsedTimer elapsedClock;
@@ -151,6 +162,40 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    play->setEnabled(false);render();
   }
  };
+ QObject::connect(exportReport,&QPushButton::clicked,&dialog,[&](){
+  if(shown.moves.empty())return;
+  const QString filename=QFileDialog::getSaveFileName(
+     &dialog,"Relatorio local da simulacao",
+     "Alencar_Laser_Previa_19_8.json","Relatorio JSON (*.json)");
+  if(filename.isEmpty())return;
+  QJsonObject data{
+   {"schema","alencar-laser-simulation-report-19.8"},
+   {"experimental",true},{"machine_commands_sent",false},
+   {"model","kinematic-start-stop-angular-runs-12deg"},
+   {"notes","Line only; passes repeat full plan; no Fill/Image/GRBL optimization"},
+   {"passes",passes->value()},
+   {"cut_distance_mm",shown.cutMm},{"travel_distance_mm",shown.travelMm},
+   {"nominal_seconds",minutes(shown,settings.cutMmMin,settings.rapidMmMin)*60.0},
+   {"accel_estimated_seconds",timeline.totalSeconds},
+   {"line_seconds",timeline.lineSeconds},{"travel_seconds",timeline.travelSeconds},
+   {"motion_runs",int(timeline.runs)},
+   {"omitted_fill",int(shown.ignoredFill)},
+   {"omitted_output_off",int(shown.ignoredDisabled)},
+   {"omitted_tool_layers",int(shown.ignoredTool)},
+   {"cut_feed_mm_min",settings.cutMmMin},{"travel_feed_mm_min",settings.rapidMmMin},
+   {"x_max_mm_min",settings.maxXmmMin},{"y_max_mm_min",settings.maxYmmMin},
+   {"line_accel_x_mm_s2",settings.cutAccelX},
+   {"line_accel_y_mm_s2",settings.cutAccelY},
+   {"travel_accel_x_mm_s2",settings.rapidAccelX},
+   {"travel_accel_y_mm_s2",settings.rapidAccelY}
+  };
+  QSaveFile output(filename);
+  const QByteArray bytes=QJsonDocument(data).toJson(QJsonDocument::Indented);
+  if(!output.open(QIODevice::WriteOnly)||output.write(bytes)!=bytes.size()||!output.commit()){
+   QMessageBox::warning(&dialog,"Exportacao falhou",
+      "Nao foi possivel salvar o relatorio. Nenhum dado foi enviado.");
+  }
+ });
  QObject::connect(progress,&QSlider::valueChanged,&dialog,[&](int){render();});
  for(auto* box:{cut,rapid,maxX,maxY,accelX,accelY,rapidAx,rapidAy})
   QObject::connect(box,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
