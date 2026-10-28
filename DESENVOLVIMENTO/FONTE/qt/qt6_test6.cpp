@@ -22,6 +22,7 @@
 #include <QGraphicsPathItem>
 #include <QGraphicsRectItem>
 #include <QContextMenuEvent>
+#include <array>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPainterPathStroker>
@@ -199,6 +200,14 @@ class QtEditorLab final:public QGraphicsView{
  bool shapeDragging_=false;
  QPointF shapeDragStart_{};
  std::vector<QGraphicsPathItem*> shapePreviewItems_;
+ // Alcas independentes dos dados; commit unico no mouseRelease.
+ bool transformDragging_=false;
+ int transformHandle_=-1; // 0..7 tamanho; 8..11 rotacao
+ QRectF transformBounds_;
+ QPointF transformAnchor_{};
+ double transformSx_=1.,transformSy_=1.,transformAngle_=0.;
+ std::vector<int> transformIds_;
+ std::vector<QGraphicsPathItem*> transformItems_;
  bool nativeContourPressing_=false;
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
  std::vector<Pt> pencilPoints_;
@@ -393,6 +402,163 @@ class QtEditorLab final:public QGraphicsView{
   nativeStyledKey_=selectedKey;
   if(all||selectionChanged)viewport()->update();
  }
+
+ std::vector<int> expandedSelection()const{
+  std::set<int> ids=selected,groups;
+  const auto& st=editor.state();
+  for(int id:ids){
+   auto it=st.objects.find(id);
+   if(it!=st.objects.end()&&it->second.group>0)groups.insert(it->second.group);
+  }
+  for(const auto& [id,meta]:st.objects)
+   if(meta.group>0&&groups.count(meta.group))ids.insert(id);
+  return {ids.begin(),ids.end()};
+ }
+ std::optional<QRectF> selectedBounds()const{
+  if(selected.empty()||tool!=Tool::Select||nativeMode_)return {};
+  auto ids=expandedSelection();
+  QRectF bounds;bool has=false;
+  for(const auto& c:editor.state().doc.contours){
+   if(std::find(ids.begin(),ids.end(),c.key.object)==ids.end())continue;
+   if(!editable(editor.state(),c.key.object))continue;
+   for(const auto& node:c.nodes){
+    const QPointF p=toQt(node.p);
+    if(!has){bounds=QRectF(p,p);has=true;}
+    else bounds=bounds.united(QRectF(p,p));
+   }
+  }
+  if(!has)return {};
+  return bounds.normalized();
+ }
+ std::array<QPointF,12> selectionHandles(const QRectF& bounds)const{
+  const QPointF tl=viewportTransform().map(bounds.topLeft());
+  const QPointF br=viewportTransform().map(bounds.bottomRight());
+  const double x0=tl.x(),x1=br.x(),y0=tl.y(),y1=br.y();
+  const double cx=(x0+x1)*.5,cy=(y0+y1)*.5;
+  return {QPointF(x0,y0),QPointF(cx,y0),QPointF(x1,y0),
+   QPointF(x1,cy),QPointF(x1,y1),QPointF(cx,y1),
+   QPointF(x0,y1),QPointF(x0,cy),
+   QPointF(x0-17,y0-17),QPointF(x1+17,y0-17),
+   QPointF(x1+17,y1+17),QPointF(x0-17,y1+17)};
+ }
+ void paintSelectionHandles(QPainter* p)const{
+  if(tool!=Tool::Select||selected.empty()||nativeMode_)return;
+  auto bounds=selectedBounds();if(!bounds)return;
+  const QPointF topLeft=viewportTransform().map(bounds->topLeft());
+  const QPointF bottomRight=viewportTransform().map(bounds->bottomRight());
+  const QRectF pixel(topLeft,bottomRight);
+  const auto handles=selectionHandles(*bounds);
+  p->save();p->resetTransform();p->setBrush(Qt::NoBrush);
+  QPen edge(QColor(238,154,60),1,Qt::DashLine);edge.setCosmetic(true);p->setPen(edge);
+  p->drawRect(pixel.normalized());
+  for(int h=0;h<12;++h){
+   const QPointF point=handles[size_t(h)];
+   p->setPen(QPen(QColor("#182633"),1));
+   p->setBrush(h>=8?QColor("#49BCF4"):QColor("#F3F5F7"));
+   if(h>=8)p->drawEllipse(point,4.,4.);
+   else p->drawRect(QRectF(point-QPointF(4.,4.),QSizeF(8.,8.)));
+  }
+  p->restore();
+ }
+ void cancelSelectionTransform(){
+  for(auto* item:transformItems_)item->setTransform(QTransform());
+  transformItems_.clear();transformIds_.clear();
+  transformDragging_=false;transformHandle_=-1;
+  transformSx_=transformSy_=1.;transformAngle_=0.;
+  viewport()->update();
+ }
+ bool beginSelectionTransform(QPointF position){
+  if(tool!=Tool::Select||nativeMode_||selected.empty()||busy())return false;
+  const auto bounds=selectedBounds();if(!bounds)return false;
+  const auto handles=selectionHandles(*bounds);
+  int h=-1;double distance=11.;
+  for(int i=0;i<12;++i){
+   const double d=QLineF(position,handles[size_t(i)]).length();
+   if(d<distance){h=i;distance=d;}
+  }
+  if(h<0)return false;
+  transformIds_=expandedSelection();
+  for(int id:transformIds_){
+   if(!editable(editor.state(),id)){cancelSelectionTransform();return false;}
+   auto found=itemsByObject_.find(id);
+   if(found!=itemsByObject_.end())
+    transformItems_.insert(transformItems_.end(),found->second.begin(),found->second.end());
+  }
+  if(transformItems_.empty()){cancelSelectionTransform();return false;}
+  transformDragging_=true;transformHandle_=h;transformBounds_=*bounds;
+  transformAnchor_=h>=8?bounds->center():QPointF{};
+  transformSx_=transformSy_=1.;transformAngle_=0.;
+  return true;
+ }
+ void updateSelectionTransform(QPointF pointer,Qt::KeyboardModifiers mods){
+  if(!transformDragging_)return;
+  QTransform t;
+  if(transformHandle_>=8){
+   const QPointF pivot=transformBounds_.center();
+   const auto handles=selectionHandles(transformBounds_);
+   const QPointF initial=handles[size_t(transformHandle_)];
+   const QPointF center=viewportTransform().map(pivot);
+   const auto start=initial-center;
+   const auto now=pointer-center;
+   const double angle=std::atan2(now.y(),now.x())-std::atan2(start.y(),start.x());
+   transformAngle_=angle*180./std::numbers::pi;
+   if(mods.testFlag(Qt::ShiftModifier))
+    transformAngle_=std::round(transformAngle_/15.)*15.;
+   t.translate(pivot.x(),pivot.y());t.rotate(transformAngle_);t.translate(-pivot.x(),-pivot.y());
+  }else{
+   const double x0=transformBounds_.left(),x1=transformBounds_.right();
+   const double y0=transformBounds_.top(),y1=transformBounds_.bottom();
+   const double mx=(x0+x1)*.5,my=(y0+y1)*.5;
+   const bool center=mods.testFlag(Qt::ControlModifier);
+   const auto handles=selectionHandles(transformBounds_);
+   const QPointF oldPoint=mapToScene(handles[size_t(transformHandle_)].toPoint());
+   const QPointF moving=mapToScene(pointer.toPoint());
+   QPointF pivot;
+   switch(transformHandle_){
+    case 0:pivot={x1,y1};break;case 1:pivot={mx,y1};break;
+    case 2:pivot={x0,y1};break;case 3:pivot={x0,my};break;
+    case 4:pivot={x0,y0};break;case 5:pivot={mx,y0};break;
+    case 6:pivot={x1,y0};break;default:pivot={x1,my};break;
+   }
+   if(center)pivot=transformBounds_.center();
+   transformAnchor_=pivot;
+   const bool horizontal=transformHandle_!=1&&transformHandle_!=5;
+   const bool vertical=transformHandle_!=3&&transformHandle_!=7;
+   double sx=1.,sy=1.;
+   if(horizontal&&std::abs(oldPoint.x()-pivot.x())>1e-9)
+     sx=(moving.x()-pivot.x())/(oldPoint.x()-pivot.x());
+   if(vertical&&std::abs(oldPoint.y()-pivot.y())>1e-9)
+     sy=(moving.y()-pivot.y())/(oldPoint.y()-pivot.y());
+   sx=std::clamp(sx,.02,100.);sy=std::clamp(sy,.02,100.);
+   const bool corner=transformHandle_%2==0;
+   if(corner&&!mods.testFlag(Qt::ShiftModifier)){
+    const double uniform=std::abs(sx-1.)>=std::abs(sy-1.)?sx:sy;
+    sx=uniform;sy=uniform;
+   }
+   transformSx_=sx;transformSy_=sy;
+   t.translate(pivot.x(),pivot.y());t.scale(sx,sy);t.translate(-pivot.x(),-pivot.y());
+  }
+  for(auto* item:transformItems_)item->setTransform(t);
+  viewport()->update();
+ }
+ void finishSelectionTransform(){
+  if(!transformDragging_)return;
+  const int h=transformHandle_;
+  const auto ids=transformIds_;
+  const QPointF pivot=h>=8?transformBounds_.center():transformAnchor_;
+  const double sx=transformSx_,sy=transformSy_,angle=transformAngle_;
+  cancelSelectionTransform();
+  if(h>=8){
+   if(std::abs(angle)<.01)return;
+   editor.rotateObjects(ids,fromQt(pivot),angle);
+  }else{
+   if(std::abs(sx-1.)<1e-5&&std::abs(sy-1.)<1e-5)return;
+   editor.scaleObjects(ids,fromQt(pivot),sx,sy);
+  }
+  rebuild();
+  if(diagnosticEvent)diagnosticEvent(h>=8?"selection_rotated":"selection_scaled",int(ids.size()));
+  if(stateChanged)stateChanged();
+ }
  void clearShapePreview(){
   for(auto* item:shapePreviewItems_)item->setPos(0,0);
   shapePreviewItems_.clear();shapeDragging_=false;
@@ -505,7 +671,7 @@ public:
  void reportZoom(){if(zoomChanged)zoomChanged(currentZoom());}
  std::function<int()> drawingLayer;
  int targetLayer()const{return drawingLayer?drawingLayer():0;}
- bool busy()const{return draggingNode_.has_value()||shapeDragging_||strokeDrawing_||polylineDrawing_||marqueeActive_||nativePressing_||nativeContourPressing_;}
+ bool busy()const{return draggingNode_.has_value()||shapeDragging_||transformDragging_||strokeDrawing_||polylineDrawing_||marqueeActive_||nativePressing_||nativeContourPressing_;}
  bool nativeMode()const{return nativeMode_;}
  bool hasNativeDocument()const{return nativeSession_&&!nativeSession_->committed().contours.empty();}
  std::optional<Key> nativeSelected()const{return nativeSession_?nativeSession_->selected():std::nullopt;}
@@ -684,7 +850,7 @@ public:
  size_t directQueries()const{return picker_.directQueries();}
  void invalidateSelectionCache(){picker_.invalidate();}
  void rebuild(){
-  clearScissorHover();clearShapePreview();endChunkPreview();
+  clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
   clearPolyline();clearMarquee();scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
    auto* o=scene_.addPath(pathOf(c),QPen(layerColor(editor.state().objects.at(c.key.object).layer),0));o->setZValue(1);
@@ -820,6 +986,7 @@ public:
   if(nativeContourPressing_&&nativeSession_){nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(true);}
   if(nativePressing_&&nativeSession_){nativeSession_->cancel();nativePressing_=false;updateNativePaths(false);}
   if(shapeDragging_)clearShapePreview();
+  if(transformDragging_)cancelSelectionTransform();
   if(draggingNode_){endChunkPreview();draggingNode_.reset();viewport()->update();}
   if(strokeDrawing_){strokeDrawing_=false;pencilPoints_.clear();if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();}
   if(polylineDrawing_)clearPolyline();
@@ -898,8 +1065,9 @@ protected:
    p->setPen(Qt::NoPen);p->setBrush(selected.count(c.key.object)?QColor(239,109,25):layerColor(editor.state().objects.at(c.key.object).layer));
    p->drawEllipse(viewportTransform().map(toQt(c.nodes.front().p)),2,2);
   }
-  p->restore();
-  if(nativeMode_&&nativeSession_&&nativeSession_->selected()){
+   p->restore();
+   paintSelectionHandles(p);
+   if(nativeMode_&&nativeSession_&&nativeSession_->selected()){
    const auto* c=findNativeCurve(nativeSession_->visible(),*nativeSession_->selected());
    if(!c)return;
    const QTransform transform=viewportTransform();
@@ -963,8 +1131,9 @@ void mousePressEvent(QMouseEvent* e)override{
  }
  if(e->button()!=Qt::LeftButton){QGraphicsView::mousePressEvent(e);return;}
   if(nativeMode_){nativeMousePress(e);return;}
-  if(tool==Tool::Select){
-   auto hits=clickHits(e->position().toPoint());
+   if(tool==Tool::Select){
+    if(beginSelectionTransform(e->position())){e->accept();return;}
+    auto hits=clickHits(e->position().toPoint());
    if(hits.empty()){
     marqueeActive_=true;marqueeStart_=e->position();
    }
@@ -1114,7 +1283,8 @@ void mouseMoveEvent(QMouseEvent* e)override{
    e->accept();return;
   }
   if(busy())pendingInput_=clock_.nsecsElapsed();
-  if(marqueeActive_){showMarquee(e->position());e->accept();return;}
+   if(transformDragging_){updateSelectionTransform(e->position(),e->modifiers());e->accept();return;}
+   if(marqueeActive_){showMarquee(e->position());e->accept();return;}
   if(shapeDragging_){
    const QPointF delta=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
    for(auto* item:shapePreviewItems_)item->setPos(delta);
@@ -1181,7 +1351,8 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    }
    e->accept();return;
   }
-  if(marqueeActive_){finishMarquee(e->position(),e->modifiers());e->accept();return;}
+   if(transformDragging_){updateSelectionTransform(e->position(),e->modifiers());finishSelectionTransform();e->accept();return;}
+   if(marqueeActive_){finishMarquee(e->position(),e->modifiers());e->accept();return;}
   if(tool==Tool::Line&&polylineDrawing_){
    // Mantem gesto legada: arrastar logo no primeiro segmento cria uma linha.
    if(polylineStartedOnPress_&&QLineF(polylineDown_,e->position()).length()>4.){
@@ -1350,8 +1521,9 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   if(e->key()==Qt::Key_Shift&&strokeDrawing_&&pendingPreview_){
    pendingPreview_->setPath(temporaryShape());viewport()->update();
   }
-  if(e->key()==Qt::Key_Escape){
-   if(polylineDrawing_){clearPolyline();e->accept();return;}
+   if(e->key()==Qt::Key_Escape){
+    if(transformDragging_){cancelSelectionTransform();e->accept();return;}
+    if(polylineDrawing_){clearPolyline();e->accept();return;}
    if(marqueeActive_){clearMarquee();e->accept();return;}
    if(!busy()){if(requestSelectTool)requestSelectTool();e->accept();return;}
    if(shapeDragging_){clearShapePreview();e->accept();return;}
