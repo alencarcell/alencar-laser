@@ -3139,7 +3139,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   preview->setAlignment(Qt::AlignCenter);
   preview->setStyleSheet("background:#fff;color:#202020;border:1px solid #666;");
   layout->addWidget(preview,1);
-  auto* information=new QLabel("Limite 80 mil nós. Arquivo de imagem original nunca é alterado.");
+  auto* information=new QLabel("Limite 50 mil nós / 1000 contornos. Arquivo original preservado.");
   information->setWordWrap(true);layout->addWidget(information);
   auto* previewButton=new QPushButton("Previsualizar vetores (roxo)");layout->addWidget(previewButton);
   auto* actions=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
@@ -3188,12 +3188,12 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto contours=std::move(prepared->contours);
   for(auto& poly:contours)for(auto& p:poly){p.x+=anchor.left();p.y+=anchor.top();}
   const int count=int(contours.size());
-  view.editor.addContours(std::move(contours),true,layers->currentData().toInt());
+  view.editor.addContours(std::move(contours),true,layers->currentData().toInt(),true);
   view.setRasterWidthMm(width->value());
   view.clearSelection();view.invalidateSelectionCache();view.rebuild();
   recoveryPolicy_.edited();captureEvent("image_trace_created",count);
   refresh();
-  status->setText(QString("%1 contornos adicionados. Imagem original somente como referencia.").arg(count));
+  status->setText(QString("%1 contornos adicionados e agrupados. Clique Desagrupar para editar individualmente.").arg(count));
  }
  void openOther(){
   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
