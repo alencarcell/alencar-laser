@@ -262,3 +262,15 @@ Registrar mudanças, testes e pendências.
 - Novo teste Qt `--scissor-closures-19-8-test` + switch `-SomenteCasoReal` e inclusão no gate integral; casos de anel isolado e cruzamentos, hover não destrutivo, undo, centro, paleta e XML sintético de Rect Cr.
 - Validar no Windows primeiro `git status --short`, `git fetch origin` e (sem mudanças locais pendentes) `git switch --track origin/fix/tesoura-fechos-lbrn2-selecao-19-8`. Depois `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteCasoReal`. Com PASS, rodar `-SomenteCamadas`, `-SomenteImportacao`, `-Abrir`.
 - Testar mouse no `TESTE TESOURA.alaser` original aberto em cópia de trabalho e fazer Ctrl+Z; não conectar a máquina física. O relatório técnico está em `DESENVOLVIMENTO/ESPECIFICACOES/CASO_REAL_TESOURA_20261028.md`.
+
+
+## 28/10/2026 — LBRN2 real SUPORTE PRA ALEXA (PR #9 em rascunho)
+
+- Arquivo recebido/analisado: `SUPORTE PRA ALEXA_backup.lbrn2` (42.185 bytes, LightBurn 2.1.00, sha256 `3336269e9bae2aa5cb2778123ff7ffea2ea1a8a515d2aca648fb44e22ebbad06`). Original do usuário preservado, NÃO inserido no GitHub.
+- Resultado da análise independente Python: 20 Shape XML = 13 Path, 4 Rect, 3 Group; saem 17 formas editáveis/1.331 nós com curvas Bézier amostradas; 13 fechadas, 4 abertas, 3 grupos/6 objetos agrupados; 7 Path compactados em LineClosed, 4 Path referenciam PrimID compartilhado sem PrimList local (IDs 1,6,8).
+- Diagnóstico de causa: importador anterior não aceitava `PrimList=LineClosed` nem buscava referências `PrimID`/`VertID` compartilhadas. Além disso, teste sintético antigo exigia elipse 96, apesar do importador ter evoluído para 384 pontos.
+- Branch `fix/lbrn2-real-shared-primitives-19-8` derivada de `fix/tesoura-fechos-lbrn2-selecao-19-8`; PR #9 draft. Importador em `src/lightburn_geometry_import.hpp` já implementa LineClosed/LineOpen e duas passagens de resolução, rejeitando IDs conflitantes/ausentes; preserva grupos em EditorState.
+- Qt ganhou fixture sintetizada (não copia a arte do cliente), teste `--lbrn2-file-19-8-test` com hash conhecido e contagens esperadas, modo de resultado JSON. Script Windows aceita `-ArquivoLbrn2` junto a `-SomenteImportacao` ou `-Abrir`.
+- **Status: Código publicado, scanner estrutural PASS, leitura Python do arquivo real PASS; SEM compilação/teste Qt Windows nesta branch.** Não homologar, não fazer merge, não instalar antes de PASS.
+- Referência: `DESENVOLVIMENTO/ESPECIFICACOES/IMPORTACAO_REAL_SUPORTE_ALEXA_LBRN2_19_8.md`.
+- Comandos: conferir `git status --short`, `git fetch origin`, `git switch --track origin/fix/lbrn2-real-shared-primitives-19-8` (se não houver mudanças locais a preservar), depois `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteImportacao -ArquivoLbrn2 "CAMINHO_REAL_DO_ARQUIVO"`; se PASS, `-Abrir` com o mesmo parâmetro. Manter a máquina desconectada.
