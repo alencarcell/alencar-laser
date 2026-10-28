@@ -1788,6 +1788,7 @@ public:
  QLabel* transportHint_=nullptr;
   std::vector<QPushButton*> layerPalette_;
   QComboBox* layerMode_=nullptr;
+  QVBoxLayout* activeLayerRows_=nullptr;
   std::vector<QShortcut*> editingShortcuts_;
  bool machineConnected()const{return serial_.connected()||(wifi_&&wifi_->state()==QAbstractSocket::ConnectedState);}
  bool wifiConnected()const{return wifi_&&wifi_->state()==QAbstractSocket::ConnectedState;}
@@ -2411,6 +2412,28 @@ public:
   auto* layersTab=new QWidget;
   auto* inspector=new QVBoxLayout(layersTab);inspector->setContentsMargins(8,8,8,8);inspector->setSpacing(6);
   inspector->addWidget(titleLabel("CAMADAS E VISIBILIDADE"));
+  auto* activeHelp=new QLabel("Em uso | S: saída virtual · V: ver · A: ar (sem comando físico)");
+  activeHelp->setWordWrap(true);activeHelp->setObjectName("brandSub");inspector->addWidget(activeHelp);
+  auto* activeBox=new QWidget;activeBox->setObjectName("activeLayerList");
+  activeLayerRows_=new QVBoxLayout(activeBox);activeLayerRows_->setContentsMargins(0,0,0,0);
+  activeLayerRows_->setSpacing(3);inspector->addWidget(activeBox);
+  auto* toolLayerRow=new QHBoxLayout;
+  for(int tid:{1001,1002}){
+   auto* b=new QPushButton(tid==1001?"T1 · Guia":"T2 · Moldura");
+   b->setObjectName(tid==1001?"add_tool_layer_T1":"add_tool_layer_T2");
+   b->setToolTip("Camada auxiliar sempre fora da simulacao e da emissao.");
+   toolLayerRow->addWidget(b);
+   connect(b,&QPushButton::clicked,this,[this,tid]{
+    run([this,tid]{
+     if(!view.editor.state().layers.count(tid)){
+      view.editor.addLayer(tid,tid==1001?"T1 · Guias":"T2 · Molduras");
+      view.editor.setLayerPreviewFlags(tid,false,false);
+     }
+     refresh();layers->setCurrentIndex(layers->findData(tid));
+    });
+   });
+  }
+  inspector->addLayout(toolLayerRow);
   layers=new QComboBox;layers->setObjectName("layers");layers->setMinimumWidth(160);inspector->addWidget(layers);
   visible=new QCheckBox("Visível");locked=new QCheckBox("Bloqueada");
   auto* flagRow=new QHBoxLayout;flagRow->addWidget(visible);flagRow->addWidget(locked);inspector->addLayout(flagRow);
@@ -2433,7 +2456,9 @@ public:
   inspector->addWidget(layerName);
   auto* layerActions=new QHBoxLayout;layerActions->setSpacing(4);
   add(layerActions,"add_layer","Nova camada",[this]{
-   int id=view.editor.state().layers.rbegin()->first+1;
+   int id=0;for(const auto& [candidate,unused]:view.editor.state().layers)
+    if(candidate>=id&&candidate<1000)id=candidate+1;
+   if(id>=1000)throw std::runtime_error("Limite de camadas normais atingido.");
     const QString name=layerName->text().trimmed();
     view.editor.addLayer(id,(name.isEmpty()?QString("Camada %1").arg(id):name).toStdString());
     refresh();layers->setCurrentIndex(layers->findData(id));
@@ -3020,6 +3045,59 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
  void refresh(){
   int current=layers->currentData().toInt();refreshing=true;layers->clear();for(const auto& [id,l]:view.editor.state().layers)layers->addItem(QString::fromStdString(l.name),id);
   int ix=layers->findData(current);layers->setCurrentIndex(ix<0?0:ix);refreshing=false;refreshFlags();
+  if(activeLayerRows_){
+   while(QLayoutItem* item=activeLayerRows_->takeAt(0)){
+    if(item->widget())delete item->widget();
+    delete item;
+   }
+   std::map<int,int> count;
+   for(const auto& c:view.editor.state().doc.contours){
+    auto it=view.editor.state().objects.find(c.key.object);
+    if(it!=view.editor.state().objects.end())++count[it->second.layer];
+   }
+   for(const auto& [id,layer]:view.editor.state().layers){
+    if(!count.count(id)&&id!=1001&&id!=1002)continue;
+    const bool tool=id==1001||id==1002;
+    auto* row=new QWidget;row->setObjectName(QString("layer_row_%1").arg(id));
+    auto* line=new QHBoxLayout(row);line->setContentsMargins(0,0,0,0);line->setSpacing(3);
+    auto* label=new QPushButton(QString("%1 (%2)").arg(QString::fromStdString(layer.name)).arg(count[id]));
+    label->setObjectName(QString("layer_select_%1").arg(id));
+    label->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Preferred);
+    line->addWidget(label,1);
+    connect(label,&QPushButton::clicked,this,[this,id]{
+     const int ix=layers->findData(id);if(ix>=0)layers->setCurrentIndex(ix);
+    });
+    auto flag=[&](const char* text,bool checked,const QString& tip){
+     auto* box=new QCheckBox(QString::fromLatin1(text));box->setChecked(checked);
+     box->setObjectName(QString("layer_%1_%2").arg(QString::fromLatin1(text)).arg(id));
+     box->setToolTip(tip);box->setStyleSheet("QCheckBox {padding:0; spacing:2px;}");
+     line->addWidget(box);return box;
+    };
+    auto* output=flag("S",!tool&&layer.output,"Saída apenas na simulação");
+    auto* show=flag("V",layer.visible,"Visibilidade da camada no editor");
+    auto* air=flag("A",layer.air,"Anotação de assistência de ar (sem ação física)");
+    output->setEnabled(!tool);air->setEnabled(!tool);
+    connect(output,&QCheckBox::toggled,this,[this,id](bool checked){
+     run([this,id,checked]{
+      const auto l=view.editor.state().layers.at(id);
+      view.editor.setLayerPreviewFlags(id,checked,l.air);
+     });
+    });
+    connect(show,&QCheckBox::toggled,this,[this,id](bool checked){
+     run([this,id,checked]{
+      const auto l=view.editor.state().layers.at(id);
+      view.editor.setLayerFlags(id,checked,l.locked);view.rebuild();
+     });
+    });
+    connect(air,&QCheckBox::toggled,this,[this,id](bool checked){
+     run([this,id,checked]{
+      const auto l=view.editor.state().layers.at(id);
+      view.editor.setLayerPreviewFlags(id,l.output,checked);
+     });
+    });
+    activeLayerRows_->addWidget(row);
+   }
+  }
   for(size_t i=0;i<layerPalette_.size();++i){
    auto* b=layerPalette_[i];b->setEnabled(true);
    b->setChecked(int(i)==layers->currentData().toInt());
