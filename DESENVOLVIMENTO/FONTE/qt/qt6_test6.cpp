@@ -202,10 +202,11 @@ class QtEditorLab final:public QGraphicsView{
  std::vector<QGraphicsPathItem*> shapePreviewItems_;
  // Alcas independentes dos dados; commit unico no mouseRelease.
  bool transformDragging_=false;
- int transformHandle_=-1; // 0..7 tamanho; 8..11 rotacao
+ int transformHandle_=-1; // 0..7 tamanho; 8..11 rotacao; 12 move pelo centro
  QRectF transformBounds_;
  QPointF transformAnchor_{};
  double transformSx_=1.,transformSy_=1.,transformAngle_=0.;
+ QPointF transformMoveDelta_{};
  std::vector<int> transformIds_;
  std::vector<QGraphicsPathItem*> transformItems_;
  bool nativeContourPressing_=false;
@@ -432,7 +433,7 @@ class QtEditorLab final:public QGraphicsView{
   if(!has)return {};
   return QRectF(QPointF(minX,minY),QPointF(maxX,maxY));
  }
- std::array<QPointF,12> selectionHandles(const QRectF& bounds)const{
+ std::array<QPointF,13> selectionHandles(const QRectF& bounds)const{
   const QPointF tl=viewportTransform().map(bounds.topLeft());
   const QPointF br=viewportTransform().map(bounds.bottomRight());
   const double x0=tl.x(),x1=br.x(),y0=tl.y(),y1=br.y();
@@ -441,7 +442,8 @@ class QtEditorLab final:public QGraphicsView{
    QPointF(x1,cy),QPointF(x1,y1),QPointF(cx,y1),
    QPointF(x0,y1),QPointF(x0,cy),
    QPointF(x0-17,y0-17),QPointF(x1+17,y0-17),
-   QPointF(x1+17,y1+17),QPointF(x0-17,y1+17)};
+   QPointF(x1+17,y1+17),QPointF(x0-17,y1+17),
+   QPointF(cx,cy)};
  }
  void paintSelectionHandles(QPainter* p)const{
   if(tool!=Tool::Select||selected.empty()||nativeMode_)return;
@@ -453,11 +455,15 @@ class QtEditorLab final:public QGraphicsView{
   p->save();p->resetTransform();p->setBrush(Qt::NoBrush);
   QPen edge(QColor(238,154,60),1,Qt::DashLine);edge.setCosmetic(true);p->setPen(edge);
   p->drawRect(pixel.normalized());
-  for(int h=0;h<12;++h){
+  for(int h=0;h<13;++h){
    const QPointF point=handles[size_t(h)];
    p->setPen(QPen(QColor("#182633"),1));
-   p->setBrush(h>=8?QColor("#49BCF4"):QColor("#F3F5F7"));
-   if(h>=8)p->drawEllipse(point,4.,4.);
+   p->setBrush(h==12?QColor("#FFAE45"):(h>=8?QColor("#49BCF4"):QColor("#F3F5F7")));
+   if(h==12){
+    p->drawRect(QRectF(point-QPointF(5.,5.),QSizeF(10.,10.)));
+    p->drawLine(point+QPointF(-3,0),point+QPointF(3,0));
+    p->drawLine(point+QPointF(0,-3),point+QPointF(0,3));
+   }else if(h>=8)p->drawEllipse(point,4.,4.);
    else p->drawRect(QRectF(point-QPointF(4.,4.),QSizeF(8.,8.)));
   }
   p->restore();
@@ -466,7 +472,7 @@ class QtEditorLab final:public QGraphicsView{
   for(auto* item:transformItems_)item->setTransform(QTransform());
   transformItems_.clear();transformIds_.clear();
   transformDragging_=false;transformHandle_=-1;
-  transformSx_=transformSy_=1.;transformAngle_=0.;
+  transformSx_=transformSy_=1.;transformAngle_=0.;transformMoveDelta_={};
   viewport()->update();
  }
  bool beginSelectionTransform(QPointF position){
@@ -474,7 +480,9 @@ class QtEditorLab final:public QGraphicsView{
   const auto bounds=selectedBounds();if(!bounds)return false;
   const auto handles=selectionHandles(*bounds);
   int h=-1;double distance=11.;
-  for(int i=0;i<12;++i){
+  // Preferir o ponto central quando a selecao e grande suficiente.
+  if(QLineF(position,handles[12]).length()<=7.){h=12;distance=7.;}
+  if(h<0)for(int i=0;i<12;++i){
    const double d=QLineF(position,handles[size_t(i)]).length();
    if(d<distance){h=i;distance=d;}
   }
@@ -495,7 +503,19 @@ class QtEditorLab final:public QGraphicsView{
  void updateSelectionTransform(QPointF pointer,Qt::KeyboardModifiers mods){
   if(!transformDragging_)return;
   QTransform t;
-  if(transformHandle_>=8){
+  if(transformHandle_==12){
+   const QPointF origin=viewportTransform().map(transformBounds_.center());
+   QPointF delta=mapToScene(pointer.toPoint())-transformBounds_.center();
+   // LightBurn: Shift limita deslocamento em 0/45/90 graus.
+   if(mods.testFlag(Qt::ShiftModifier)){
+    const double angle=std::atan2(delta.y(),delta.x());
+    const double snapped=std::round(angle/(std::numbers::pi/4.))*(std::numbers::pi/4.);
+    const double length=std::hypot(delta.x(),delta.y());
+    delta=QPointF(length*std::cos(snapped),length*std::sin(snapped));
+   }
+   transformMoveDelta_=delta;
+   t.translate(delta.x(),delta.y());(void)origin;
+  }else if(transformHandle_>=8){
    const QPointF pivot=transformBounds_.center();
    const auto handles=selectionHandles(transformBounds_);
    const QPointF initial=handles[size_t(transformHandle_)];
@@ -549,8 +569,12 @@ class QtEditorLab final:public QGraphicsView{
   const auto ids=transformIds_;
   const QPointF pivot=h>=8?transformBounds_.center():transformAnchor_;
   const double sx=transformSx_,sy=transformSy_,angle=transformAngle_;
+  const QPointF move=transformMoveDelta_;
   cancelSelectionTransform();
-  if(h>=8){
+  if(h==12){
+   if(QLineF(QPointF{},move).length()<1e-8)return;
+   editor.moveObjects(ids,fromQt(move));
+  }else if(h>=8){
    if(std::abs(angle)<.01)return;
    editor.rotateObjects(ids,fromQt(pivot),angle);
   }else{
@@ -558,7 +582,7 @@ class QtEditorLab final:public QGraphicsView{
    editor.scaleObjects(ids,fromQt(pivot),sx,sy);
   }
   rebuild();
-  if(diagnosticEvent)diagnosticEvent(h>=8?"selection_rotated":"selection_scaled",int(ids.size()));
+  if(diagnosticEvent)diagnosticEvent(h==12?"shapes_moved":h>=8?"selection_rotated":"selection_scaled",int(ids.size()));
   if(stateChanged)stateChanged();
  }
  void clearShapePreview(){
