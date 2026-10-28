@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [string]$ArquivoLbrn2 = "", [switch]$SomenteRastreio)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -60,6 +60,19 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteRastreio) {
+        Write-Host 'RASTREIO: imagem P&B, detalhes pequenos, preview, agrupamento e diagnostico Tesoura.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt rastreio 19.8'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\rastreio'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --trace-editor-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Rastreamento e Diagnosticos' (Join-Path $destino 'RESULTADO_RASTREIO_EDITOR_19_8.json')
+        Write-Host 'Rastreamento/Diagnosticos PASS sintetico. Teste manual obrigatorio.' -ForegroundColor Green
+        return
+    }
     if ($SomenteCasoReal) {
         Write-Host 'TESTE REAL: fecho duplicado Tesoura, alca central, paleta e LBRN2 arredondado.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test7_qt6
@@ -227,6 +240,10 @@ try {
     New-Item -ItemType Directory -Path $dirCasoReal -Force | Out-Null
     & $app --scissor-closures-19-8-test $fixture $dirCasoReal
     Checar-ResultadoQt 'Regressao caso real Tesoura/Alca/Paleta/LBRN2' (Join-Path $dirCasoReal 'RESULTADO_CASO_REAL_19_8.json')
+    $dirTrace = Join-Path $destino 'rastreio'
+    New-Item -ItemType Directory -Path $dirTrace -Force | Out-Null
+    & $app --trace-editor-19-8-test $fixture $dirTrace
+    Checar-ResultadoQt 'Rastreamento e Diagnosticos 19.8' (Join-Path $dirTrace 'RESULTADO_RASTREIO_EDITOR_19_8.json')
     Write-Host 'BUILD E REGRESSOES AUTOMATIZADAS PASSARAM. AVALIACAO VISUAL AINDA NECESSARIA.' -ForegroundColor Green
     if ($Abrir) {
         Write-Host 'Abrindo editor em modo de desenvolvimento; mantenha o laser desconectado.' -ForegroundColor Yellow
