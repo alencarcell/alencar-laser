@@ -100,7 +100,7 @@ public:
  }
  // Insercao vetorial atomica: todas as letras/contornos contam como UMA acao
  // de desfazer, sem criar historico para cada glifo separadamente.
- std::vector<int> addContours(std::vector<std::vector<Pt>> contours,bool closed,int layerId=0){
+ std::vector<int> addContours(std::vector<std::vector<Pt>> contours,bool closed,int layerId=0,bool asGroup=false){
   if(contours.empty()||contours.size()>1000)throw std::runtime_error("contornos em lote fora do limite");
   size_t nodes=0;
   for(const auto& c:contours){
@@ -114,6 +114,7 @@ public:
    auto li=state.layers.find(layerId);
    if(li==state.layers.end()||!li->second.visible||li->second.locked)
     throw std::runtime_error("camada de texto bloqueada ou invisivel");
+   const int groupId=asGroup&&contours.size()>1?state.nextGroup++:0;
    int next=start;
    for(const auto& polygon:contours){
     Contour contour;contour.key={next,0};contour.closed=closed;
@@ -123,7 +124,7 @@ public:
      contour.nodes.push_back({state.doc.nextId++,point});
     }
     state.doc.contours.push_back(std::move(contour));
-    state.objects[next]={layerId,0};
+    state.objects[next]={layerId,groupId};
     ids.push_back(next++);
    }
   });return ids;
