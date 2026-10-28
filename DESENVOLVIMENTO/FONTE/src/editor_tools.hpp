@@ -20,6 +20,7 @@ struct Layer {
  double speedMmMin=3000.0,powerPercent=20.0; // valores virtuais, NUNCA hardware
  int passes=1;
  std::string powerMode="M4"; // M4=dinamica / M3=constante (somente metadados)
+ bool optimizeTravel=true; // reordenacao VIRTUAL na previa apenas
 };
 struct Meta {int layer=0,group=0;};
 struct EditorState {Document doc;std::map<int,Meta> objects;std::map<int,Layer> layers;int nextGroup=1;};
@@ -434,12 +435,13 @@ public:
   if(present.name==desired.name&&present.mode==desired.mode&&
      present.speedMmMin==desired.speedMmMin&&
      present.powerPercent==desired.powerPercent&&present.passes==desired.passes&&
-     present.powerMode==desired.powerMode)return;
+     present.powerMode==desired.powerMode&&present.optimizeTravel==desired.optimizeTravel)return;
   change([&](EditorState& state){
    auto& item=state.layers.at(id);
    item.name=desired.name;item.mode=desired.mode;
    item.speedMmMin=desired.speedMmMin;item.powerPercent=desired.powerPercent;
    item.passes=desired.passes;item.powerMode=desired.powerMode;
+   item.optimizeTravel=desired.optimizeTravel;
   },false);
  }
  void setLayerMode(int id,const std::string& mode){
@@ -496,7 +498,7 @@ inline boost::json::object metadata(const EditorState& s){
  using namespace boost::json;object m;m["schema"]="editor-meta-1";m["nextGroup"]=s.nextGroup;array layers;
  for(auto&[id,l]:s.layers)layers.push_back(object{{"id",id},{"name",l.name},{"visible",l.visible},{"locked",l.locked},{"mode",l.mode},{"output",l.output},{"air",l.air},
    {"speedMmMin",l.speedMmMin},{"powerPercent",l.powerPercent},
-   {"passes",l.passes},{"powerMode",l.powerMode}});
+   {"passes",l.passes},{"powerMode",l.powerMode},{"optimizeTravel",l.optimizeTravel}});
  m["layers"]=std::move(layers);array objects;
  for(auto&[id,o]:s.objects)objects.push_back(object{{"id",id},{"layer",o.layer},{"group",o.group}});
  m["objects"]=std::move(objects);return m;
@@ -513,7 +515,8 @@ inline EditorState fromMetadata(Document d,const boost::json::value& v){
     x.if_contains("speedMmMin")?x.at("speedMmMin").to_number<double>():3000.0,
     x.if_contains("powerPercent")?x.at("powerPercent").to_number<double>():20.0,
     x.if_contains("passes")?int(x.at("passes").as_int64()):1,
-    x.if_contains("powerMode")?std::string(x.at("powerMode").as_string()):"M4"};}
+    x.if_contains("powerMode")?std::string(x.at("powerMode").as_string()):"M4",
+    x.if_contains("optimizeTravel")?x.at("optimizeTravel").as_bool():true};}
  for(const auto& item:m.at("objects").as_array()){const auto& x=item.as_object();int id=int(x.at("id").as_int64());if(s.objects.count(id))throw std::runtime_error("duplicate object meta");s.objects[id]={int(x.at("layer").as_int64()),int(x.at("group").as_int64())};}
  validate(s);return s;
 }
