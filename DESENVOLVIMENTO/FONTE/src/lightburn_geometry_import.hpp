@@ -21,6 +21,7 @@ struct GeometryShape {
  std::vector<Pt> points;
  int layer=0;
  bool closed=true;
+ int group=0;
 };
 struct ParseNode{
  QString type;
@@ -229,12 +230,15 @@ inline std::pair<std::vector<Pt>,bool> decodePath(const ParseNode& n){
 }
 
 inline void flatten(const ParseNode& n,const QTransform& parent,
-                    std::vector<GeometryShape>& result){
+                    std::vector<GeometryShape>& result,
+                    int& nextGroup,int inheritedGroup=0){
  // A composicao Qt opera com coordenadas como vetores linha:
  // transformacao local PRIMEIRO, grupo pai DEPOIS.
  const QTransform total=n.xform*parent;
  if(n.type=="Group"){
-  for(const auto& c:n.children)flatten(c,total,result);
+  // EditorState suporta um nivel de agrupamento. Preservar grupo externo.
+  const int group=inheritedGroup>0?inheritedGroup:nextGroup++;
+  for(const auto& c:n.children)flatten(c,total,result,nextGroup,group);
   return;
  }
  if(!n.children.empty())throw std::runtime_error("Forma com filhos inesperados");
@@ -264,7 +268,7 @@ inline void flatten(const ParseNode& n,const QTransform& parent,
     throw std::runtime_error("Path fora dos limites seguros");
    p={q.x(),q.y()};
   }
-  result.push_back({std::move(pts),n.cutIndex,converted.second});
+  result.push_back({std::move(pts),n.cutIndex,converted.second,inheritedGroup});
   return;
  }else if(n.type=="Ellipse"){
   constexpr int steps=384;
@@ -279,7 +283,7 @@ inline void flatten(const ParseNode& n,const QTransform& parent,
    throw std::runtime_error("Posicao transformada fora dos limites seguros");
   p={q.x(),q.y()};
  }
- result.push_back({std::move(pts),n.cutIndex,true});
+ result.push_back({std::move(pts),n.cutIndex,true,inheritedGroup});
 }
 inline ImportResult readGeometry(const QString& path){
  QFile file(path);
@@ -310,7 +314,8 @@ inline ImportResult readGeometry(const QString& path){
  for(const auto& root:roots)gatherSharedGeometry(root,sharedVertices,sharedPrimitives);
  for(auto& root:roots)resolveSharedGeometry(root,sharedVertices,sharedPrimitives);
  std::vector<GeometryShape> shapes;
- for(const auto& root:roots)flatten(root,QTransform(),shapes);
+ int nextGroup=1;
+ for(const auto& root:roots)flatten(root,QTransform(),shapes,nextGroup);
  if(shapes.empty())throw std::runtime_error("Projeto sem formas vetoriais compativeis");
  if(shapes.size()>30000)throw std::runtime_error("Limite de objetos excedido");
  // Construir documento isolado diretamente, sem registrar uma copia integral
@@ -327,8 +332,9 @@ inline ImportResult readGeometry(const QString& path){
   Contour contour;contour.key={++object,0};contour.closed=shape.closed;
   for(Pt p:shape.points)contour.nodes.push_back({state.doc.nextId++,p});
   state.doc.contours.push_back(std::move(contour));
-  state.objects[object]={shape.layer,0};
+  state.objects[object]={shape.layer,shape.group};
  }
+ state.nextGroup=nextGroup;
  validate(state);
  return ImportResult(std::move(state),int(shapes.size()));
 }
