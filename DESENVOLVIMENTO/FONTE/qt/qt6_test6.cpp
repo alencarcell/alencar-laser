@@ -3486,6 +3486,69 @@ static QJsonObject newDrawingTools198Test(const QString& directory){
          {"text_tool_enabled",true},{"hardware_commands_sent",false}};
 }
 
+// Qt GUI: texto direto na mesa, proporcao, escala livre e rotacao.
+static QJsonObject inlineTransforms198Test(const QString& directory){
+ QDir().mkpath(directory);
+ LabWindow textWindow(Document{});textWindow.show();QApplication::processEvents();
+ auto& tv=textWindow.view;tv.setTransform(QTransform::fromScale(4.,4.));
+ tv.centerOn(QPointF(80,65));QApplication::processEvents();
+ clickButton(textWindow,"text");clickScene(textWindow,{80,65});
+ QLineEdit* entry=textWindow.findChild<QLineEdit*>("inlineTextEdit");
+ check(entry&&entry->isVisible(),"Texto nao apareceu dentro da mesa");
+ check(entry->parentWidget()==tv.viewport(),"Texto nao pertence a viewport");
+ check(entry->styleSheet().contains("background:transparent"),"Texto nao e transparente");
+ QTest::keyClicks(entry,"Teste");QApplication::processEvents();
+ check(tv.editor.state().doc.contours.empty(),"Texto em digitacao alterou o documento");
+ QTest::keyClick(entry,Qt::Key_Return);QApplication::processEvents();
+ check(!textWindow.findChild<QLineEdit*>("inlineTextEdit")||
+       !textWindow.findChild<QLineEdit*>("inlineTextEdit")->isVisible(),
+       "Campo de texto ficou aberto apos concluir");
+ check(!tv.editor.state().doc.contours.empty(),"Texto nao criou contornos vetoriais");
+ check(tv.editor.undoCount()==1,"Texto nao criou transacao unica");
+ pressKey(textWindow,Qt::Key_Z,Qt::ControlModifier);
+ check(tv.editor.state().doc.contours.empty(),"Undo do texto falhou");
+ LabWindow transformWindow(Document{});transformWindow.show();QApplication::processEvents();
+ auto& v=transformWindow.view;v.setTransform(QTransform::fromScale(5.,5.));
+ v.centerOn(QPointF(60,50));QApplication::processEvents();
+ const int id=v.editor.rectangle({40,40},20,10);v.rebuild();
+ clickButton(transformWindow,"select");clickScene(transformWindow,{50,40});
+ check(v.selected.count(id)>0,"Selecao do retangulo nao funcionou");
+ const auto before=v.editor.undoCount();
+ auto drag=[&](QPoint press,QPoint target,Qt::KeyboardModifiers mods=Qt::NoModifier){
+  QTest::mousePress(v.viewport(),Qt::LeftButton,mods,press);
+  const QPointF local(target),global(v.viewport()->mapToGlobal(target));
+  QMouseEvent moved(QEvent::MouseMove,local,global,Qt::NoButton,Qt::LeftButton,mods);
+  QApplication::sendEvent(v.viewport(),&moved);QApplication::processEvents();
+  QTest::mouseRelease(v.viewport(),Qt::LeftButton,mods,target);
+  QApplication::processEvents();
+ };
+ drag(v.mapFromScene({60,40}),v.mapFromScene({80,30}));
+ check(v.editor.undoCount()==before+1,"Escala nao criou um passo de undo");
+ const Contour* scaled=get(v.editor.state().doc,{id,0});
+ check(scaled!=nullptr,"Escala perdeu objeto");
+ double minX=1e20,minY=1e20,maxX=-1e20,maxY=-1e20;
+ for(const auto& n:scaled->nodes){
+  minX=std::min(minX,n.p.x);maxX=std::max(maxX,n.p.x);
+  minY=std::min(minY,n.p.y);maxY=std::max(maxY,n.p.y);
+ }
+ check(std::abs((maxX-minX)-40.)<1.,"Escala proporcional largura incorreta");
+ check(std::abs((maxY-minY)-20.)<1.,"Escala proporcional altura incorreta");
+ const auto stateScaled=stateText(v.editor.state());
+ const QPointF center=v.mapFromScene({60,40});
+ const QPointF rotateStart=v.mapFromScene({80,30})+QPointF(17,-17);
+ const QPointF d=rotateStart-center;
+ const QPointF rotateEnd=center+QPointF(-d.y(),d.x());
+ drag(rotateStart.toPoint(),rotateEnd.toPoint());
+ check(v.editor.undoCount()==before+2,"Rotacao nao criou passo de undo");
+ check(stateText(v.editor.state())!=stateScaled,"Rotacao nao alterou vertices");
+ pressKey(transformWindow,Qt::Key_Z,Qt::ControlModifier);
+ check(stateText(v.editor.state())==stateScaled,"Undo da rotacao nao restaurou desenho");
+ transformWindow.grab().save(directory+"/TRANSFORMACOES_EDITOR_19_8.png");
+ textWindow.grab().save(directory+"/TEXTO_DIRETO_19_8.png");
+ return {{"status","PASS"},{"inline_text",true},{"transparent_overlay",true},
+  {"text_atomic_undo",true},{"scale_proportional",true},
+  {"rotation_handle",true},{"undo_rotate",true},{"hardware_commands_sent",false}};
+}
 static QJsonObject editorMultitool198Test(const QString& directory){
  // Gesto multi-nos, fechamento e linha por arraste legada.
  LabWindow w(Document{});w.show();QApplication::processEvents();
@@ -3650,6 +3713,13 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--inline-transforms-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=inlineTransforms198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_TEXTO_TRANSFORMACOES_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--editor-multitool-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=editorMultitool198Test(out);}
