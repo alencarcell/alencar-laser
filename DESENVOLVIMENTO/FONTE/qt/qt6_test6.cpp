@@ -3241,6 +3241,81 @@ static QJsonObject newDrawingTools198Test(const QString& directory){
          {"vector_text_atomic",true},{"vector_text_undo_redo",true},
          {"text_tool_enabled",true},{"hardware_commands_sent",false}};
 }
+
+static QJsonObject editorMultitool198Test(const QString& directory){
+ // Gesto multi-nos, fechamento e linha por arraste legada.
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ auto& v=w.view;
+ v.setTransform(QTransform::fromScale(4.,4.));v.centerOn(QPointF(80,55));
+ QApplication::processEvents();
+ clickButton(w,"line");
+ clickScene(w,{20,20});clickScene(w,{40,20});clickScene(w,{40,40});
+ check(v.isPolylineActive()&&v.polylineVertexCount()==3,
+       "Linha continua nao manteve os tres nos no mesmo gesto");
+ clickScene(w,{20,20});
+ check(!v.isPolylineActive(),"Fechamento na origem nao finalizou a linha");
+ const auto* closed=get(v.editor.state().doc,{v.lastCreated(),0});
+ check(closed&&closed->closed&&closed->nodes.size()==3,
+       "Fechamento da linha nao gerou um contorno unico");
+ check(v.editor.undoCount()==1,"Linha fechada criou multiplas acoes de undo");
+ pressKey(w,Qt::Key_Z,Qt::ControlModifier);
+ check(v.editor.state().doc.contours.empty(),"Undo da linha fechada nao funcionou");
+ pressKey(w,Qt::Key_Y,Qt::ControlModifier);
+ check(v.editor.state().doc.contours.size()==1,"Redo da linha fechada nao funcionou");
+ clickScene(w,{48,20});clickScene(w,{60,23});clickScene(w,{67,31});
+ QTest::mouseClick(v.viewport(),Qt::RightButton,Qt::NoModifier,v.mapFromScene(QPointF(67,31)));
+ QApplication::processEvents();
+ check(!v.isPolylineActive(),"Botao direito nao encerrou a polilinha");
+ const auto* opened=get(v.editor.state().doc,{v.lastCreated(),0});
+ check(opened&&!opened->closed&&opened->nodes.size()==3,
+       "Botao direito deveria salvar um caminho aberto com tres nos");
+ const QPoint a=v.mapFromScene(QPointF(75,67)),b=v.mapFromScene(QPointF(87,79));
+ QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,a);
+ QTest::mouseMove(v.viewport(),b);
+ QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,b);
+ QApplication::processEvents();
+ const auto* legacy=get(v.editor.state().doc,{v.lastCreated(),0});
+ check(legacy&&!legacy->closed&&legacy->nodes.size()==2,
+       "Gesto antigo de arrastar uma linha deixou de funcionar");
+ clickScene(w,{80,25});check(v.isPolylineActive(),"Linha nao iniciou para cancelar");
+ pressKey(w,Qt::Key_Escape);
+ check(!v.isPolylineActive(),"Esc nao cancelou a linha");
+ // Caixa: direita contem; esquerda cruza, em cima de geometria real.
+ LabWindow selection(Document{});selection.show();QApplication::processEvents();
+ auto& sv=selection.view;
+ sv.setTransform(QTransform::fromScale(4.,4.));sv.centerOn(QPointF(100,65));
+ const int first=sv.editor.rectangle({50,50},20,20);
+ const int second=sv.editor.rectangle({100,50},20,20);
+ const int third=sv.editor.rectangle({150,50},20,20);
+ sv.rebuild();QApplication::processEvents();
+ auto dragBox=[&](QPointF from,QPointF to,Qt::KeyboardModifiers mod=Qt::NoModifier){
+  const QPoint x=sv.mapFromScene(from),y=sv.mapFromScene(to);
+  QTest::mousePress(sv.viewport(),Qt::LeftButton,mod,x);
+  QApplication::processEvents();
+  check(sv.isMarqueeActive(),"A caixa de selecao nao iniciou no espaco vazio");
+  QTest::mouseMove(sv.viewport(),y);QApplication::processEvents();
+  QTest::mouseRelease(sv.viewport(),Qt::LeftButton,mod,y);QApplication::processEvents();
+  check(!sv.isMarqueeActive(),"A caixa de selecao ficou ativa apos soltar");
+ };
+ dragBox({45,45},{75,75});
+ check(sv.selected.size()==1&&sv.selected.count(first),
+       "Caixa esquerda-direita nao selecionou somente forma inteiramente contida");
+ dragBox({124,54},{116,66});
+ check(sv.selected.size()==1&&sv.selected.count(second),
+       "Caixa direita-esquerda nao selecionou contorno cruzado");
+ dragBox({45,45},{75,75},Qt::ShiftModifier);
+ check(sv.selected.size()==2&&sv.selected.count(first)&&sv.selected.count(second),
+       "Shift nao acrescentou selecao por caixa");
+ pressKey(selection,Qt::Key_A,Qt::ControlModifier);
+ check(sv.selected.size()==3&&sv.selected.count(third),"Ctrl+A nao selecionou as formas");
+ pressKey(selection,Qt::Key_I,Qt::ControlModifier|Qt::ShiftModifier);
+ check(sv.selected.empty(),"Ctrl+Shift+I nao inverteu a selecao");
+ selection.grab().save(directory+"/EDITOR_MULTIFERRAMENTAS_19_8.png");
+ return {{"status","PASS"},{"line_continuous",true},
+         {"line_closed_and_open",true},{"legacy_drag",true},
+         {"marquee_enclosing_and_crossing",true},
+         {"multi_selection_modifiers",true},{"hardware_commands_sent",false}};
+}
 static QJsonObject lightburnImport198Test(const QString& directory){
  QTemporaryDir temp(QDir(directory).filePath("lbrn2_XXXXXX"));
  check(temp.isValid(),"nao criou pasta temporaria de importacao");
