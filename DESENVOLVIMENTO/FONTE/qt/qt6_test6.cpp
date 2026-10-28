@@ -4389,6 +4389,20 @@ static QJsonObject refineCurvesTrace198Test(const QString& folder){
    "Handles de Bezier nao controlam suavizacao");
  check(curves.undo()&&curves.committed().contours.empty(),"Undo Bezier falhou");
  check(curves.redo()&&curves.committed().contours.size()==1,"Redo Bezier falhou");
+ // Confirmar fluxo REAL da GUI: ativar coleta, escolher Tesoura e clicar no vazio.
+ LabWindow ui(Document{});ui.show();QApplication::processEvents();
+ auto* enabled=ui.findChild<QCheckBox*>("diagnostics_enable");
+ check(enabled!=nullptr,"Checkbox de diagnosticos ausente");
+ enabled->setChecked(true);
+ clickButton(ui,"scissors");
+ QTest::mouseClick(ui.view.viewport(),Qt::LeftButton,Qt::NoModifier,
+    ui.view.viewport()->rect().center());
+ QApplication::processEvents();
+ const auto diag=ui.captureDocument();
+ check(diag.value("scissor_attempts").toArray().size()>=1,
+    "Coleta GUI da Tesoura nao registrou clique invalido");
+ check(diag.value("counts").toObject().value("tool_scissors_activated").toInt()==1,
+    "Coleta nao registrou ativacao da Tesoura");
  traced.binary.save(folder+"/BINARIO_19_8.png");
  return {{"status","PASS"},{"r_nodes",double(textNodes)},
   {"hole_contours",int(o.size())},{"trace_contours",int(traced.contours.size())},
