@@ -1218,7 +1218,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   else if(requestToolbarTool&&action==group)requestToolbarTool("group");
   else if(requestToolbarTool&&action==ungroup)requestToolbarTool("ungroup");
   else if(requestToolbarTool&&action==rotate)requestToolbarTool("rotate_90");
-  else if(requestToolbarTool&&action==mirror)requestToolbarTool("mirror_horizontal");
+  else if(requestToolbarTool&&action==mirror)requestToolbarTool("mirror_horiz");
   e->accept();
  }
  void keyReleaseEvent(QKeyEvent* e)override{
