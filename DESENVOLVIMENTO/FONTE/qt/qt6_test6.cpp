@@ -2420,9 +2420,19 @@ public:
   auto* layersTab=new QWidget;
   auto* inspector=new QVBoxLayout(layersTab);inspector->setContentsMargins(8,8,8,8);inspector->setSpacing(6);
   inspector->addWidget(titleLabel("CAMADAS E VISIBILIDADE"));
-  auto* activeHelp=new QLabel("CAMADA                                      S   V   A");
-  activeHelp->setToolTip("S=Saida virtual | V=Visibilidade | A=Ar (apenas referencia). Duplo clique na camada edita parametros.");
-  activeHelp->setWordWrap(true);activeHelp->setObjectName("brandSub");inspector->addWidget(activeHelp);
+  // Cabecalho usa exatamente as mesmas larguras dos checkboxes da lista.
+  auto* header=new QWidget;
+  auto* headerLine=new QHBoxLayout(header);
+  headerLine->setContentsMargins(1,0,1,0);headerLine->setSpacing(2);
+  auto* headerName=new QLabel("Camada (duplo clique: configurar)");
+  headerName->setObjectName("brandSub");headerLine->addWidget(headerName,1);
+  for(const QString& code:{"S","V","A"}){
+   auto* tag=new QLabel(code);tag->setObjectName("brandSub");
+   tag->setFixedWidth(20);tag->setAlignment(Qt::AlignCenter);
+   tag->setToolTip(code=="S"?"Saida virtual":(code=="V"?"Visibilidade":"Ar, apenas referencia"));
+   headerLine->addWidget(tag,0,Qt::AlignCenter);
+  }
+  inspector->addWidget(header);
   auto* activeBox=new QWidget;activeBox->setObjectName("activeLayerList");
   activeLayerRows_=new QVBoxLayout(activeBox);activeLayerRows_->setContentsMargins(0,0,0,0);
   activeLayerRows_->setSpacing(1);inspector->addWidget(activeBox);
