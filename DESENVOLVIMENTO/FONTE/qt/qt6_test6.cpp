@@ -3,6 +3,7 @@
 #include "editor_tools.hpp"
 #include "workspace_dimensions.hpp"
 #include "lightburn_reference_inspector.hpp"
+#include "lightburn_geometry_import.hpp"
 #include "diagnostics_collector.hpp"
 #include "persistent_session_store.hpp"
 #include "recovery_policy.hpp"
@@ -24,6 +25,10 @@
 #include <QPainterPathStroker>
 #include <QPen>
 #include <QMouseEvent>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QUrl>
 #include <QWheelEvent>
 #include <QScrollBar>
 #include <QSignalBlocker>
@@ -101,6 +106,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <filesystem>
+#include <sstream>
 static const QString processInstance=QUuid::createUuid().toString(QUuid::WithoutBraces);
 using namespace alaser;
 namespace fs=std::filesystem;
@@ -190,6 +196,12 @@ class QtEditorLab final:public QGraphicsView{
  bool nativeContourPressing_=false;
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
  QGraphicsPathItem* pendingPreview_=nullptr;
+ ScissorSpanPlanner scissorPlanner_;
+ uint64_t scissorIndexVersion_=std::numeric_limits<uint64_t>::max();
+ std::optional<ScissorSpan> scissorHover_;
+ QGraphicsPathItem* scissorPreview_=nullptr;
+ uint64_t scissorHoverEvents_=0;
+ std::optional<QPoint> scissorLastHoverPosition_;
  // TESTE_12: caminho continuo e o modo seguro padrao.
  // Blocos sao EXCLUSIVAMENTE experimentais (ALENCAR_LAB_CHUNKS_EXPERIMENTAL=1).
  bool continuousPreview_=false;
@@ -510,7 +522,11 @@ public:
  QtEditorLab(Document d):QGraphicsView(),editor(std::move(d)){
   setScene(&scene_);setSceneRect(-2000,-2000,5000,5000);setRenderHints(QPainter::Antialiasing);
   setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);setTransformationAnchor(QGraphicsView::NoAnchor);
-  setMouseTracking(true);setFocusPolicy(Qt::StrongFocus);resize(780,560);
+  // QAbstractScrollArea entrega os movimentos atraves do QWidget viewport.
+  // Garantir rastreamento explicitamente no filho que recebe os eventos.
+  setMouseTracking(true);viewport()->setMouseTracking(true);
+  viewport()->setAttribute(Qt::WA_Hover,true);
+  setFocusPolicy(Qt::StrongFocus);resize(780,560);
   clock_.start();rebuild();
  }
  // Apenas objetos que trocam de estado visual devem ser modificados.
@@ -548,7 +564,7 @@ public:
  size_t directQueries()const{return picker_.directQueries();}
  void invalidateSelectionCache(){picker_.invalidate();}
  void rebuild(){
-  clearShapePreview();endChunkPreview();
+  clearScissorHover();clearShapePreview();endChunkPreview();
   scene_.clear();objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
    auto* o=scene_.addPath(pathOf(c),QPen(layerColor(editor.state().objects.at(c.key.object).layer),0));o->setZValue(1);
@@ -583,7 +599,93 @@ public:
  }
  QGraphicsPathItem* pathItem(Key k){return objects_.at(k);}
  std::optional<Key> active()const{return active_;}
- void setTool(Tool t){if(!busy()){nativeMode_=false;tool=t;viewport()->setCursor(t==Tool::Scissors?QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4):QCursor(Qt::ArrowCursor));viewport()->update();}}
+ std::optional<ScissorSpan> scissorPreview()const{return scissorHover_;}
+ uint64_t scissorHoverEventCount()const{return scissorHoverEvents_;}
+ bool scissorHoverReceivedAt(QPoint expected)const{
+  return scissorLastHoverPosition_&&*scissorLastHoverPosition_==expected;
+ }
+ std::string scissorHoverDiagnostics(QPoint at){
+  const auto scenePt=mapToScene(at);
+  std::ostringstream out;
+  out<<"hover_events="<<scissorHoverEvents_
+     <<" mode="<<int(tool)<<" native="<<nativeMode_<<" busy="<<busy()
+     <<" point=("<<at.x()<<","<<at.y()<<")"
+     <<" viewport=("<<viewport()->width()<<","<<viewport()->height()<<")"
+     <<" tracking="<<viewport()->hasMouseTracking()
+     <<" hover_attr="<<viewport()->testAttribute(Qt::WA_Hover)
+     <<" last_hover="<<(scissorLastHoverPosition_?
+       ("("+std::to_string(scissorLastHoverPosition_->x())+","+
+             std::to_string(scissorLastHoverPosition_->y())+")"):"none")
+     <<" scene=("<<scenePt.x()<<","<<scenePt.y()<<")";
+  auto hits=clickHits(at);
+  out<<" hits="<<hits.size();
+  ScissorSpanPlanner checker;
+  checker.reset(editor.state().doc,[&](Key k){
+   auto it=editor.state().objects.find(k.object);
+   if(it==editor.state().objects.end())return false;
+   auto li=editor.state().layers.find(it->second.layer);
+   return li!=editor.state().layers.end()&&li->second.visible;
+  });
+  for(size_t i=0;i<std::min<size_t>(hits.size(),3);++i){
+   auto candidate=checker.candidate(editor.state().doc,hits[i]);
+   out<<" hit"<<i<<"=(object:"<<hits[i].key.object
+      <<",edge:"<<hits[i].segment<<",candidate:"<<(bool(candidate))
+      <<",pts:"<<(candidate?candidate->preview.size():0)<<")";
+  }
+  out<<" preview="<<(bool(scissorHover_))
+     <<" overlay="<<(scissorPreview_!=nullptr);
+  return out.str();
+ }
+ void clearScissorHover(){
+  scissorHover_.reset();
+  if(scissorPreview_){scene_.removeItem(scissorPreview_);delete scissorPreview_;scissorPreview_=nullptr;}
+  viewport()->setCursor(Qt::ArrowCursor);
+ }
+ void updateScissorHover(QPoint where){
+  ++scissorHoverEvents_;
+  scissorLastHoverPosition_=where;
+  if(tool!=Tool::Scissors||nativeMode_||busy()){clearScissorHover();return;}
+  if(scissorIndexVersion_!=editor.generation){
+   clearScissorHover();
+   const auto& state=editor.state();
+   scissorPlanner_.reset(state.doc,[&](Key key){
+    const auto meta=state.objects.find(key.object);
+    if(meta==state.objects.end())return false;
+    const auto li=state.layers.find(meta->second.layer);
+    return li!=state.layers.end()&&li->second.visible;
+   });
+   scissorIndexVersion_=editor.generation;
+  }
+  std::optional<ScissorSpan> next;
+  const auto& state=editor.state();
+  for(const Hit& hit:clickHits(where)){
+   const auto meta=state.objects.find(hit.key.object);
+   if(meta==state.objects.end()||meta->second.group>0||!editable(state,hit.key.object))continue;
+   next=scissorPlanner_.candidate(state.doc,hit);
+   if(next)break;
+  }
+  if(!next){if(scissorHover_)clearScissorHover();return;}
+  if(scissorHover_&&scissorHover_->key==next->key&&
+     std::abs(scissorHover_->from-next->from)<1e-8&&
+     std::abs(scissorHover_->to-next->to)<1e-8)return;
+  clearScissorHover();
+  scissorHover_=std::move(next);
+  QPainterPath colored;
+  colored.moveTo(toQt(scissorHover_->preview.front()));
+  for(size_t i=1;i<scissorHover_->preview.size();i++)
+   colored.lineTo(toQt(scissorHover_->preview[i]));
+  QPen highlight(QColor(255,160,37),3);
+  highlight.setCosmetic(true);
+  highlight.setCapStyle(Qt::RoundCap);
+  highlight.setJoinStyle(Qt::RoundJoin);
+  scissorPreview_=scene_.addPath(colored,highlight);
+  scissorPreview_->setZValue(45);
+  scissorPreview_->setAcceptedMouseButtons(Qt::NoButton);
+  viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+ }
+ void setTool(Tool t){if(!busy()){
+  clearScissorHover();nativeMode_=false;tool=t;viewport()->setCursor(Qt::ArrowCursor);viewport()->update();
+ }}
  QPointF constrainedCorner(QPointF first,QPointF last,bool shift)const{
   if(!shift||(tool!=Tool::Rectangle&&tool!=Tool::Ellipse))return last;
   const double dx=last.x()-first.x(),dy=last.y()-first.y();
@@ -725,15 +827,22 @@ void mousePressEvent(QMouseEvent* e)override{
    e->accept();return;
   }
   if(tool==Tool::Scissors){
-   auto hits=clickHits(e->position().toPoint());
-   if(hits.empty()){if(toolWarning)toolWarning("Tesoura: clique sobre um segmento de polilinha.");e->accept();return;}
+   updateScissorHover(e->position().toPoint());
+   if(!scissorHover_){
+    if(toolWarning)toolWarning("Tesoura: aproxime do trecho entre cruzamentos ate a linha ficar laranja.");
+    e->accept();return;
+   }
    try{
-    const auto& hit=hits.front();
-    const int obj=editor.removePolylineEdge(hit.key,hit.segment);
+    const ScissorSpan cutting=*scissorHover_;
+    clearScissorHover();
+    const int obj=editor.removeScissorSpan(cutting);
     selected.clear();rebuild();if(obj>0)activate({obj,0});
-    if(diagnosticEvent)diagnosticEvent("polyline_scissor_edge_removed",1);
+    if(diagnosticEvent)diagnosticEvent("scissor_continuous_span_removed",1);
     if(stateChanged)stateChanged();
-   }catch(const std::exception& ex){if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));}
+   }catch(const std::exception& ex){
+    clearScissorHover();
+    if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));
+   }
    e->accept();return;
   }
   if(tool==Tool::Nodes&&active_&&editable(editor.state(),active_->object)){
@@ -814,6 +923,7 @@ void mouseMoveEvent(QMouseEvent* e)override{
    frameUpdates++;e->accept();return;
   }
   if(strokeDrawing_){drawCurrent_=e->position();pendingPreview_->setPath(temporaryShape());frameUpdates++;e->accept();return;}
+  if(tool==Tool::Scissors){updateScissorHover(e->position().toPoint());e->accept();return;}
   QGraphicsView::mouseMoveEvent(e);
  }
 void mouseReleaseEvent(QMouseEvent* e)override{
@@ -1328,6 +1438,8 @@ public:
   view.viewport()->update();
  }
  LabWindow(Document doc,CurveDocument curveDoc=CurveDocument{}):view(std::move(doc)){
+  setAcceptDrops(true);
+  view.setAcceptDrops(false);view.viewport()->setAcceptDrops(false);
   if(!curveDoc.contours.empty())curves=std::make_unique<CurveDragSession>(std::move(curveDoc));
   view.attachNative(curves.get());
   darkTheme_=QSettings("AlencarLaser","DesktopBeta").value("workspace/darkTheme",true).toBool();
@@ -1440,9 +1552,9 @@ public:
    [this]{if(!curves){status->setText("Abra um projeto com curvas v5.");return;}
      bezierToolActive_=true;view.enableNative(true);
      status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
-  compact(editorGrid,3,0,"scissors","✂ Tesoura","Remover aresta clicada (K); desfazer com Ctrl+Z. Curvas Bezier nao sao alteradas.",
+  compact(editorGrid,3,0,"scissors","✂ Tesoura","Ao aproximar, marca em laranja o trecho entre cruzamentos; clique remove tudo (K). Bézier nativa indisponivel.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
-     status->setText("Tesoura: clique na aresta para remove-la; Ctrl+Z desfaz.");});
+     status->setText("Tesoura: passe o mouse sobre um trecho; destaque laranja = corte completo. Ctrl+Z desfaz.");});
   tools->addSpacing(5); // Ferramentas de desenho
   auto* shapeGrid=newGrid();
   compact(shapeGrid,0,0,"line","╱ Linha","Desenhar linha",
@@ -1973,6 +2085,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   shortcut("Esc",[this]{view.cancelCurrentGesture();buttons.at("select")->click();});
   shortcut("V",[this]{buttons.at("select")->click();});
   shortcut("K",[this]{buttons.at("scissors")->click();});
+  shortcut("Ctrl+K",[this]{buttons.at("scissors")->click();});
   shortcut("Ctrl+R",[this]{buttons.at("rectangle")->click();});
   shortcut("Ctrl+E",[this]{buttons.at("ellipse")->click();});
   shortcut("Ctrl+L",[this]{buttons.at("move_layer")->click();});
@@ -1988,6 +2101,28 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    connect(recoveryTimer_,&QTimer::timeout,this,[this]{snapshotForRecovery();});
    recoveryTimer_->start();
    QTimer::singleShot(0,this,[this]{recoverAtStartup();});
+  }
+ }
+ void dragEnterEvent(QDragEnterEvent* e)override{
+  const auto* mime=e->mimeData();
+  if(!mime||!mime->hasUrls()||mime->urls().size()!=1){e->ignore();return;}
+  const QUrl url=mime->urls().first();
+  const QString suffix=QFileInfo(url.toLocalFile()).suffix().toLower();
+  if(url.isLocalFile()&&(suffix=="alaser"||suffix=="lbrn2"))
+   e->acceptProposedAction();
+  else e->ignore();
+ }
+ void dropEvent(QDropEvent* e)override{
+  const auto* mime=e->mimeData();
+  if(!mime||!mime->hasUrls()||mime->urls().size()!=1){e->ignore();return;}
+  const QUrl url=mime->urls().first();
+  const QString suffix=QFileInfo(url.toLocalFile()).suffix().toLower();
+  if(!url.isLocalFile()||(suffix!="alaser"&&suffix!="lbrn2")){e->ignore();return;}
+  e->acceptProposedAction();
+  try{openFilePath(url.toLocalFile());}
+  catch(const std::exception& error){
+   QMessageBox::warning(this,"Arquivo nao importado",QString::fromUtf8(error.what())+
+      "\n\nO desenho anterior foi preservado. Use Referencias para inspecionar o .lbrn2.");
   }
  }
  std::vector<int> selection()const{return {view.selected.begin(),view.selected.end()};}
@@ -2043,15 +2178,65 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   try{save();}catch(...){projectPath=previous;throw;}
  }
  void openOther(){
-  // Somente substitui o caminho ativo apos selecionar; erros recuperam o caminho anterior.
-  const QString chosen=QFileDialog::getOpenFileName(this,"Abrir outro projeto",projectPath,"Alencar Laser (*.alaser)");
-  if(chosen.isEmpty())return;
-  const QString previous=projectPath;projectPath=chosen;
-  try{open();}catch(...){projectPath=previous;throw;}
+  const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
+   projectPath,"Projetos de desenho (*.alaser *.lbrn2);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2)");
+  if(!chosen.isEmpty())openFilePath(chosen);
+ }
+ void ensureSafeToReplace(){
+  if(!uiPersistenceEnabled_||!recoveryPolicy_.dirty())return;
+  const auto answer=QMessageBox::warning(this,"Projeto com edicoes nao salvas",
+     "O projeto atual tem alteracoes nao salvas. Salve antes de abrir outro arquivo.",
+     QMessageBox::Save|QMessageBox::Cancel,QMessageBox::Save);
+  if(answer!=QMessageBox::Save)throw std::runtime_error("Abertura cancelada: projeto atual preservado");
+  save();
+  if(recoveryPolicy_.dirty())throw std::runtime_error("Salvamento cancelado: projeto atual preservado");
+ }
+ void openFilePath(const QString& path){
+  const QString suffix=QFileInfo(path).suffix().toLower();
+  if(suffix=="alaser"){
+   ensureSafeToReplace();
+   const QString previous=projectPath;projectPath=path;
+   try{open();}catch(...){projectPath=previous;throw;}
+   return;
+  }
+  if(suffix!="lbrn2")throw std::runtime_error("Use .alaser ou .lbrn2");
+  // Parse COMPLETO antes de qualquer mutacao: qualquer Shape desconhecida
+  // cancela importacao inteira e preserva arquivo e desenho existentes.
+  const auto imported=lightburn::readGeometry(path);
+  const auto response=QMessageBox::question(this,"Importar LightBurn (somente desenhos)",
+    QString("Foram reconhecidas %1 formas vetoriais.\n\n"
+            "Substituir o desenho atual por uma COPIA editavel?\n"
+            "As configuracoes de corte e da maquina NAO serao importadas.\n"
+            "O arquivo .lbrn2 original nao sera alterado.")
+      .arg(imported.shapeCount),
+    QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
+  if(response!=QMessageBox::Yes)return;
+  ensureSafeToReplace();
+  view.attachNative(nullptr);
+  curves.reset();
+  view.editor=Editor(imported.state);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  bezierToolActive_=false;
+  loadedProject_.reset();
+  projectPath.clear(); // Nunca salvar por cima de um .lbrn2!
+  buttons.at("select")->click();
+  recoveryPolicy_.edited();
+  captureEvent("lightburn_geometry_imported");
+  refresh();
+  view.setFocus();
+  status->setText(QString("Importadas %1 formas LightBurn. Salve como .alaser para preservar.")
+     .arg(imported.shapeCount));
  }
  void open(){
-  if(projectPath.isEmpty())projectPath=QFileDialog::getOpenFileName(this,"Abrir projeto",{},"Alencar Laser (*.alaser)");
-  if(projectPath.isEmpty())return;
+  if(projectPath.isEmpty()){
+   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir projeto",{},
+    "Projetos (*.alaser *.lbrn2);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2)");
+   if(chosen.isEmpty())return;
+   if(QFileInfo(chosen).suffix().compare("lbrn2",Qt::CaseInsensitive)==0){
+    openFilePath(chosen);return;
+   }
+   projectPath=chosen;
+  }
   auto project=openNative(projectPath);
   auto state=editorStateForIntegratedProject(project);
   view.editor=Editor(std::move(state));
@@ -2426,18 +2611,59 @@ static QJsonObject editTools197Test(const QString& directory){
  LabWindow w(Document{});w.show();QApplication::processEvents();
  auto& v=w.view;v.setTransform(QTransform::fromScale(8.,8.));
  int rectangle=v.editor.rectangle({100,100},20,20);
- int line=v.editor.line({150,110},{190,110});v.rebuild();
+ int line=v.editor.line({150,110},{190,110});
+ int crossing=v.editor.line({90,110},{130,110});v.rebuild();
  v.centerOn(QPointF(135,110));QApplication::processEvents();
  clickButton(w,"nodes");check(v.tool==QtEditorLab::Tool::Nodes,"nodes tool not activated");
  pressKey(w,Qt::Key_Escape);check(v.tool==QtEditorLab::Tool::Select,"Esc failed to restore selection");
  clickButton(w,"line");pressKey(w,Qt::Key_Escape);
  check(v.tool==QtEditorLab::Tool::Select,"Esc failed from drawing mode");
  pressKey(w,Qt::Key_K);check(v.tool==QtEditorLab::Tool::Scissors,"K scissor shortcut missing");
+ check(v.viewport()->cursor().shape()==Qt::ArrowCursor,"tesoura fora do objeto deveria ser seta");
+ const QPoint hoverPoint=v.mapFromScene({110,100});
+ check(v.viewport()->hasMouseTracking(),"viewport sem mouse tracking");
+ const QPoint clearPoint=v.mapFromScene({138,135});
+ bool usedViewportEventFallback=false;
+ // QTest::mouseMove pode nao gerar hover SEM botao no ambiente de testes
+ // Windows/Qt. A segunda via envia um QMouseEvent real ao QWidget viewport,
+ // atravessando QAbstractScrollArea/viewportEvent -> QtEditorLab::mouseMoveEvent.
+ // Nao chama updateScissorHover diretamente, nem altera documento ou preview.
+ auto moveHover=[&](QPoint at){
+  const uint64_t before=v.scissorHoverEventCount();
+  QTest::mouseMove(v.viewport(),at);QApplication::processEvents();
+  // QTest pode entregar um evento atrasado com coordenadas anteriores.
+  // Receber ALGUM evento nao demonstra que o cursor saiu do contorno.
+  if(v.scissorHoverEventCount()!=before&&v.scissorHoverReceivedAt(at))return;
+  usedViewportEventFallback=true;
+  const QPointF local(at),global(v.viewport()->mapToGlobal(at));
+  QMouseEvent mouse(QEvent::MouseMove,local,global,
+                    Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+  QApplication::sendEvent(v.viewport(),&mouse);
+  QApplication::processEvents();
+  if(v.scissorHoverEventCount()==before||!v.scissorHoverReceivedAt(at))
+   throw std::runtime_error("MouseMove nao chegou na coordenada esperada pela viewport: "+v.scissorHoverDiagnostics(at));
+ };
+ moveHover(clearPoint);
+ moveHover(hoverPoint);
+ auto preview=v.scissorPreview();
+ if(!preview||preview->preview.size()<4){
+  w.grab().save(directory+"/FALHA_HOVER_TESOURA.png");
+  throw std::runtime_error("hover nao iluminou arco completo: "+v.scissorHoverDiagnostics(hoverPoint));
+ }
+ check(v.viewport()->cursor().shape()!=Qt::ArrowCursor,"cursor nao mudou sobre trecho valido");
+ moveHover(clearPoint);
+ if(v.scissorPreview()||v.viewport()->cursor().shape()!=Qt::ArrowCursor){
+  w.grab().save(directory+"/FALHA_SAIDA_TESOURA.png");
+  throw std::runtime_error("Tesoura permaneceu ativa fora do trecho: "+
+                           v.scissorHoverDiagnostics(clearPoint));
+ }
  const size_t old=v.editor.undoCount();
  clickScene(w,{110,100});
  check(v.editor.undoCount()==old+1,"scissor mouse click did not create history");
  check(!get(v.editor.state().doc,{rectangle,0})->closed,"scissor failed to open closed contour");
- check(get(v.editor.state().doc,{rectangle,0})->nodes.size()==4,"scissor left duplicate/seam nodes instead of removing edge");
+ check(get(v.editor.state().doc,{rectangle,0})->nodes.size()==4,"Tesoura removeu arco incompleto ou deixou arestas");
+ check(get(v.editor.state().doc,{crossing,0})&&get(v.editor.state().doc,{crossing,0})->nodes.size()==2,
+       "Tesoura alterou contorno cruzador");
  checkRendered(w);
  pressKey(w,Qt::Key_Z,Qt::ControlModifier);
  check(get(v.editor.state().doc,{rectangle,0})->closed,"undo cut failed");
@@ -2475,9 +2701,46 @@ static QJsonObject editTools197Test(const QString& directory){
  layer6->click();
  check(w.layers->findData(6)>=0&&w.layers->currentData().toInt()==6,"camada nao criada por clique");
  w.layers->setCurrentIndex(w.layers->findData(0));
+ // Tesoura igual ao Trim Shapes: formas novas isoladas ficam 100% laranja,
+ // e desaparecem inteiras ao clicar, sem exigir cruzamento.
+ LabWindow shapes(Document{});shapes.show();QApplication::processEvents();
+ auto& sv=shapes.view;
+ sv.setTransform(QTransform::fromScale(8.,8.));
+ const int circleId=sv.editor.ellipse({120,100},10,10,64);
+ const int rectId=sv.editor.rectangle({145,90},18,18);
+ sv.rebuild();sv.centerOn(QPointF(135,100));QApplication::processEvents();
+ clickButton(shapes,"scissors");
+ auto pointHover=[&](QPointF p){
+  const QPoint at=sv.mapFromScene(p);
+  const uint64_t count=sv.scissorHoverEventCount();
+  QTest::mouseMove(sv.viewport(),at);QApplication::processEvents();
+  if(sv.scissorHoverEventCount()==count){
+   const QPointF local(at),global(sv.viewport()->mapToGlobal(at));
+   QMouseEvent move(QEvent::MouseMove,local,global,Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+   QApplication::sendEvent(sv.viewport(),&move);QApplication::processEvents();
+  }
+  check(sv.scissorHoverEventCount()>count,"hover isolado nao recebido");
+ };
+ pointHover({130,100});
+ auto circleSpan=sv.scissorPreview();
+ check(bool(circleSpan)&&circleSpan->preview.size()>=64,
+       "Tesoura nao destacou circulo novo completo");
+ const int beforeIsolated=int(sv.editor.state().doc.contours.size());
+ clickScene(shapes,{130,100});
+ check(sv.editor.state().doc.contours.size()==size_t(beforeIsolated-1)&&
+       sv.editor.state().objects.count(circleId)==0,"Circulo isolado nao excluido");
+ pointHover({154,90});
+ auto rectSpan=sv.scissorPreview();
+ check(bool(rectSpan)&&rectSpan->preview.size()==5,
+       "Tesoura nao destacou retangulo novo completo");
+ clickScene(shapes,{154,90});
+ check(sv.editor.state().doc.contours.empty()&&sv.editor.state().objects.count(rectId)==0,
+       "Retangulo isolado nao excluido");
  w.grab().save(directory+"/TESTE_19_7_FERRAMENTAS.png");
  return {{"status","PASS"},{"selection_esc",true},{"selection_v",true},
-   {"scissors_k",true},{"scissors_mouse",true},{"undo_scissors",true},
+   {"scissors_k",true},{"scissors_mouse",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"scissors_isolated_circle",true},{"scissors_isolated_rectangle",true},{"undo_scissors",true},
+   {"hover_delivery",usedViewportEventFallback?"viewport_synthetic_mouse_move":"qtest_mouse_move"},
+   {"hardware_hover_verified",false},
    {"ctrl_r_rectangle",true},{"ctrl_e_ellipse",true},{"shift_square_circle",true},{"create_layer_by_palette",true},
    {"move_layer_ctrl_l",true},{"layer_lock_rejected",true},
    {"document_before_lock_attempt",QString::number(before.size())},
@@ -2515,6 +2778,79 @@ static QJsonObject recovery198Test(const QString& directory){
  return {{"status","PASS"},{"snapshot_v5",true},{"original_untouched_until_save",true},
          {"successful_save_discarded_snapshot",true},{"no_hardware_access",true}};
 }
+// TESTE_19.8 importacao: XMLs sinteticos representam formas garantidas.
+// Testes sem abrir dialogos, sem salvar ou conectar a maquina.
+static QJsonObject lightburnImport198Test(const QString& directory){
+ QTemporaryDir temp(QDir(directory).filePath("lbrn2_XXXXXX"));
+ check(temp.isValid(),"nao criou pasta temporaria de importacao");
+ const QString filename=temp.filePath("formas.lbrn2");
+ const QByteArray xml=R"XML(<?xml version="1.0" encoding="UTF-8"?>
+<LightBurnProject AppVersion="1.7" FormatVersion="1" MirrorX="False" MirrorY="False">
+ <CutSetting type="Cut"><index Value="1"/><speed Value="1000"/><maxPower Value="100"/></CutSetting>
+ <Shape Type="Rect" CutIndex="1" W="20" H="10" Cr="0">
+  <XForm>1 0 0 1 50 70</XForm>
+ </Shape>
+ <Shape Type="Group" CutIndex="0">
+  <XForm>1 0 0 1 100 200</XForm>
+  <Children>
+   <Shape Type="Rect" CutIndex="2" W="10" H="10" Cr="0"><XForm>1 0 0 1 5 7</XForm></Shape>
+  </Children>
+ </Shape>
+ <Shape Type="Ellipse" CutIndex="3" W="30" H="20"><XForm>1 0 0 1 0 0</XForm></Shape>
+ <Shape Type="Path" CutIndex="4">
+  <VertList>V0 0c0x1c1x1V10 0c0x1c1x1V10 10c0x1c1x1</VertList>
+  <PrimList>L0 1L1 2</PrimList><XForm>1 0 0 1 8 9</XForm>
+ </Shape>
+ <Shape Type="Path" CutIndex="5">
+  <VertList>V0 0c0x5c0y5c1x1V10 0c0x1c1x5c1y5</VertList>
+  <PrimList>B0 1</PrimList><XForm>1 0 0 1 0 0</XForm>
+ </Shape>
+</LightBurnProject>)XML";
+ QFile f(filename);check(f.open(QIODevice::WriteOnly),"falhou fixture LightBurn");
+ check(f.write(xml)==xml.size(),"fixture LightBurn truncada");f.close();
+ auto imported=lightburn::readGeometry(filename);
+ check(imported.shapeCount==5&&imported.state.doc.contours.size()==5,"5 formas nao foram reconhecidas");
+ check(imported.state.layers.size()==6,"camadas do XML nao foram mapeadas");
+ check(imported.state.objects.at(1).layer==1&&imported.state.objects.at(2).layer==2,
+       "indices de camada foram perdidos");
+ const auto& first=imported.state.doc.contours.at(0);
+ check(first.nodes.size()==4&&std::abs(first.nodes[0].p.x-40.)<1e-8&&
+       std::abs(first.nodes[0].p.y-65.)<1e-8,"retangulo e XForm incorretos");
+ const auto& nested=imported.state.doc.contours.at(1);
+ check(std::abs(nested.nodes[0].p.x-100.)<1e-8&&
+       std::abs(nested.nodes[0].p.y-202.)<1e-8,"transformacao de grupo incorreta");
+ const auto& ellipse=imported.state.doc.contours.at(2);
+ check(ellipse.nodes.size()==96,"elipse nao foi convertida para pontos");
+ const auto& path=imported.state.doc.contours.at(3);
+ check(!path.closed&&path.nodes.size()==3&&std::abs(path.nodes[0].p.x-8.)<1e-8,
+       "Path com segmentos retos ou XForm incorreto");
+ const auto& cubic=imported.state.doc.contours.at(4);
+ check(!cubic.closed&&cubic.nodes.size()==25&&
+       std::abs(cubic.nodes[12].p.y-3.75)<1e-8,
+       "Cubic Bezier importada com interpolacao errada");
+ validate(imported.state);
+
+ // Projetos mistos sao RECUSADOS, nunca importados parcialmente.
+ const QString invalid=temp.filePath("incompativel.lbrn2");
+ QFile bad(invalid);check(bad.open(QIODevice::WriteOnly),"fixture incompleta nao criada");
+ bad.write(R"XML(<?xml version="1.0"?><LightBurnProject>
+ <Shape Type="Rect" W="10" H="10"/>
+ <Shape Type="Path" CutIndex="0"><VertList>V0 0</VertList></Shape>
+ </LightBurnProject>)XML");bad.close();
+ bool rejected=false;
+ try{(void)lightburn::readGeometry(invalid);}catch(const std::runtime_error&){rejected=true;}
+ check(rejected,"importador aceitou perda silenciosa de Path");
+
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ QMimeData mime;mime.setUrls({QUrl::fromLocalFile(filename)});
+ QDragEnterEvent drag(QPoint(20,20),Qt::CopyAction,&mime,Qt::LeftButton,Qt::NoModifier);
+ QApplication::sendEvent(&w,&drag);
+ check(drag.isAccepted(),"janela nao aceita arrastar .lbrn2");
+ return {{"status","PASS"},{"rect_transform",true},{"group_transform",true},
+         {"ellipse_96_segments",true},{"path_lines",true},{"path_bezier",true},{"layers",true},{"unsupported_path_rejected",true},
+         {"drag_enter_lbrn2",true},{"hardware_commands_sent",false}};
+}
+
 int main(int argc,char** argv){
  QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";if(mode=="--recovery-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
@@ -2526,6 +2862,12 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--lbrn2-import-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=lightburnImport198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_IMPORTACAO_LBRN2.json");if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--shape-operations-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=shapeOperationsTest(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}

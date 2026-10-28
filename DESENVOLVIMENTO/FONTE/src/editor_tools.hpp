@@ -1,6 +1,7 @@
 #pragma once
 // Alencar Laser TESTE_5 - experimental editable geometry, no machine commands.
 #include "geometry.hpp"
+#include "scissors_span.hpp"
 #include <boost/json.hpp>
 #include <set>
 #include <map>
@@ -218,6 +219,86 @@ public:
    }
   });
   return result;
+ }
+ // Corte por INTERVALO CONTINUO: o preview escolhido e a geometria removida
+ // usam os mesmos parametros. Os demais contornos nao sao modificados.
+ // Uma unica transacao cria no maximo dois restos independentes.
+ int removeScissorSpan(const ScissorSpan& span){
+  const Contour* source=get(current.doc,span.key);
+  if(!source||source->closed!=span.closed)throw std::runtime_error("contorno de tesoura ausente");
+  if(!editable(current,span.key.object))throw std::runtime_error("camada bloqueada ou invisivel");
+  if(current.objects.at(span.key.object).group>0)throw std::runtime_error("desagrupe antes de usar tesoura");
+  const int m=int(source->nodes.size())-(source->closed?0:1);
+  if(m<=0||!std::isfinite(span.from)||!std::isfinite(span.to)||
+     span.to<=span.from+1e-7||span.to-span.from>m+1e-7||
+     (!source->closed&&(span.from<0||span.to>m))||
+     (source->closed&&(span.from< -m||span.from>=m||span.to>2.*m)))
+    throw std::runtime_error("intervalo de tesoura invalido");
+  const int nextObject=nextObjectId(current.doc);
+  int selectedResult=span.key.object;
+  change([&](EditorState& state){
+   Contour* original=get(state.doc,span.key);
+   if(!original)throw std::runtime_error("contorno removido");
+   const Contour before=*original;
+   const int n=int(before.nodes.size());
+   auto nodeAt=[&](double u)->Node{
+    const double value=before.closed?wrapScissorParam(u,m):u;
+    const double rounded=std::round(value);
+    if(std::abs(value-rounded)<1e-8){
+     int j=int(rounded);
+     if(before.closed)j%=n;
+     return before.nodes.at(size_t(j));
+    }
+    return Node{state.doc.nextId++,pointAt(before,value)};
+   };
+   auto piece=[&](double a,double b)->std::vector<Node>{
+    if(b-a<=1e-8)return {};
+    std::vector<Node> nodes{nodeAt(a)};
+    for(int j=int(std::floor(a))+1;double(j)<b-1e-8;j++){
+     int index=before.closed?((j%n+n)%n):j;
+     nodes.push_back(before.nodes.at(size_t(index)));
+    }
+    nodes.push_back(nodeAt(b));
+    nodes.erase(std::unique(nodes.begin(),nodes.end(),[](const Node& x,const Node& y){
+     return dist(x.p,y.p)<1e-10;
+    }),nodes.end());
+    if(nodes.size()<2)return {};
+    return nodes;
+   };
+   if(before.closed){
+    auto remainder=piece(span.to,span.from+m);
+    if(remainder.size()>=2){
+     original->nodes=std::move(remainder);original->closed=false;
+    }else{
+     state.doc.contours.erase(std::remove_if(state.doc.contours.begin(),state.doc.contours.end(),
+      [&](const Contour& c){return c.key==span.key;}),state.doc.contours.end());
+     bool others=false;
+     for(const auto& c:state.doc.contours)if(c.key.object==span.key.object){others=true;break;}
+     if(!others)state.objects.erase(span.key.object);
+     selectedResult=0;
+    }
+   }else{
+    auto left=piece(0,span.from),right=piece(span.to,double(m));
+    if(left.size()>=2&&right.size()>=2){
+     original->nodes=std::move(left);original->closed=false;
+     state.doc.contours.push_back({{nextObject,0},std::move(right),false});
+     Meta metadata=state.objects.at(span.key.object);metadata.group=0;
+     state.objects.emplace(nextObject,metadata);selectedResult=nextObject;
+    }else if(left.size()>=2){
+     original->nodes=std::move(left);original->closed=false;
+    }else if(right.size()>=2){
+     original->nodes=std::move(right);original->closed=false;
+    }else{
+     state.doc.contours.erase(std::remove_if(state.doc.contours.begin(),state.doc.contours.end(),
+      [&](const Contour& c){return c.key==span.key;}),state.doc.contours.end());
+     bool others=false;
+     for(const auto& c:state.doc.contours)if(c.key.object==span.key.object){others=true;break;}
+     if(!others)state.objects.erase(span.key.object);
+     selectedResult=0;
+    }
+   }
+  });
+  return selectedResult;
  }
  void rotateObjects(std::vector<int> ids,Pt pivot,double angle){change([&](EditorState& s){apply(s,ids,[&](Pt p){return rotateAround(p,pivot,angle);});});}
  void scaleObjects(std::vector<int> ids,Pt pivot,double sx,double sy){if(!std::isfinite(sx)||!std::isfinite(sy)||sx==0||sy==0)throw std::runtime_error("invalid scale");change([&](EditorState& s){apply(s,ids,[&](Pt p){return Pt{pivot.x+(p.x-pivot.x)*sx,pivot.y+(p.y-pivot.y)*sy};});});}

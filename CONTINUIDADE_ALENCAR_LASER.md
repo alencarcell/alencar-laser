@@ -94,3 +94,95 @@ Registrar mudanças, testes e pendências.
 - Logo apresentada pelo usuario: iconografia metalica/prata com laranja/laser; retirar slogan "Precisao para suas criacoes". Aguardar uso do arquivo grafico aprovado no aplicativo Qt (nao redesenhar).
 - Proxima verificacao: reproduzir tesoura sobre o mesmo tipo de contorno nos dois aplicativos, inspecionar antes/depois/undo e observar se o objeto original permanece; correlacionar `command_error` com acao sem exportar informacoes sensiveis.
 - Esta atualizacao e documental, nao certifica correcoes funcionais nem homologacao da branch.
+
+## Tesoura — correção de escopo funcional — 27/10/2026
+- Usuário esclareceu a referência LightBurn: Tesoura selecionada mantém seta normal até pairar sobre trecho de recorte válido; então vira tesoura, destaca **todo o trecho** que será removido e um clique elimina integralmente aquela região.
+- A 19.8 atual remove apenas a aresta `hit.segment`, dependente do número de nós; por isso falha com curvas poligonais densas e alguns trechos.
+- Próxima Tesoura deve operar por **intervalos de contorno delimitados por interseções/extremidades**, com preview e cursor condicionais; sem candidatos inequívocos não deve fazer recorte parcial.
+- Criada branch isolada `fix/scissors-continuous-span-19-8` e especificação `DESENVOLVIMENTO/ESPECIFICACOES/TESOURA_TRECHO_CONTINUO_19_8.md` com critérios A1–A10.
+- **Somente especificação/planejamento nesta branch até aqui:** ainda sem implementação funcional ou aprovação Windows; não apontar como defeito resolvido. Main e candidata testada preservadas.
+
+## Avanco Tesoura continua — 27/10/2026
+- Branch independente `fix/scissors-continuous-span-19-8` derivada da `feat/toolbar-vertical-compacta-19-8`. `main` preservada.
+- Novos arquivos de engenharia: `src/scissors_span.hpp` e `tests/test19_8_scissors_span.cpp`. `geometry.hpp`, `editor_tools.hpp`, `qt/qt6_test6.cpp`, CMake e script de teste Windows alterados.
+- A Tesoura deixou de chamar `removePolylineEdge` na GUI; passa a calcular e remover o intervalo contínuo entre interseções com preview laranja e cursor condicional (seta fora, tesoura sobre trecho válido).
+- Inclui busca por caixas usando BVH, identificação de autocruzamentos, filtros de visibilidade das camadas e recusa localizada de tangências/sobreposições ambíguas.
+- Testes C++ de linhas densas, elipse 64 arestas, autocruzamentos, camadas invisíveis/bloqueadas e undo/redo adicionados; teste GUI de hover / cursor / recorte completo atualizado.
+- **Estado real:** alterações foram inspecionadas estruturalmente, mas `build Windows` e testes executáveis ainda NÃO realizados para essa branch. Não declarar homologado, não mesclar em main, não reativar Wi-Fi nem comandos físicos.
+- Próximo passo: no VS Code, trocar para a branch e executar `powershell -NoProfile -ExecutionPolicy Bypass -File .\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1 -Abrir`; corrigir logs de compilação e verificar vídeo antes/depois.
+
+## Compilacao 19.8 — falha de hover circular e hotfix — 27/10/2026
+- O usuario executou corretamente `git fetch origin`, mudou para `fix/scissors-continuous-span-19-8` e compilou no Windows. Todos os testes de nucleo passaram: Bezier 54/0, GRBL, zoom/Wi-Fi safety, Tesoura legada, nova Tesoura por intervalos, recuperacao policy e codec v5.
+- O teste GUI parou com `hover nao iluminou arco completo` (resultado `RESULTADO_TESTE_19_7_GUI.json`). Nao foi falha de compilacao.
+- Causa confirmada por leitura de codigo: `ScissorSpanPlanner::candidate`, em contorno fechado e cursor antes do primeiro cruzamento, usava `hi=edges.front()+m` enquanto `lo=edges.back()-m`. Isso produzia intervalo maior que uma volta e a funcao recusava preview.
+- Corrigido: antes do primeiro cruzamento `hi=edges.front()`; apos o ultimo `hi=edges.front()+m`. Corrigido no commit `ad89dd3`.
+- Criados testes de regressao do caso concreto: retangulo cruzado horizontalmente e mouse na aresta superior (intervalo que atravessa origem), verificacao geometrica de trecho inteiro, undo e cursor do ultimo arco, commit `169fd0b`.
+- Estado: hotfix revisado estaticamente, **ainda nao executado no Windows apos correcao**. Proxima acao: `git pull --ff-only` e script existente `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -Abrir`. Nao homologar nem mesclar PR #2 sem PASS Qt e validacao manual.
+
+## Rodada seguinte de hover — 27/10/2026, segundo FAIL
+- Após os commits ad89dd3 e 169fd0b, usuário recompilou no VS Code; todos os testes do núcleo passaram novamente (incluindo nova Tesoura por intervalos, Bézier 54/0, GRBL e codec .alaser v5). **Teste GUI ainda falhou:** "hover nao iluminou arco completo", código 1; sem abertura do app por validação segura.
+- Não tratar essa falha como resolvida e não criar mais hotfix geométrico por hipótese: o cenário geométrico de retângulo cortado já passa no teste de núcleo. Precisamos discriminar evento de mouse, posição viewport/scene, pick, planejamento e overlay na GUI Qt.
+- qt6_test6.cpp recebeu contador de atualizações hover e mensagem diagnóstica em caso de FAIL com posição/viewport/scene, número e identificação de hits, candidatos, número de pontos do preview, cursor e item gráfico. Também salva captura de falha FALHA_HOVER_TESOURA.png.
+- SCRIPTS/TESTAR_19_8_WINDOWS.ps1 agora aceita -SomenteTesoura para compilar somente alencar_test7_qt6 e executar o teste GUI em RELATORIOS/AUDITORIAS/GITHUB_19_8/tesoura_foco; **não é homologação completa**.
+- Próxima execução no VS Code: git pull --ff-only; powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\TESTAR_19_8_WINDOWS.ps1" -SomenteTesoura. O erro detalhado aparece direto no terminal sem pedir arquivo.
+- Ainda sem teste Windows desses diagnósticos, não declarar funcional. Main e demais branches preservadas.
+
+## Terceira rodada Qt — diagnóstico conclusivo do hover 27/10/2026
+- Captura real Windows: test GUI \`FAIL: hover nao iluminou arco completo\`; \`hover_events=0 mode=2 native=0 busy=0 point=(245,159) viewport=(891,479) scene=(110,100) hits=1 hit0=(object:1,edge:0,candidate:1,pts:4) preview=0 overlay=0\`.
+- **Conclusão factual:** a posição, busca e cálculo do arco estão corretos (há candidato com 4 pontos). O teste de mouseMove não chegou a \`updateScissorHover\`; não é justificável mexer novamente na geometria do arco.
+- Correção experimental em \`qt/qt6_test6.cpp\`: habilita explicitamente \`viewport()->setMouseTracking(true)\` e \`Qt::WA_Hover\` no filho da \`QGraphicsView\`; teste gera dois movimentos distintos, verifica recepção por contador e imprime tracking/hover do viewport caso ainda falhe.
+- Não houve nova compilação Windows nesta revisão; \`main\` permanece preservada e o PR #2 segue em rascunho. Próxima ação \`git pull --ff-only\`, seguido de \`powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteTesoura\` e enviar log. Caso passe, exigir teste GUI completo, validação visual manual e somente depois considerar merge.
+
+## Quarta rodada Qt — QTest mouseMove sem botão não gera evento — 27/10/2026
+- Log real Windows confirmou: compilação da interface concluída, \`hover_events=0\`, \`tracking=1\`, \`hover_attr=1\`, \`hits=1\`, \`candidate=1\`, \`pts=4\`, \`preview=0\`. Não alterar novamente a geometria, pois o cálculo identificou corretamente o intervalo.
+- Alteração experimental em \`qt/qt6_test6.cpp\` (commit \`0da3fcb\`): o teste GUI chama \`QTest::mouseMove\` e, caso **não incremente o contador**, despacha um \`QMouseEvent(QEvent::MouseMove)\` via \`QApplication::sendEvent(viewport())\` para testar o caminho Qt de \`viewportEvent\` até \`QtEditorLab::mouseMoveEvent\`.
+- Se nem a via direta funcionar, o relatório inclui \`hover_events\`, rastreamento, coordenadas e candidatos. Caso passe, o relatório \`RESULTADO_TESTE_19_7_GUI.json\` inclui \`hover_delivery\` com \`viewport_synthetic_mouse_move\` ou \`qtest_mouse_move\`.
+- **Um PASS com evento Qt sintético NÃO comprova comportamento do mouse real do notebook.** Após passar, executar suíte completa e validar manualmente cursor condicional, destaque laranja e recorte no desenho real. \`main\` preservada, conexão física bloqueada.
+- Executar no VS Code: \`git pull --ff-only\`; \`powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteTesoura\`.
+
+## Validacao Windows da Tesoura — 27/10/2026: teste focado PASS
+- Captura enviada pelo usuario no VS Code apos `git pull --ff-only` e `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteTesoura`.
+- Saida verificada: CMake configurou, Ninja compilou e vinculou `alencar_test7_qt6.exe`; terminal terminou com `Teste focado passou; validacao completa ainda obrigatoria.` e retornou ao prompt PowerShell sem erro.
+- Os warnings `-Wmisleading-indentation` em `lightburn_reference_inspector.hpp` e `qt6_test6.cpp` nao impediram a compilacao. Corrigir depois sem misturar com a homologacao da Tesoura.
+- Nao consta no print se `hover_delivery` foi `viewport_synthetic_mouse_move` ou `qtest_mouse_move`; consultar o JSON do teste quando necessario.
+- **Ainda pendente:** suite completa `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`, seguida de validação manual com mouse fisico no desenho real, verificando seta no vazio, cursor Tesoura no trecho, preview laranja do arco inteiro, clique remove sem fragmentos, Ctrl+Z e Ctrl+Y.
+- PASS focado nao homologa desempenho em arquivos reais, nem conexao Wi-Fi; maquina deve permanecer desconectada e `main` preservada.
+
+## Ampliação solicitada — arraste, LBRN2 e Tesoura isolada — 27/10/2026
+- O usuario confirmou na interface Windows que a Tesoura melhorou, mas circulo/retangulo novos isolados nao eram reconhecidos; informou tambem necessidade de arrastar arquivos e abrir `.lbrn2`.
+- Documentacao oficial LightBurn Trim Shapes indica: forma sem intersecoes pode ser destacada por inteiro e excluida num clique; mesmo para formas primitivas como retangulo e elipse. `Ctrl+K` e o atalho documentado.
+- `src/scissors_span.hpp`: alterado para retornar candidato de intervalo completo em contorno sem intersecoes, inclusive fechado; exatamente 1 intersecao de forma fechada segue ambigua. Testes de circulo e retangulo isolados no nucleo e no Qt adicionados.
+- `qt/qt6_test6.cpp`: Ctrl+K adicional, dragEnterEvent/dropEvent para UM arquivo local `.alaser` ou `.lbrn2`; Arquivo > Abrir tambem reconhece `.lbrn2`. Confirma substituicao e protege projeto nao salvo. Nenhuma conexao com laser.
+- Novo `src/lightburn_geometry_import.hpp`: leitor parcial/conservador XML LightBurnProject; Rect, Ellipse, Group e Path simples em `VertList`+`PrimList` com L e B (Bezier amostrada em 24 segmentos por cubica), XForm e CutIndex 0..31. Cria copia editavel somente após decodificacao integral. Nenhuma operacao de laser importada. Recusa qualquer estrutura nao compreendida, paths compostos desconexos, espelhamentos MirrorX/MirrorY ativos, geometrias com limites excessivos e cantos arredondados. Nao apresenta compatibilidade completa com LBRN2.
+- Regressoes de importacao Qt com fixtures sintéticas de retangulo, elipse, grupo, linhas, Bezier, layers, rejeicao de formato parcial e dragEnter foram adicionadas; script Windows recebeu `-SomenteImportacao` e teste automatico na suite completa.
+- Importacao de bitmap, texto, referencias compartilhadas/variantes de caminhos complexos e reflexoes: PENDENTES de exemplo real do usuario, sem criar arte incompleta silenciosamente.
+- Relatorio real da nova sessao: 575 contornos, 13.415 nos, 7 shape_created, 2 shapes_moved, 11 undo; sem conexao fisica. Render P95 ~58,83ms, P99 ~171,27ms e pico ~814,14ms: monitorar engasgos, sem conclusao de performance homologada.
+- Estado da revisao: **commits no GitHub apenas; nao foi compilada nem testada no Windows depois destas alteracoes.** Branch experimental `fix/scissors-continuous-span-19-8`, PR #2 ainda rascunho, `main` nao alterada. Proxima acao: `git pull --ff-only` e `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`; se falha, consultar JSON/importacao; nao homologar sem mouse e arquivo .lbrn2 reais.
+- Fontes referencia: https://docs.lightburnsoftware.com/latest/Reference/TrimShapes/ ; https://docs.lightburnsoftware.com/latest/Reference/FileManagement/ ; https://forum.lightburnsoftware.com/t/lbrn2-file-documentation/52174 ; https://github.com/tscircuit/laser-deformation-fix .
+
+## Correção do teste de Tesoura diante de camada oculta — 27/10/2026
+- O usuario executou a suite completa no VS Code apos implementacao de drag-drop/.lbrn2 e Tesoura de forma isolada. O Ninja compilou os alvos e os testes iniciais passaram (54/0 Bézier, GRBL, regras, Tesoura 19.7), mas o executavel `alencar_test19_8_scissors_span` retornou `FAIL: contorno invisivel gerou limite de Tesoura`.
+- Diagnostico de codigo: o teste de 19.8 continha uma assercao antiga que esperava NENHUM candidato se houvesse um retangulo isolado cruzado somente por uma linha numa camada oculta. O comportamento novo/esperado de Trim Shapes retorna agora o retangulo INTEIRO (5 pontos no preview), ja que a linha invisivel nao participa das intersecoes.
+- Atualizado APENAS o teste `DESENVOLVIMENTO/FONTE/tests/test19_8_scissors_span.cpp` (commit `eda7d25`). Agora valida preview da forma inteira, remocao somente do retangulo visivel, conservacao da linha na camada oculta e restauração via undo sem reexibir a camada.
+- **Sem validacao Windows apos este commit.** Proxima acao: `git pull --ff-only` e `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`. A compilacao anterior nao foi erro; manter a branch experimental sem merge. Testar LBRN2 real e arraste na GUI somente quando a suite passar.
+
+## Rodada de teste 19.8 — PASS geometrico / FAIL limpeza hover — 27/10/2026
+- Captura Windows apos atualizacao da Tesoura e importacao LBRN2: todos os testes anteriores passaram (Bezier 54/0, GRBL, regras, 19.7, 19.8 continuous span, recuperacao e codec v5). O teste Qt GUI interrompeu com `Tesoura permanece ativa fora do trecho`. A fase de testes da importacao LBRN2 ainda nao foi executada nesta rodada, pois a suite interrompeu antes.
+- Analise do codigo: `updateScissorHover` ja invoca `clearScissorHover` se a busca nao encontra candidato. Entretanto, o teste `moveHover` aceitava apenas incremento de contador, sem confirmar se `QTest::mouseMove` entregou **o ponto exato solicitado**; evento atrasado do Qt pode ser contabilizado apesar de estar na coordenada anterior.
+- Commit `4604ea6` registra `scissorLastHoverPosition_`, acrescenta `scissorHoverReceivedAt`, exige a coordenada correta antes de considerar evento Qt entregue, usa um evento sintético via `viewport` se a coordenada for outra, e inclui diagnóstico de `last_hover` e captura `FALHA_SAIDA_TESOURA.png` caso o hover continue preso.
+- **Isto corrige uma vulnerabilidade da simulação do teste, mas ainda NÃO está comprovado ser a causa da falha no Windows.** Se voltar a falhar, usar `last_hover`, `hits`, `candidate` e captura para distinguir erro real da GUI.
+- Main preservada, PR #2 em desenvolvimento, hardware bloqueado. Proxima acao `git pull --ff-only` e `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteTesoura`; apos PASS, executar `-Abrir` para suite completa e teste de arrastar/importar LBRN2.
+
+## PASS GUI focado — hover com coordenada correta — 27/10/2026
+- Usuario enviou captura do terminal apos compilar `alencar_test7_qt6.exe` e executar `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteTesoura`. Resultado verde: `Teste focado passou; validacao completa ainda obrigatoria.` PowerShell retornou normalmente.
+- Confirmacao limitada ao **teste automatizado focado Qt**. O teste anterior de nucleo `alencar_test19_8_scissors_span` tambem havia passado, incluindo circulos e retangulos isolados, cruzamentos, elipses e desfazer/refazer.
+- Warnings sem bloqueio observados: `-Wmisleading-indentation` em `lightburn_reference_inspector.hpp` e `qt6_test6.cpp`, e construtor `QDragEnterEvent` obsoleto num teste. Deixar limpeza posterior, sem misturar com validacao funcional.
+- Ainda SEM PASS da suite completa apos esse commit, SEM verificacao de mouse real, SEM confirmacao de arrastar soltar arquivo real e SEM compatibilidade LBRN2 em trabalho real.
+- Proxima execucao: `git pull --ff-only` seguido de `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`; testar Tesoura manualmente com laser desconectado. Se falhar importacao, priorizar JSON `RELATORIOS/AUDITORIAS/GITHUB_19_8/importacao/RESULTADO_IMPORTACAO_LBRN2.json`.
+- Branch `fix/scissors-continuous-span-19-8`, PR #2 ainda experimental; main intocada.
+
+## Rodada Qt: teste focado da Tesoura PASS após validação das coordenadas — 27/10/2026
+- Usuário mostrou nova execução Windows/VS Code com **`[2/2] Linking CXX executable alencar_test7_qt6.exe`** e a mensagem final **`Teste focado passou; validacao completa ainda obrigatoria.`**; retorno ao prompt PowerShell sem falha.
+- A mudança anterior (commit `4604ea6`) passou o teste automatizado de cursor e remoção da prévia após sair do trecho. Ainda **não equivale à homologação com mouse físico**.
+- Warnings de `-Wmisleading-indentation` em `lightburn_reference_inspector.hpp` e `qt6_test6.cpp` e aviso de construtor `QDragEnterEvent` obsoleto não impediram a compilação; limpeza deve ser feita separadamente.
+- Próximo teste: `git pull --ff-only` e `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`. Este roda a suíte completa, incluindo importação geométrica `.lbrn2` em fixtures, e abre a candidata apenas se passar. Testar mouse físico em retângulo/círculo isolados, contornos cruzados e arraste de arquivos reais. Máquina desconectada; nenhuma homologação até então.
