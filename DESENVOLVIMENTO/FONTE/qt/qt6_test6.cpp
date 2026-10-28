@@ -942,7 +942,23 @@ void mousePressEvent(QMouseEvent* e)override{
    if(tool==Tool::Scissors){
     updateScissorHover(e->position().toPoint());
    if(!scissorHover_){
-    if(toolWarning)toolWarning("Tesoura: aproxime do trecho entre cruzamentos ate a linha ficar laranja.");
+    // Informar o motivo observavel, sem alterar a geometria.
+    const auto hits=clickHits(e->position().toPoint());
+    QString reason="Trecho ambiguo ou sem intersecoes reconhecidas; tente outro arco.";
+    if(hits.empty())reason="Nenhum contorno atingido; aproxime da linha.";
+    else{
+     const auto& state=editor.state();
+     for(const auto& hit:hits){
+      auto meta=state.objects.find(hit.key.object);
+      if(meta==state.objects.end())continue;
+      if(meta->second.group>0){reason="Contorno agrupado; desagrupe antes de recortar.";break;}
+      if(!editable(state,hit.key.object)){
+       reason="Camada bloqueada ou oculta; habilite a edicao.";break;
+      }
+     }
+    }
+    if(toolWarning)toolWarning("Tesoura: "+reason);
+    if(diagnosticEvent)diagnosticEvent("scissor_span_unavailable",1);
     e->accept();return;
    }
    try{
