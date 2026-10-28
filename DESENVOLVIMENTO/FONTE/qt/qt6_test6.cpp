@@ -2247,11 +2247,15 @@ public:
   persistentSplitter_=splitter;
   splitter->setChildrenCollapsible(false);splitter->setHandleWidth(3);
   auto* left=new QFrame;left->setObjectName("leftPanel");
-  left->setMinimumWidth(52);left->setMaximumWidth(64);
+  // Largura minima inclui icone 38 px, margens e barra vertical fina.
+  left->setMinimumWidth(68);left->setMaximumWidth(76);
   auto* leftOuter=new QVBoxLayout(left);leftOuter->setContentsMargins(4,5,4,5);
-  auto* toolScroll=new QScrollArea;toolScroll->setWidgetResizable(true);
+  auto* toolScroll=new QScrollArea;toolScroll->setObjectName("toolScroll");
+  toolScroll->setWidgetResizable(true);
   toolScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-  auto* leftContent=new QWidget;
+  toolScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  toolScroll->setStyleSheet("QScrollBar:vertical { width:6px; }");
+  auto* leftContent=new QWidget;leftContent->setObjectName("toolsContent");
   auto* tools=new QVBoxLayout(leftContent);tools->setContentsMargins(4,4,4,4);tools->setSpacing(5);
   auto* toolGroup=new QButtonGroup(this);toolGroup->setExclusive(true);
   auto compact=[&](QGridLayout* grid,int row,int col,const QString& id,const QString& title,
@@ -2326,8 +2330,16 @@ public:
   for(const auto& data:std::vector<QString>{"SVG", "DXF", "LightBurn"}){
    const int index=fileGrid->count();fileGrid->addWidget(future(data,"Importação de "+data),index,0);
   }
-  auto* importImageButton=new QPushButton("Imagem / Traçar…");
+  // Texto longo alargava o grid e deslocava os icones para fora do painel.
+  auto* importImageButton=new QPushButton;
   importImageButton->setObjectName("open_image_for_trace");
+  importImageButton->setProperty("compact",true);
+  importImageButton->setAccessibleName("Imagem / Traçar");
+  importImageButton->setToolTip("Importar imagem (PNG/JPEG/BMP/WebP) e traçar vetores");
+  importImageButton->setIcon(alaser::toolGlyph("image"));
+  importImageButton->setIconSize(QSize(20,20));
+  importImageButton->setFixedSize(QSize(38,36));
+  importImageButton->setFocusPolicy(Qt::NoFocus);
   fileGrid->addWidget(importImageButton,fileGrid->count(),0);
   connect(importImageButton,&QPushButton::clicked,this,[this]{
    run([this]{
@@ -4074,6 +4086,21 @@ static QJsonObject layersUngroup198Test(const QString& directory){
 static QJsonObject inlineTransforms198Test(const QString& directory){
  QDir().mkpath(directory);
  LabWindow textWindow(Document{});textWindow.show();QApplication::processEvents();
+ // Teste de viewport: barra lateral nao pode recortar icones horizontalmente.
+ auto* toolScroll=textWindow.findChild<QScrollArea*>("toolScroll");
+ check(toolScroll&&toolScroll->viewport(),"Barra de ferramentas lateral ausente");
+ auto* toolsContent=textWindow.findChild<QWidget*>("toolsContent");
+ check(toolsContent&&toolsContent->minimumSizeHint().width()<=toolScroll->viewport()->width(),
+       "Conteudo de ferramentas excedeu largura visivel");
+ for(const char* id:{"select","nodes","bezier","scissors","new_bezier",
+                     "line","rectangle","ellipse","polygon","pencil","text","open_image_for_trace"}){
+  auto* button=textWindow.findChild<QPushButton*>(id);
+  check(button&&!button->icon().isNull(),std::string("Icone ausente: ")+id);
+  const QRect inViewport(button->mapTo(toolScroll->viewport(),QPoint{}),button->size());
+  check(inViewport.left()>=0&&inViewport.right()<toolScroll->viewport()->width(),
+        std::string("Ferramenta recortada: ")+id);
+ }
+ textWindow.grab().save(directory+"/BARRA_LATERAL_19_8.png");
  auto& tv=textWindow.view;tv.setTransform(QTransform::fromScale(4.,4.));
  tv.centerOn(QPointF(80,65));QApplication::processEvents();
  clickButton(textWindow,"text");clickScene(textWindow,{80,65});
@@ -4219,7 +4246,8 @@ static QJsonObject inlineTransforms198Test(const QString& directory){
  return {{"status","PASS"},{"inline_text",true},{"transparent_overlay",true},
   {"text_atomic_undo",true},{"scale_proportional",true},
   {"rotation_handle",true},{"undo_rotate",true},{"shift_free_scale",true},
-  {"ctrl_center_scale",true},{"selection_preview_follows_drag",true},
+  {"ctrl_center_scale",true},{"toolbar_icons_visible",true},
+  {"selection_preview_follows_drag",true},
   {"selection_preview_center_handle",true},{"selection_preview_is_non_destructive",true},
   {"selection_drag_undo",true},{"hardware_commands_sent",false}};
 }
