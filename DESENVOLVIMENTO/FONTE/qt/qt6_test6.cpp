@@ -3398,6 +3398,13 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--editor-multitool-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=editorMultitool198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_EDITOR_MULTIFERRAMENTAS_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--drawing-tools-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=newDrawingTools198Test(out);}
