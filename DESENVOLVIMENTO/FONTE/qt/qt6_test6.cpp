@@ -60,6 +60,7 @@
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QFontDialog>
+#include <QFontComboBox>
 #include <QFont>
 #include <QToolButton>
 #include <QCursor>
@@ -1938,7 +1939,8 @@ static void appendAdaptiveCubic(std::vector<Pt>& out,Pt a,Pt b,Pt c,Pt d,
  appendAdaptiveCubic(out,m,bcd,cd,d,tolerance,depth+1);
 }
 static std::vector<std::vector<Pt>> vectorTextOutlines(const QString& value,QFont font,
-                                                        double height,Pt origin){
+                                 double height,Pt origin,
+                                 Qt::AlignmentFlag align=Qt::AlignLeft){
  if(value.trimmed().isEmpty()||value.size()>100||!std::isfinite(height)||height<1||height>150)
   throw std::runtime_error("Texto ou altura fora do limite");
  font.setPixelSize(1024); // escala interna alta; coordenadas finais continuam em mm
@@ -1947,8 +1949,11 @@ static std::vector<std::vector<Pt>> vectorTextOutlines(const QString& value,QFon
  const QRectF bounds=outline.boundingRect();
  if(bounds.height()<1e-6)throw std::runtime_error("Fonte sem altura util");
  QTransform t;
- t.translate(origin.x,origin.y);
- const double scale=height/bounds.height();t.scale(scale,scale);
+ const double scale=height/bounds.height();
+ const double alignedX=origin.x-
+      (align==Qt::AlignHCenter?bounds.width()*scale/2.:
+       align==Qt::AlignRight?bounds.width()*scale:0.);
+ t.translate(alignedX,origin.y);t.scale(scale,scale);
  t.translate(-bounds.left(),-bounds.top());
  auto transformed=[&](const QPainterPath::Element& e)->Pt {
   const QPointF p=t.map(QPointF(e.x,e.y));return {p.x(),p.y()};
@@ -2004,6 +2009,10 @@ public:
  Pt inlineTextAnchor_{};
  double inlineTextHeightMm_=12.;
  QFont inlineTextFont_{"Arial",12};
+ Qt::AlignmentFlag inlineTextAlign_=Qt::AlignLeft;
+ double inlineTextLetterSpacing_=100.;
+ QTabWidget* textInspectorTabs_=nullptr;
+ QWidget* textOptionsTab_=nullptr;
  bool darkTheme_=true;
  // Persistent local preferences and crash recovery; no automatic machine connection.
  alaser::RecoveryPolicy recoveryPolicy_;
@@ -2566,7 +2575,11 @@ public:
   compact(shapeGrid,4,0,"pencil","✏ Lápis","Traço livre (P), arraste o mouse; uma acao de desfazer",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Pencil);});
   compact(shapeGrid,5,0,"text","T Texto","Texto transparente direto na mesa (T): Enter/Esc conclui",
-    [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Text);});
+    [this]{
+     bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Text);
+     if(textInspectorTabs_&&textOptionsTab_)textInspectorTabs_->setCurrentWidget(textOptionsTab_);
+     status->setText("Texto: escolha fonte, estilos e alinhamento no painel Texto, depois clique na mesa.");
+    });
   buttons.at("select")->setChecked(true);
   auto future=[&](const QString& name,const QString& tip){
     auto* b=new QPushButton(name.left(1));b->setProperty("compact",true);
@@ -3508,7 +3521,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(!commit||message.trimmed().isEmpty()){view.setFocus();return;}
   try{
    if(message.size()>100)throw std::runtime_error("Texto limitado a 100 caracteres");
-   auto outlines=vectorTextOutlines(message,inlineTextFont_,inlineTextHeightMm_,anchor);
+   QFont chosen=inlineTextFont_;
+   chosen.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
+   auto outlines=vectorTextOutlines(message,chosen,inlineTextHeightMm_,anchor,inlineTextAlign_);
    const auto ids=view.editor.addContours(std::move(outlines),true,layers->currentData().toInt());
    view.clearSelection();view.invalidateSelectionCache();view.rebuild();
    view.activate({ids.front(),0});recoveryPolicy_.edited();
@@ -3529,7 +3544,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   inlineTextEntry_=field;field->setObjectName("inlineTextEdit");
   field->setMaxLength(100);field->setPlaceholderText("Digite texto...");
   const int px=int(std::clamp(inlineTextHeightMm_*view.currentZoom(),12.,82.));
-  QFont font=inlineTextFont_;font.setPixelSize(px);field->setFont(font);
+  QFont font=inlineTextFont_;
+  font.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
+  font.setPixelSize(px);field->setFont(font);
+  field->setAlignment(inlineTextAlign_);
   field->setFrame(false);
   field->setStyleSheet("QLineEdit#inlineTextEdit { background:transparent; border:none;"
      " color:#FFAA54; padding:0; selection-background-color:#996031; }");
