@@ -184,6 +184,7 @@ class QtEditorLab final:public QGraphicsView{
  // A sessao e propriedade de LabWindow; QtEditorLab nunca a libera.
  CurveDragSession* nativeSession_=nullptr;
  bool nativeMode_=false;
+ bool fillPreview_=false; // Editor LightBurn mostra linhas por padrao.
  std::map<Key,QGraphicsPathItem*> nativeItems_;
  std::optional<CurveHit> nativeSelectedPart_;
  std::optional<Key> nativeStyledKey_;
@@ -202,10 +203,11 @@ class QtEditorLab final:public QGraphicsView{
  std::vector<QGraphicsPathItem*> shapePreviewItems_;
  // Alcas independentes dos dados; commit unico no mouseRelease.
  bool transformDragging_=false;
- int transformHandle_=-1; // 0..7 tamanho; 8..11 rotacao
+ int transformHandle_=-1; // 0..7 tamanho; 8..11 rotacao; 12 move pelo centro
  QRectF transformBounds_;
  QPointF transformAnchor_{};
  double transformSx_=1.,transformSy_=1.,transformAngle_=0.;
+ QPointF transformMoveDelta_{};
  std::vector<int> transformIds_;
  std::vector<QGraphicsPathItem*> transformItems_;
  bool nativeContourPressing_=false;
@@ -432,7 +434,7 @@ class QtEditorLab final:public QGraphicsView{
   if(!has)return {};
   return QRectF(QPointF(minX,minY),QPointF(maxX,maxY));
  }
- std::array<QPointF,12> selectionHandles(const QRectF& bounds)const{
+ std::array<QPointF,13> selectionHandles(const QRectF& bounds)const{
   const QPointF tl=viewportTransform().map(bounds.topLeft());
   const QPointF br=viewportTransform().map(bounds.bottomRight());
   const double x0=tl.x(),x1=br.x(),y0=tl.y(),y1=br.y();
@@ -441,7 +443,8 @@ class QtEditorLab final:public QGraphicsView{
    QPointF(x1,cy),QPointF(x1,y1),QPointF(cx,y1),
    QPointF(x0,y1),QPointF(x0,cy),
    QPointF(x0-17,y0-17),QPointF(x1+17,y0-17),
-   QPointF(x1+17,y1+17),QPointF(x0-17,y1+17)};
+   QPointF(x1+17,y1+17),QPointF(x0-17,y1+17),
+   QPointF(cx,cy)};
  }
  void paintSelectionHandles(QPainter* p)const{
   if(tool!=Tool::Select||selected.empty()||nativeMode_)return;
@@ -453,11 +456,15 @@ class QtEditorLab final:public QGraphicsView{
   p->save();p->resetTransform();p->setBrush(Qt::NoBrush);
   QPen edge(QColor(238,154,60),1,Qt::DashLine);edge.setCosmetic(true);p->setPen(edge);
   p->drawRect(pixel.normalized());
-  for(int h=0;h<12;++h){
+  for(int h=0;h<13;++h){
    const QPointF point=handles[size_t(h)];
    p->setPen(QPen(QColor("#182633"),1));
-   p->setBrush(h>=8?QColor("#49BCF4"):QColor("#F3F5F7"));
-   if(h>=8)p->drawEllipse(point,4.,4.);
+   p->setBrush(h==12?QColor("#FFAE45"):(h>=8?QColor("#49BCF4"):QColor("#F3F5F7")));
+   if(h==12){
+    p->drawRect(QRectF(point-QPointF(5.,5.),QSizeF(10.,10.)));
+    p->drawLine(point+QPointF(-3,0),point+QPointF(3,0));
+    p->drawLine(point+QPointF(0,-3),point+QPointF(0,3));
+   }else if(h>=8)p->drawEllipse(point,4.,4.);
    else p->drawRect(QRectF(point-QPointF(4.,4.),QSizeF(8.,8.)));
   }
   p->restore();
@@ -466,7 +473,7 @@ class QtEditorLab final:public QGraphicsView{
   for(auto* item:transformItems_)item->setTransform(QTransform());
   transformItems_.clear();transformIds_.clear();
   transformDragging_=false;transformHandle_=-1;
-  transformSx_=transformSy_=1.;transformAngle_=0.;
+  transformSx_=transformSy_=1.;transformAngle_=0.;transformMoveDelta_={};
   viewport()->update();
  }
  bool beginSelectionTransform(QPointF position){
@@ -474,7 +481,9 @@ class QtEditorLab final:public QGraphicsView{
   const auto bounds=selectedBounds();if(!bounds)return false;
   const auto handles=selectionHandles(*bounds);
   int h=-1;double distance=11.;
-  for(int i=0;i<12;++i){
+  // Preferir o ponto central quando a selecao e grande suficiente.
+  if(QLineF(position,handles[12]).length()<=7.){h=12;distance=7.;}
+  if(h<0)for(int i=0;i<12;++i){
    const double d=QLineF(position,handles[size_t(i)]).length();
    if(d<distance){h=i;distance=d;}
   }
@@ -495,7 +504,19 @@ class QtEditorLab final:public QGraphicsView{
  void updateSelectionTransform(QPointF pointer,Qt::KeyboardModifiers mods){
   if(!transformDragging_)return;
   QTransform t;
-  if(transformHandle_>=8){
+  if(transformHandle_==12){
+   const QPointF origin=viewportTransform().map(transformBounds_.center());
+   QPointF delta=mapToScene(pointer.toPoint())-transformBounds_.center();
+   // LightBurn: Shift limita deslocamento em 0/45/90 graus.
+   if(mods.testFlag(Qt::ShiftModifier)){
+    const double angle=std::atan2(delta.y(),delta.x());
+    const double snapped=std::round(angle/(std::numbers::pi/4.))*(std::numbers::pi/4.);
+    const double length=std::hypot(delta.x(),delta.y());
+    delta=QPointF(length*std::cos(snapped),length*std::sin(snapped));
+   }
+   transformMoveDelta_=delta;
+   t.translate(delta.x(),delta.y());(void)origin;
+  }else if(transformHandle_>=8){
    const QPointF pivot=transformBounds_.center();
    const auto handles=selectionHandles(transformBounds_);
    const QPointF initial=handles[size_t(transformHandle_)];
@@ -549,8 +570,12 @@ class QtEditorLab final:public QGraphicsView{
   const auto ids=transformIds_;
   const QPointF pivot=h>=8?transformBounds_.center():transformAnchor_;
   const double sx=transformSx_,sy=transformSy_,angle=transformAngle_;
+  const QPointF move=transformMoveDelta_;
   cancelSelectionTransform();
-  if(h>=8){
+  if(h==12){
+   if(QLineF(QPointF{},move).length()<1e-8)return;
+   editor.moveObjects(ids,fromQt(move));
+  }else if(h>=8){
    if(std::abs(angle)<.01)return;
    editor.rotateObjects(ids,fromQt(pivot),angle);
   }else{
@@ -558,7 +583,7 @@ class QtEditorLab final:public QGraphicsView{
    editor.scaleObjects(ids,fromQt(pivot),sx,sy);
   }
   rebuild();
-  if(diagnosticEvent)diagnosticEvent(h>=8?"selection_rotated":"selection_scaled",int(ids.size()));
+  if(diagnosticEvent)diagnosticEvent(h==12?"shapes_moved":h>=8?"selection_rotated":"selection_scaled",int(ids.size()));
   if(stateChanged)stateChanged();
  }
  void clearShapePreview(){
@@ -671,6 +696,11 @@ public:
  std::function<void(double)> zoomChanged;
  double currentZoom()const{return std::hypot(transform().m11(),transform().m21());}
  void reportZoom(){if(zoomChanged)zoomChanged(currentZoom());}
+ bool fillPreview()const{return fillPreview_;}
+ void setFillPreview(bool enabled){
+  if(fillPreview_==enabled)return;
+  fillPreview_=enabled;rebuild();
+ }
  std::function<int()> drawingLayer;
  int targetLayer()const{return drawingLayer?drawingLayer():0;}
  bool busy()const{return draggingNode_.has_value()||shapeDragging_||transformDragging_||strokeDrawing_||polylineDrawing_||marqueeActive_||nativePressing_||nativeContourPressing_;}
@@ -860,7 +890,7 @@ public:
     const auto meta=editor.state().objects.at(c.key.object);
     const auto layer=editor.state().layers.at(meta.layer);
     auto* o=scene_.addPath(pathOf(c),QPen(layerColor(meta.layer),0));o->setZValue(1);
-    if(layer.mode=="Fill"&&c.closed){
+    if(fillPreview_&&layer.mode=="Fill"&&(c.closed||hasExactDuplicateClosure(c))){
      QColor translucent=layerColor(meta.layer);translucent.setAlpha(115);
      o->setBrush(QBrush(translucent));
     }
@@ -2218,7 +2248,13 @@ public:
    layerMode_->setToolTip("Apenas visualizacao editorial. Sem G-code, velocidade ou potencia.");
    inspector->addWidget(titleLabel("MODO DA CAMADA ATIVA (PREVISUALIZACAO)"));
    inspector->addWidget(layerMode_);
-   auto* fillNote=new QLabel("Linha percorre contornos; Preenchimento colore formas fechadas. Saida fisica bloqueada.");
+   auto* showFill=new QCheckBox("Prévia de preenchimento (apenas visual)");
+   showFill->setObjectName("preview_fill");
+   showFill->setChecked(false);
+   showFill->setToolTip("Desligado por padrão como no LightBurn; não gera hatch de gravação.");
+   inspector->addWidget(showFill);
+   connect(showFill,&QCheckBox::toggled,this,[this](bool checked){view.setFillPreview(checked);});
+   auto* fillNote=new QLabel("Linha/Fill são configurações editoriais. A mesa mostra contornos por padrão; sem G-code.");
    fillNote->setObjectName("brandSub");fillNote->setWordWrap(true);inspector->addWidget(fillNote);
    layerName=new QLineEdit;layerName->setObjectName("layerName");layerName->setPlaceholderText("Nome da nova camada");
   inspector->addWidget(layerName);
@@ -2617,7 +2653,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     const QString color=shades.at(id%shades.size());
     b->setStyleSheet(QString("QPushButton { background:%1; color:white; border:1px solid #69717B; border-radius:4px; padding:1px; font-size:10px;} "
       "QPushButton:checked {border:3px solid #FFFFFF;} QPushButton:disabled {background:#41454D; color:#797D82;}").arg(color));
-    b->setToolTip(QString("Clique: ativar ou criar camada %1 | Shift+clique: criar se necessario e enviar selecao").arg(id));
+    b->setToolTip(QString("Clique: move seleção para camada %1; sem seleção, ativa. Shift+clique seleciona objetos desta camada.").arg(id));
     connect(b,&QPushButton::clicked,this,[this,id]{
      if(layers->findData(id)<0){
       run([this,id]{view.editor.addLayer(id,"Camada "+std::to_string(id));});
@@ -2625,10 +2661,18 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
      const int ix=layers->findData(id);
      if(ix<0)return;
      if(QApplication::keyboardModifiers().testFlag(Qt::ShiftModifier)){
+      if(bezierToolActive_){status->setText("Selecione polilinhas no modo Seleção.");return;}
+      view.clearSelection();
+      for(const auto& [obj,meta]:view.editor.state().objects)
+       if(meta.layer==id&&editable(view.editor.state(),obj))view.selected.insert(obj);
+      view.applySelectionStyles();view.viewport()->update();
+      layers->setCurrentIndex(ix);
+     }else if(!selection().empty()){
       run([this,id]{
-       check(!bezierToolActive_,"Somente polilinhas podem ser enviadas para camadas nesta versao.");
-       const auto ids=selection();check(!ids.empty(),"Selecione uma forma primeiro.");
-       view.editor.moveSelectionToLayer(ids,id);view.rebuild();captureEvent("objects_layer_changed",int(ids.size()));
+       check(!bezierToolActive_,"Mover camadas: polilinhas no modo Seleção.");
+       const auto ids=selection();
+       view.editor.moveSelectionToLayer(ids,id);view.rebuild();
+       captureEvent("objects_layer_changed",int(ids.size()));
        layers->setCurrentIndex(layers->findData(id));
       });
      }else layers->setCurrentIndex(ix);
@@ -3565,6 +3609,100 @@ static QJsonObject newDrawingTools198Test(const QString& directory){
 
 // Qt GUI: texto direto na mesa, proporcao, escala livre e rotacao.
 // Qt 19.8: camadas persistentes, modo visual, grupos multiplos e Ctrl+U.
+// 19.8: topologia real do arquivo TESTE TESOURA.alaser (sem copiar sua arte).
+// O arquivo do cliente tem 571 anéis com ultimo no repetido e closed=false.
+static QJsonObject scissorClosures198Test(const QString& directory){
+ QDir().mkpath(directory);
+ Document d;d.nextId=6;
+ d.contours.push_back({{1,0},
+  {{1,{0,0}},{2,{20,0}},{3,{20,20}},{4,{0,20}},{5,{0,0}}},false});
+ check(hasExactDuplicateClosure(d.contours.front()),"Fecho duplicado nao identificado");
+ const auto original=serialize(encode(d));
+ ScissorSpanPlanner planner;planner.reset(d);
+ auto candidate=planner.candidate(d,Hit{{1,0},0,0,{10,0}});
+ check(candidate.has_value()&&candidate->closed,"Tesoura ignorou anel virtual");
+ check(serialize(encode(d))==original,"Hover da Tesoura alterou arquivo");
+ Editor isolated(fromDocument(d));
+ isolated.removeScissorSpan(*candidate);
+ check(isolated.state().doc.contours.empty(),"Tesoura nao removeu anel isolado");
+ check(isolated.undo(),"Undo do corte falhou");
+ check(serialize(encode(isolated.state().doc))==original,"Undo nao restaurou fecho original");
+ Document crosses=d;
+ crosses.contours.push_back({{2,0},{{6,{5,-10}},{7,{5,30}}},false});
+ crosses.contours.push_back({{3,0},{{8,{15,-10}},{9,{15,30}}},false});
+ crosses.nextId=10;
+ ScissorSpanPlanner crossPlanner;crossPlanner.reset(crosses);
+ auto crossSpan=crossPlanner.candidate(crosses,Hit{{1,0},0,0,{10,0}});
+ check(crossSpan.has_value()&&crossSpan->closed,
+  "Tesoura nao encontrou segmento entre cruzamentos com fecho duplicado");
+ const auto crossingBefore=serialize(encode(crosses));
+ Editor crossed(fromDocument(crosses));
+ const auto crossUndo=crossed.undoCount();
+ crossed.removeScissorSpan(*crossSpan);
+ check(crossed.undoCount()==crossUndo+1,"Corte nao registrou undo unico");
+ check(crossed.state().doc.contours.size()==3,"Corte alterou outras formas");
+ const auto* trimmed=get(crossed.state().doc,{1,0});
+ check(trimmed&&(!trimmed->closed),"Corte nao abriu restante do anel");
+ check(sameDoc(Document{{crosses.contours[1],crosses.contours[2]},10},
+                   Document{{crossed.state().doc.contours[1],crossed.state().doc.contours[2]},10}),
+       "Corte alterou outros objetos");
+ check(crossed.undo()&&serialize(encode(crossed.state().doc))==crossingBefore,
+       "Undo nao restaurou contornos cruzados");
+ // Alca central move o conjunto com uma unica acao.
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ auto& v=w.view;v.setTransform(QTransform::fromScale(5.,5.));
+ v.centerOn(QPointF(40,40));QApplication::processEvents();
+ const int id=v.editor.rectangle({30,30},20,20);v.rebuild();
+ clickButton(w,"select");v.activate({id,0});
+ const auto start=v.mapFromScene({40,40}),end=v.mapFromScene({50,40});
+ const auto nUndo=v.editor.undoCount();
+ QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,start);
+ QMouseEvent move(QEvent::MouseMove,QPointF(end),
+   QPointF(v.viewport()->mapToGlobal(end)),Qt::NoButton,Qt::LeftButton,Qt::NoModifier);
+ QApplication::sendEvent(v.viewport(),&move);
+ QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,end);
+ QApplication::processEvents();
+ check(v.editor.undoCount()==nUndo+1,"Alca central nao gerou um unico undo");
+ const auto* moved=get(v.editor.state().doc,{id,0});
+ check(moved&&std::abs(moved->nodes.front().p.x-40.)<.5,
+       "Alca central nao moveu o objeto em 10 mm");
+ check(v.editor.undo(),"Alca central nao pode ser desfeita");
+ check(std::abs(get(v.editor.state().doc,{id,0})->nodes.front().p.x-30.)<.1,
+       "Undo da alca central falhou");
+ // Paleta: clique simples move selecao para camada.
+ v.activate({id,0});
+ auto* swatch=w.findChild<QPushButton*>("layer_swatch_3");
+ check(swatch,"Swatch nao encontrado");
+ QTest::mouseClick(swatch,Qt::LeftButton);QApplication::processEvents();
+ check(v.editor.state().objects.at(id).layer==3,
+       "Clique simples na paleta nao moveu a selecao para camada 3");
+ // XML LightBurn com raio em Rect e elipse.
+ const QString path=directory+"/LBRN2_RAIO_19_8.lbrn2";
+ QFile xml(path);check(xml.open(QIODevice::WriteOnly),"Nao criou fixture LBRN2");
+ const QByteArray fixture=R"XML(<?xml version="1.0" encoding="utf-8"?>
+<LightBurnProject>
+<Shape Type="Rect" W="20" H="10" Cr="3" CutIndex="2">
+ <XForm>1 0 0 1 25 30</XForm>
+</Shape>
+<Shape Type="Ellipse" W="16" H="16" CutIndex="3">
+ <XForm>1 0 0 1 50 50</XForm>
+</Shape>
+</LightBurnProject>)XML";
+ xml.write(fixture);xml.close();
+ auto parsed=lightburn::readGeometry(path);
+ check(parsed.shapeCount==2&&parsed.state.doc.contours.size()==2,
+       "Importador rejeitou retangulo arredondado e elipse");
+ check(parsed.state.doc.contours.front().nodes.size()>70,
+       "Cr foi ignorado e retangulo virou cantos retos");
+ check(parsed.state.doc.contours[1].nodes.size()==384,
+       "Elipse LBRN2 nao manteve suavizacao");
+ w.grab().save(directory+"/ALCA_CENTRAL_19_8.png");
+ return {{"status","PASS"},{"client_topology_reproduced",true},
+   {"virtual_closed_isolated",true},{"virtual_closed_crossings",true},
+   {"original_and_undo_preserved",true},{"center_move",true},
+   {"palette_simple_click",true},{"rounded_rect_lbrn2",true},
+   {"laser_commands_sent",false}};
+}
 static QJsonObject layersUngroup198Test(const QString& directory){
  QDir().mkpath(directory);
  LabWindow w(Document{});w.show();QApplication::processEvents();
@@ -3585,7 +3723,10 @@ static QJsonObject layersUngroup198Test(const QString& directory){
  QApplication::processEvents();
  v.rebuild();
  check(v.editor.state().layers.at(2).mode=="Fill","Modo Fill nao persistiu no Editor");
- check(v.pathItem({a,0})->brush().style()!=Qt::NoBrush,"Forma fechada nao teve preenchimento");
+ check(v.pathItem({a,0})->brush().style()==Qt::NoBrush,
+  "Editor deve mostrar contornos no padrao LightBurn");
+ v.setFillPreview(true);
+ check(v.pathItem({a,0})->brush().style()!=Qt::NoBrush,"Previa opcional nao preencheu forma fechada");
  check(v.pathItem({c,0})->brush().style()==Qt::NoBrush,"Modo Linha indevidamente preenchido");
  const int ga=v.editor.group({a,b});
  const int gb=v.editor.group({c,d});
@@ -3852,7 +3993,7 @@ static QJsonObject lightburnImport198Test(const QString& directory){
  check(std::abs(nested.nodes[0].p.x-100.)<1e-8&&
        std::abs(nested.nodes[0].p.y-202.)<1e-8,"transformacao de grupo incorreta");
  const auto& ellipse=imported.state.doc.contours.at(2);
- check(ellipse.nodes.size()==96,"elipse nao foi convertida para pontos");
+ check(ellipse.nodes.size()==384,"elipse nao foi convertida para 384 pontos");
  const auto& path=imported.state.doc.contours.at(3);
  check(!path.closed&&path.nodes.size()==3&&std::abs(path.nodes[0].p.x-8.)<1e-8,
        "Path com segmentos retos ou XForm incorreto");
@@ -3879,7 +4020,7 @@ static QJsonObject lightburnImport198Test(const QString& directory){
  QApplication::sendEvent(&w,&drag);
  check(drag.isAccepted(),"janela nao aceita arrastar .lbrn2");
  return {{"status","PASS"},{"rect_transform",true},{"group_transform",true},
-         {"ellipse_96_segments",true},{"path_lines",true},{"path_bezier",true},{"layers",true},{"unsupported_path_rejected",true},
+         {"ellipse_384_segments",true},{"path_lines",true},{"path_bezier",true},{"layers",true},{"unsupported_path_rejected",true},
          {"drag_enter_lbrn2",true},{"hardware_commands_sent",false}};
 }
 
@@ -3894,6 +4035,12 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--scissor-closures-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=scissorClosures198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_CASO_REAL_19_8.json");if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--layers-ungroup-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=layersUngroup198Test(out);}

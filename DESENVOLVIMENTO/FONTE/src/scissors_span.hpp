@@ -45,6 +45,20 @@ inline std::vector<Pt> spanPoints(const Contour& c,double a,double b){
  return p;
 }
 inline double cross2(Pt a,Pt b){return a.x*b.y-a.y*b.x;}
+// Arquivos vetoriais antigos podem ter o primeiro no repetido no fim mas
+// closed=false. A geometria e um anel real, somente o metadado ficou aberto.
+// Usar fecho virtual APENAS para preview/tesoura; nao mudar os dados originais.
+inline bool hasExactDuplicateClosure(const Contour& contour){
+ return !contour.closed && contour.nodes.size()>=4 &&
+  dist(contour.nodes.front().p,contour.nodes.back().p)<=1e-9;
+}
+inline Contour scissorLogicalContour(const Contour& contour){
+ Contour result=contour;
+ if(hasExactDuplicateClosure(contour)){
+  result.nodes.pop_back();result.closed=true;
+ }
+ return result;
+}
 class ScissorSpanPlanner {
  struct Boundaries {std::vector<double> crossings;std::vector<std::pair<double,double>> unsafe;};
  std::vector<Segment> segments_;
@@ -109,8 +123,11 @@ public:
   cache_.clear();
  }
  std::optional<ScissorSpan> candidate(const Document& d,const Hit& hit){
-  const Contour* c=get(d,hit.key);
-  if(!c||c->nodes.size()<2)return {};
+  const Contour* original=get(d,hit.key);
+  if(!original||original->nodes.size()<2)return {};
+  // Tratar costura duplicada como anel fechado em arquivos ja existentes.
+  Contour logical=scissorLogicalContour(*original);
+  const Contour* c=&logical;
   const int m=int(c->nodes.size())-(c->closed?0:1);
   if(hit.segment<0||hit.segment>=m)return {};
   const Pt a=c->nodes[size_t(hit.segment)].p,b=c->nodes[size_t(hit.segment+1)%c->nodes.size()].p;

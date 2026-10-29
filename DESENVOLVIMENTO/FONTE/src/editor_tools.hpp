@@ -260,21 +260,25 @@ public:
  // Uma unica transacao cria no maximo dois restos independentes.
  int removeScissorSpan(const ScissorSpan& span){
   const Contour* source=get(current.doc,span.key);
-  if(!source||source->closed!=span.closed)throw std::runtime_error("contorno de tesoura ausente");
+  if(!source)throw std::runtime_error("contorno de tesoura ausente");
+  const bool logicalClosed=source->closed||hasExactDuplicateClosure(*source);
+  if(logicalClosed!=span.closed)throw std::runtime_error("geometria de tesoura mudou");
   if(!editable(current,span.key.object))throw std::runtime_error("camada bloqueada ou invisivel");
   if(current.objects.at(span.key.object).group>0)throw std::runtime_error("desagrupe antes de usar tesoura");
   const int m=int(source->nodes.size())-(source->closed?0:1);
   if(m<=0||!std::isfinite(span.from)||!std::isfinite(span.to)||
      span.to<=span.from+1e-7||span.to-span.from>m+1e-7||
-     (!source->closed&&(span.from<0||span.to>m))||
-     (source->closed&&(span.from< -m||span.from>=m||span.to>2.*m)))
+     (!logicalClosed&&(span.from<0||span.to>m))||
+     (logicalClosed&&(span.from< -m||span.from>=m||span.to>2.*m)))
     throw std::runtime_error("intervalo de tesoura invalido");
   const int nextObject=nextObjectId(current.doc);
   int selectedResult=span.key.object;
   change([&](EditorState& state){
    Contour* original=get(state.doc,span.key);
    if(!original)throw std::runtime_error("contorno removido");
-   const Contour before=*original;
+   // O fecho virtual fica persistente APENAS no contorno editado, no
+   // instante em que a pessoa confirma o corte. Undo restaura o original.
+   const Contour before=scissorLogicalContour(*original);
    const int n=int(before.nodes.size());
    auto nodeAt=[&](double u)->Node{
     const double value=before.closed?wrapScissorParam(u,m):u;

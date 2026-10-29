@@ -66,9 +66,9 @@ inline ParseNode readShape(QXmlStreamReader& xml,int depth,int& seen){
  if(node.type!="Group"&&node.type!="Rect"&&node.type!="Ellipse"&&node.type!="Path"){
   throw std::runtime_error(("Tipo de forma LightBurn ainda nao suportado: "+node.type).toStdString());
  }
- // Arcos arredondados ainda precisam de conversao de bezier; nao fingir que sao retos.
- if(node.type=="Rect"&&std::abs(node.radius)>1e-9)
-  throw std::runtime_error("Retangulo com cantos arredondados ainda nao suportado");
+ // Raio valido de cantos arredondados; sem retangularizar silenciosamente.
+ if(node.type=="Rect"&&(node.radius<0||node.radius>std::min(node.w,node.h)/2.+1e-9))
+  throw std::runtime_error("Raio Cr fora dos limites de Rect");
  if(node.type!="Group"&&node.type!="Path"&&(!(node.w>0)||!(node.h>0)))
   throw std::runtime_error("Dimensoes ausentes para Rect/Ellipse");
  while(xml.readNextStartElement()){
@@ -185,7 +185,19 @@ inline void flatten(const ParseNode& n,const QTransform& parent,
  std::vector<Pt> pts;
  if(n.type=="Rect"){
   const double x=n.w/2.,y=n.h/2.;
-  pts={{-x,-y},{x,-y},{x,y},{-x,y}};
+  const double radius=std::min(n.radius,std::min(x,y));
+  if(radius<=1e-9)pts={{-x,-y},{x,-y},{x,y},{-x,y}};
+  else{
+   constexpr int arcSteps=24;
+   const std::array<Pt,4> centers{{{x-radius,-y+radius},
+    {x-radius,y-radius},{-x+radius,y-radius},{-x+radius,-y+radius}}};
+   for(int corner=0;corner<4;++corner)
+    for(int j=0;j<=arcSteps;++j){
+     const double angle=(-90.+90.*corner+90.*j/arcSteps)*std::numbers::pi/180.;
+     pts.push_back({centers[size_t(corner)].x+radius*std::cos(angle),
+      centers[size_t(corner)].y+radius*std::sin(angle)});
+    }
+  }
  }else if(n.type=="Path"){
   auto converted=decodePath(n);
   pts=std::move(converted.first);
@@ -199,7 +211,7 @@ inline void flatten(const ParseNode& n,const QTransform& parent,
   result.push_back({std::move(pts),n.cutIndex,converted.second});
   return;
  }else if(n.type=="Ellipse"){
-  constexpr int steps=96;
+  constexpr int steps=384;
   for(int i=0;i<steps;i++){
    const double angle=2*std::numbers::pi*i/steps;
    pts.push_back({(n.w/2.)*std::cos(angle),(n.h/2.)*std::sin(angle)});
