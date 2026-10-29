@@ -190,6 +190,7 @@ class QtEditorLab final:public QGraphicsView{
  // A sessao e propriedade de LabWindow; QtEditorLab nunca a libera.
  CurveDragSession* nativeSession_=nullptr;
  bool nativeMode_=false;
+ bool nativeEditHandles_=false; // Select mode moves native contours; Bézier mode edits anchors/handles.
  bool fillPreview_=false; // Editor LightBurn mostra linhas por padrao.
  QImage rasterSource_; // preview temporario fora do arquivo .alaser
  QRectF rasterRect_;
@@ -863,19 +864,61 @@ public:
  void attachNative(CurveDragSession* session){
   if((nativePressing_||nativeContourPressing_)&&nativeSession_)nativeSession_->cancel();
   nativePressing_=false;nativeContourPressing_=false;nativeMode_=false;
+  nativeEditHandles_=false;
   clearNativeItems();nativeSession_=session;
   createNativeItems();
  }
  void enableNative(bool enabled){
   if(busy())return;
   nativeMode_=enabled&&hasNativeDocument();
+  nativeEditHandles_=nativeMode_;
   if(nativeMode_){tool=Tool::Select;viewport()->setCursor(Qt::ArrowCursor);}
   updateNativePaths(false);
+ }
+ bool nativeSelectionMode()const{return nativeMode_&&!nativeEditHandles_;}
+ bool nativeEditingMode()const{return nativeMode_&&nativeEditHandles_;}
+ bool nativeModeActive()const{return nativeMode_;}
+ bool nativeHistoryAvailable(bool redo)const{
+  return nativeSession_&&(redo?nativeSession_->redoCount():nativeSession_->undoCount())>0;
+ }
+ bool selectNativeAt(Pt click,bool startMove){
+  if(!nativeSession_||!hasNativeDocument())return false;
+  const auto matches=nativeSession_->pickEdges(click,nativePxPerMm(),viewport()->devicePixelRatioF(),8);
+  if(matches.empty())return false;
+  nativeSession_->select(matches.front().key);
+  nativeMode_=true;nativeEditHandles_=false;tool=Tool::Select;
+  active_.reset();selected.clear();applySelectionStyles();
+  if(startMove){
+   nativeContourPressing_=nativeSession_->startContourMove(matches.front().key,click);
+  }
+  updateNativePaths(true);
+  if(stateChanged)stateChanged();
+  return true;
+ }
+ bool cutNativeAt(Pt click){
+  if(!nativeSession_||!hasNativeDocument())return false;
+  const auto hits=nativeSession_->pickEdges(click,nativePxPerMm(),viewport()->devicePixelRatioF(),9);
+  if(hits.empty())return false;
+  int next=1;
+  for(const auto& [id,_]:editor.state().objects)next=std::max(next,id+1);
+  for(const auto& c:nativeSession_->committed().contours)next=std::max(next,c.key.object+1);
+  if(!nativeSession_->cutContourAtEdge(hits.front(),next))return false;
+  nativeMode_=true;nativeEditHandles_=false;tool=Tool::Select;
+  createNativeItems();updateNativePaths(true);
+  if(diagnosticEvent)diagnosticEvent("bezier_contour_scissor_cut",1);
+  if(stateChanged)stateChanged();
+  return true;
  }
  void nativeHistory(bool redo){
   if(!nativeSession_||nativePressing_||nativeContourPressing_)return;
   bool changed=redo?nativeSession_->redo():nativeSession_->undo();
-  if(changed){nativeSelectedPart_.reset();updateNativePaths(true);if(stateChanged)stateChanged();}
+  if(changed){
+   nativeSelectedPart_.reset();
+   // Undo/Redo can CREATE or REMOVE entire native paths. Updating only
+   // existing QGraphicsPathItem paths leaves orphaned ghost curves.
+   createNativeItems();
+   if(stateChanged)stateChanged();
+  }
  }
  bool nativeDeleteSelected(){
   if(!nativeSession_||nativePressing_||nativeContourPressing_||!nativeSelectedPart_||!nativeSession_->selected())return false;
