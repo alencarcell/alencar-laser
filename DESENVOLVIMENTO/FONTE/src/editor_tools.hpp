@@ -23,7 +23,18 @@ struct Layer {
  bool optimizeTravel=true; // reordenacao VIRTUAL na previa apenas
 };
 struct Meta {int layer=0,group=0;};
-struct EditorState {Document doc;std::map<int,Meta> objects;std::map<int,Layer> layers;int nextGroup=1;};
+struct EditableText {
+ std::string text,fontFamily;
+ double heightMm=12,spacingPercent=100;
+ bool bold=false,italic=false;
+ int align=0; // 0 left, 1 center, 2 right
+ Pt anchor{},sourceBoundsMin{};
+ std::vector<int> members;
+};
+struct EditorState {
+ Document doc;std::map<int,Meta> objects;std::map<int,Layer> layers;
+ int nextGroup=1;std::map<int,EditableText> editableTexts;
+};
 inline size_t countNodes(const Document& d){size_t n=0;for(auto& c:d.contours)n+=c.nodes.size();return n;}
 inline void validate(const EditorState& s){
  std::set<Key> keys;std::set<int64_t> ids;std::set<int> objs;int64_t maxId=0;
@@ -44,6 +55,18 @@ inline void validate(const EditorState& s){
    throw std::runtime_error("invalid layer simulation parameters");
  for(auto obj:objs){auto i=s.objects.find(obj);if(i==s.objects.end()||!s.layers.count(i->second.layer)||i->second.group<0)throw std::runtime_error("unregistered object/layer");}
  for(auto& [id,meta]:s.objects)if(!objs.count(id))throw std::runtime_error("metadata on missing object");
+ for(const auto& [root,t]:s.editableTexts){
+  if(t.text.empty()||t.text.size()>600||t.fontFamily.empty()||
+     t.fontFamily.size()>250||t.members.empty()||t.members.front()!=root||
+     !std::isfinite(t.heightMm)||t.heightMm<1||t.heightMm>150||
+     !std::isfinite(t.spacingPercent)||t.spacingPercent<60||t.spacingPercent>200||
+     !std::isfinite(t.anchor.x)||!std::isfinite(t.anchor.y)||
+     !std::isfinite(t.sourceBoundsMin.x)||!std::isfinite(t.sourceBoundsMin.y)||
+     t.align<0||t.align>2)throw std::runtime_error("invalid editable text");
+  std::set<int> members;
+  for(int id:t.members)if(!members.insert(id).second||!objs.count(id))
+   throw std::runtime_error("missing text member");
+ }
 }
 inline EditorState fromDocument(Document d){
  EditorState s;s.doc=std::move(d);s.layers[0]={0,"Padrão",true,false};
@@ -115,7 +138,14 @@ class Editor{
  std::vector<EditorState> past,future;
  size_t maxHistory=40;
  template<class Fn> void change(Fn fn,bool changesGeometry=true){
-  EditorState next=current;fn(next);validate(next);
+  EditorState next=current;fn(next);
+  for(auto it=next.editableTexts.begin();it!=next.editableTexts.end();){
+   bool intact=true;
+   for(int id:it->second.members)
+    if(!next.objects.count(id)){intact=false;break;}
+   if(!intact)it=next.editableTexts.erase(it);else ++it;
+  }
+  validate(next);
   past.push_back(current);if(past.size()>maxHistory)past.erase(past.begin());
   current=std::move(next);future.clear();++generation;if(changesGeometry)++geometryGeneration;
  }
@@ -183,6 +213,68 @@ public:
     ids.push_back(next++);
    }
   });return ids;
+ }
+ std::optional<std::pair<int,EditableText>> findEditableText(int objectId)const{
+  for(const auto& [id,t]:current.editableTexts)
+   if(std::find(t.members.begin(),t.members.end(),objectId)!=t.members.end())
+    return std::make_pair(id,t);
+  return std::nullopt;
+ }
+ int addEditableText(std::vector<std::vector<Pt>> polygons,EditableText text,int layer){
+  if(polygons.empty()||polygons.size()>1000||text.text.empty())
+   throw std::runtime_error("invalid text polygons");
+  std::size_t n=0;
+  for(const auto& poly:polygons){if(poly.size()<3)throw std::runtime_error("text path invalid");n+=poly.size();}
+  if(n>50000)throw std::runtime_error("text exceeds node limit");
+  const int root=nextObjectId(current.doc);
+  if(root>INT32_MAX-int(polygons.size()))throw std::runtime_error("text IDs exhausted");
+  change([&](EditorState& state){
+   if(!state.layers.count(layer)||!state.layers.at(layer).visible||
+      state.layers.at(layer).locked)throw std::runtime_error("text layer not editable");
+   text.members.clear();
+   int id=root;
+   const int group=polygons.size()>1?state.nextGroup++:0;
+   for(const auto& poly:polygons){
+    Contour c;c.key={id,0};c.closed=true;
+    for(Pt p:poly)c.nodes.push_back({state.doc.nextId++,p});
+    state.doc.contours.push_back(std::move(c));
+    state.objects[id]={layer,group};text.members.push_back(id++);
+   }
+   text.sourceBoundsMin=boundsOf(state.doc,text.members).first;
+   state.editableTexts[root]=text;
+  });
+  return root;
+ }
+ void replaceEditableText(int root,std::vector<std::vector<Pt>> polygons,
+                          EditableText updated){
+  if(polygons.empty()||polygons.size()>1000||updated.text.empty())
+   throw std::runtime_error("invalid text replacement");
+  size_t count=0;
+  for(const auto& poly:polygons){if(poly.size()<3)throw std::runtime_error("invalid glyph");count+=poly.size();}
+  if(count>50000)throw std::runtime_error("text exceeds node limit");
+  change([&](EditorState& state){
+   auto old=state.editableTexts.find(root);
+   if(old==state.editableTexts.end())throw std::runtime_error("no editable text");
+   auto previous=old->second;
+   for(int id:previous.members)if(!editable(state,id))
+    throw std::runtime_error("text member locked");
+   const Meta meta=state.objects.at(root);
+   std::set<int> remove(previous.members.begin(),previous.members.end());
+   state.doc.contours.erase(std::remove_if(state.doc.contours.begin(),state.doc.contours.end(),
+      [&](const Contour& c){return remove.count(c.key.object)>0;}),state.doc.contours.end());
+   for(int id:remove)state.objects.erase(id);
+   int next=nextObjectId(state.doc);
+   updated.members.clear();
+   for(std::size_t i=0;i<polygons.size();++i){
+    const int id=i==0?root:next++;
+    Contour c;c.key={id,0};c.closed=true;
+    for(Pt p:polygons[i])c.nodes.push_back({state.doc.nextId++,p});
+    state.doc.contours.push_back(std::move(c));
+    state.objects[id]=meta;updated.members.push_back(id);
+   }
+   updated.sourceBoundsMin=boundsOf(state.doc,updated.members).first;
+   state.editableTexts[root]=updated;
+  });
  }
  // Explicit Alt+J action for TWO selected open contours; closest pair of
  // free endpoints must be within tolerance. Only one history transaction.
@@ -684,7 +776,18 @@ inline boost::json::object metadata(const EditorState& s){
    {"passes",l.passes},{"powerMode",l.powerMode},{"optimizeTravel",l.optimizeTravel}});
  m["layers"]=std::move(layers);array objects;
  for(auto&[id,o]:s.objects)objects.push_back(object{{"id",id},{"layer",o.layer},{"group",o.group}});
- m["objects"]=std::move(objects);return m;
+ m["objects"]=std::move(objects);
+ array texts;
+ for(const auto& [root,t]:s.editableTexts){
+  array members;for(int id:t.members)members.push_back(id);
+  texts.push_back(object{{"root",root},{"text",t.text},{"family",t.fontFamily},
+   {"heightMm",t.heightMm},{"spacingPercent",t.spacingPercent},
+   {"bold",t.bold},{"italic",t.italic},{"align",t.align},
+   {"anchorX",t.anchor.x},{"anchorY",t.anchor.y},
+   {"boundsX",t.sourceBoundsMin.x},{"boundsY",t.sourceBoundsMin.y},
+   {"members",std::move(members)}});
+ }
+ m["editableTexts"]=std::move(texts);return m;
 }
 inline EditorState fromMetadata(Document d,const boost::json::value& v){
  EditorState s;s.doc=std::move(d);const auto& m=v.as_object();if(m.at("schema").as_string()!="editor-meta-1")throw std::runtime_error("metadata schema unsupported");s.nextGroup=int(m.at("nextGroup").as_int64());
@@ -701,6 +804,24 @@ inline EditorState fromMetadata(Document d,const boost::json::value& v){
     x.if_contains("powerMode")?std::string(x.at("powerMode").as_string()):"M4",
     x.if_contains("optimizeTravel")?x.at("optimizeTravel").as_bool():true};}
  for(const auto& item:m.at("objects").as_array()){const auto& x=item.as_object();int id=int(x.at("id").as_int64());if(s.objects.count(id))throw std::runtime_error("duplicate object meta");s.objects[id]={int(x.at("layer").as_int64()),int(x.at("group").as_int64())};}
+ if(const auto* texts=m.if_contains("editableTexts")){
+  for(const auto& item:texts->as_array()){
+   const auto& x=item.as_object();
+   EditableText t;
+   const int root=int(x.at("root").as_int64());
+   t.text=std::string(x.at("text").as_string());
+   t.fontFamily=std::string(x.at("family").as_string());
+   t.heightMm=x.at("heightMm").to_number<double>();
+   t.spacingPercent=x.at("spacingPercent").to_number<double>();
+   t.bold=x.at("bold").as_bool();t.italic=x.at("italic").as_bool();
+   t.align=int(x.at("align").as_int64());
+   t.anchor={x.at("anchorX").to_number<double>(),x.at("anchorY").to_number<double>()};
+   t.sourceBoundsMin={x.at("boundsX").to_number<double>(),x.at("boundsY").to_number<double>()};
+   for(const auto& v:x.at("members").as_array())t.members.push_back(int(v.as_int64()));
+   if(!s.editableTexts.emplace(root,std::move(t)).second)
+    throw std::runtime_error("duplicate text root");
+  }
+ }
  validate(s);return s;
 }
 } // namespace alaser
