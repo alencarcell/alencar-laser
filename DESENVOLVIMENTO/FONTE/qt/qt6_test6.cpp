@@ -5431,6 +5431,44 @@ static QJsonObject drawAndJoin198Test(){
  QApplication::processEvents();
  check(ui.view.nativeItemCount()==1&&ui.view.hasNativeDocument(),
        "Cliques e arraste nao concluiram novo desenho Bézier na viewport");
+ // Reproduction of Windows bug report: created path appeared on screen,
+ // but could not be selected, undone, cut, or edited once the tool changed.
+ const Key nativeKey{1,0}; // empty fixture starts native IDs at 1
+ const QPainterPath initialCurve=ui.view.nativeItemPath(nativeKey);
+ const QPoint hitPoint=ui.view.mapFromScene(initialCurve.pointAtPercent(0.25));
+ clickButton(ui,"select");
+ QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,hitPoint);
+ QApplication::processEvents();
+ check(ui.view.nativeSelectionMode()&&ui.view.nativeSelected()&&
+       *ui.view.nativeSelected()==nativeKey,
+       "Curva criada nao ficou selecionavel pela ferramenta Selecao");
+ check(ui.view.shouldUseNativeHistory(false),
+       "Ctrl+Z nao reconhece historico nativo apos voltar ao modo Selecao");
+ clickButton(ui,"undo");
+ QApplication::processEvents();
+ check(ui.view.nativeItemCount()==0&&!ui.view.hasNativeDocument(),
+       "Desfazer criacao deixou objeto Bézier fantasma na tela");
+ clickButton(ui,"redo");
+ QApplication::processEvents();
+ check(ui.view.nativeItemCount()==1&&ui.view.hasNativeDocument(),
+       "Refazer criacao nao restaurou QGraphicsPathItem Bézier");
+ // Native curve is reselectable and its handles are editable after redo.
+ clickButton(ui,"select");
+ QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,hitPoint);
+ clickButton(ui,"bezier");
+ check(ui.view.nativeEditingMode()&&ui.view.nativeSelected(),
+       "Ferramenta editar Bézier nao ativou alcas da curva criada");
+ // Scissors splits the native path exactly (not flattened to polyline).
+ clickButton(ui,"scissors");
+ const QPoint scissorPt=ui.view.mapFromScene(
+     ui.view.nativeItemPath(nativeKey).pointAtPercent(.35));
+ QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,scissorPt);
+ QApplication::processEvents();
+ check(ui.view.nativeItemCount()==2,
+       "Tesoura nao separou Bézier nativa em dois caminhos editaveis");
+ clickButton(ui,"undo");
+ check(ui.view.nativeItemCount()==1,
+       "Desfazer Tesoura nao restaurou um unico contorno Bézier");
  ui.close();
  LabWindow lineUi(Document{});
  lineUi.show();QApplication::processEvents();
@@ -5454,7 +5492,9 @@ static QJsonObject drawAndJoin198Test(){
  lineUi.close();
  return {{"status","PASS"},{"rectangle_join_atomic",true},
   {"snap_endpoint",true},{"bezier_native_handles",true},
-  {"bezier_viewport_drag",true},{"line_viewport_auto_join",true},
+  {"bezier_viewport_drag",true},{"bezier_select_after_finish",true},
+  {"bezier_undo_redo_no_ghosts",true},{"bezier_scissor_split",true},
+  {"bezier_edit_handles_accessible",true},{"line_viewport_auto_join",true},
   {"undo_redo",true},{"hardware_commands_sent",false}};
 }
 
