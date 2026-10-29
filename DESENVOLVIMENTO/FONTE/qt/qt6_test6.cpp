@@ -1406,13 +1406,36 @@ protected:
   if(draggedMarker){p->setBrush(QColor(255,186,84));p->drawEllipse(*draggedMarker,4./markerScale,4./markerScale);++markerDraws;}
   p->restore();
  }
+// Texto original deve aceitar clique no interior das letras, nao so
+// sobre vertices/arestas das polilinhas geradas pela fonte.
+std::optional<int> editableTextAt(Pt point)const{
+ const auto hits=editor.selectableHits(point,10./std::max(.001,currentZoom()));
+ for(const auto& hit:hits){
+  const auto text=editor.findEditableText(hit.key.object);
+  if(text)return text->first;
+ }
+ std::optional<int> best;
+ double smallest=std::numeric_limits<double>::infinity();
+ for(const auto& [root,text]:editor.state().editableTexts){
+  bool allowed=true;
+  for(int member:text.members)if(!editable(editor.state(),member)){
+   allowed=false;break;
+  }
+  if(!allowed)continue;
+  const auto [lo,hi]=boundsOf(editor.state().doc,text.members);
+  const QRectF bounds(toQt(lo),toQt(hi));
+  if(!bounds.contains(toQt(point)))continue;
+  const double area=std::max(1e-8,bounds.width()*bounds.height());
+  if(area<smallest){best=root;smallest=area;}
+ }
+ return best;
+}
 void mouseDoubleClickEvent(QMouseEvent* e)override{
  if(e->button()==Qt::LeftButton&&requestEditTextObject&&
     (tool==Tool::Select||tool==Tool::Text)){
-  const Pt point=fromQt(mapToScene(e->position().toPoint()));
-  const auto hits=editor.selectableHits(point,10./std::max(0.001,currentZoom()));
-  for(const auto& hit:hits)if(editor.findEditableText(hit.key.object)){
-   const int id=hit.key.object;
+  const auto target=editableTextAt(fromQt(mapToScene(e->position().toPoint())));
+  if(target){
+   const int id=*target;
    QTimer::singleShot(0,this,[this,id]{
     if(requestEditTextObject)requestEditTextObject(id);
    });
@@ -1533,7 +1556,18 @@ void mousePressEvent(QMouseEvent* e)override{
    e->accept();return;
   }
   if(tool==Tool::Text){
-   if(requestTextAt)requestTextAt(fromQt(mapToScene(e->position().toPoint())));
+   const Pt at=fromQt(mapToScene(e->position().toPoint()));
+   if(requestEditTextObject){
+    const auto existing=editableTextAt(at);
+    if(existing){
+     const int id=*existing;
+     QTimer::singleShot(0,this,[this,id]{
+      if(requestEditTextObject)requestEditTextObject(id);
+     });
+     e->accept();return;
+    }
+   }
+   if(requestTextAt)requestTextAt(at);
    e->accept();return;
   }
   if(tool==Tool::DrawBezier){
