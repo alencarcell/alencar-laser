@@ -31,6 +31,16 @@ int main(){
  Plan p{{{{0,0},{10,0},true,1},{{10,0},{20,0},true,1},
          {{20,0},{20,10},true,1},{{20,10},{10,10},false,1}}};
  auto t=estimate(p,cfg);
+ // GUI and exported JSON must share the same nominal, per-layer model.
+ Plan feeds{{{{0,0},{100,0},true,2},{{100,0},{200,0},false,2}}};
+ Settings rated;
+ rated.cutMmMin=3000.;rated.rapidMmMin=6000.;
+ assert(near(nominalSecondsWithFeeds(feeds,rated,[&](int){return 6000.;}),2.));
+ assert(near(nominalSecondsWithFeeds(feeds,rated,[&](int){return 3000.;}),3.));
+ bool invalidFeed=false;
+ try{(void)nominalSecondsWithFeeds(feeds,rated,[&](int){return 0.;});}
+ catch(const std::runtime_error&){invalidFeed=true;}
+ assert(invalidFeed);
  assert(t.endSeconds.size()==4&&t.runs==3);
  assert(t.totalSeconds>0&&near(t.totalSeconds,t.lineSeconds+t.travelSeconds));
  assert(t.endSeconds[1]>t.endSeconds[0]&&t.endSeconds[2]>t.endSeconds[1]);
