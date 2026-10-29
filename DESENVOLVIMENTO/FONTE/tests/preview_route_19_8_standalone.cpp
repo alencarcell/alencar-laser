@@ -71,6 +71,15 @@ int main(){
  (void)sim198::route::nearestNeighborLines(
     touching.state(),300000,1500,true,&touchingDeps);
  assert(touchingDeps==0);
+ // Self-crossing inner shapes have ambiguous topology and must never
+ // force an internal-before-external constraint.
+ Editor crossing(Document{});
+ crossing.rectangle({0,0},100,100);
+ crossing.addContour({{20,20},{60,60},{20,60},{60,20}},true);
+ std::size_t crossingDeps=99;
+ (void)sim198::route::nearestNeighborLines(
+   crossing.state(),300000,1500,true,&crossingDeps);
+ assert(crossingDeps==0);
  // Guides never participate in preview ordering or emission.
  Editor guide(Document{});
  guide.rectangle({0,0},100,100);
