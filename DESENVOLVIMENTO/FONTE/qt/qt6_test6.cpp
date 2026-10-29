@@ -179,6 +179,65 @@ static QPainterPath previewNode(const Document& d,Key key,int64_t id,Pt pos){
  return path;
 }
 
+// Tela de rastreamento: bitmap apenas como referencia; vetores Qt nativos
+// permanecem nitidos ao aproximar. Nao altera imagem/projeto/simulacao.
+class TracePreviewCanvas198 final:public QGraphicsView{
+ QGraphicsScene scene_;
+ QGraphicsPixmapItem* imageItem_=nullptr;
+ QGraphicsPathItem* traceItem_=nullptr;
+ double zoom_=1.0;
+public:
+ explicit TracePreviewCanvas198(QWidget* parent=nullptr):QGraphicsView(parent){
+  setObjectName("trace_preview");
+  setScene(&scene_);
+  imageItem_=scene_.addPixmap(QPixmap());
+  imageItem_->setTransformationMode(Qt::FastTransformation);
+  traceItem_=scene_.addPath(QPainterPath());
+  QPen purple(QColor("#AF19E8"),1.4);purple.setCosmetic(true);
+  traceItem_->setPen(purple);traceItem_->setBrush(Qt::NoBrush);
+  traceItem_->setAcceptedMouseButtons(Qt::NoButton);
+  setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
+  setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+  setResizeAnchor(QGraphicsView::AnchorViewCenter);
+  setDragMode(QGraphicsView::ScrollHandDrag);
+  setBackgroundBrush(QColor("#EEEEEE"));
+  setToolTip("Roda: aproximar/afastar | arrastar: mover | ajustar imagem: enquadrar");
+ }
+ ~TracePreviewCanvas198()override{setScene(nullptr);}
+ void showResult(const QImage& binary,double widthMm,
+                 const std::vector<std::vector<Pt>>& paths){
+  if(binary.isNull()||widthMm<=0)return;
+  imageItem_->setPixmap(QPixmap::fromImage(binary));
+  const double scale=double(binary.width())/widthMm;
+  QPainterPath lines;
+  for(const auto& contour:paths){
+   if(contour.empty())continue;
+   lines.moveTo(contour.front().x*scale,contour.front().y*scale);
+   for(std::size_t i=1;i<contour.size();++i)
+    lines.lineTo(contour[i].x*scale,contour[i].y*scale);
+   lines.closeSubpath();
+  }
+  traceItem_->setPath(lines);
+  scene_.setSceneRect(QRectF(0,0,binary.width(),binary.height()));
+ }
+ void resetView(){
+  if(scene_.sceneRect().isEmpty())return;
+  resetTransform();fitInView(scene_.sceneRect(),Qt::KeepAspectRatio);
+  zoom_=1.;
+ }
+ double zoomLevel()const{return zoom_;}
+protected:
+ void wheelEvent(QWheelEvent* e)override{
+  const int angle=e->angleDelta().y();
+  if(angle==0){QGraphicsView::wheelEvent(e);return;}
+  const double factor=std::pow(1.22,double(angle)/120.0);
+  if(zoom_*factor>=.12&&zoom_*factor<=30.){
+   scale(factor,factor);zoom_*=factor;
+  }
+  e->accept();
+ }
+};
+
 class QtEditorLab final:public QGraphicsView{
  QGraphicsScene scene_;
  WorkspaceConfig workspace_{};
@@ -3982,11 +4041,12 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   form->addRow("Limiar P&B",threshold);form->addRow("Ignorar ilhas menores",minPixels);
   form->addRow("Otimizar (px)",optimize);form->addRow("Suavizar",smooth);
   form->addRow("Largura física",width);
-  auto* preview=new QLabel("Clique em Previsualizar para calcular os vetores");
-  preview->setObjectName("trace_preview");preview->setMinimumHeight(280);
-  preview->setAlignment(Qt::AlignCenter);
-  preview->setStyleSheet("background:#fff;color:#202020;border:1px solid #666;");
+  auto* preview=new TracePreviewCanvas198(&dlg);
+  preview->setMinimumHeight(280);
   layout->addWidget(preview,1);
+  auto* fitTrace=new QPushButton("Ajustar imagem na janela");
+  layout->addWidget(fitTrace);
+  connect(fitTrace,&QPushButton::clicked,preview,&TracePreviewCanvas198::resetView);
   auto* information=new QLabel("Limite 50 mil nós / 1000 contornos. Arquivo original preservado.");
   information->setWordWrap(true);layout->addWidget(information);
   auto* previewButton=new QPushButton("Previsualizar vetores (roxo)");layout->addWidget(previewButton);
@@ -4006,21 +4066,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     opts.minPixels=minPixels->value();opts.optimizePx=optimize->value();
     opts.smooth=smooth->isChecked();opts.widthMm=width->value();
     prepared=trace198::trace(view.rasterImage(),opts);
-    const QSize target=prepared->binary.size().scaled(QSize(460,320),Qt::KeepAspectRatio);
-    QImage image=prepared->binary.scaled(target,Qt::IgnoreAspectRatio,Qt::FastTransformation)
-       .convertToFormat(QImage::Format_ARGB32);
-    QPainter painter(&image);painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QPen(QColor("#A200E2"),1.2));painter.setBrush(Qt::NoBrush);
-    const double scale=target.width()/opts.widthMm;
+    preview->showResult(prepared->binary,opts.widthMm,prepared->contours);
+    preview->resetView();
     size_t nodes=0;
-    for(const auto& path:prepared->contours){
-     if(path.empty())continue;nodes+=path.size();
-     QPainterPath vector;vector.moveTo(path.front().x*scale,path.front().y*scale);
-     for(size_t i=1;i<path.size();++i)
-      vector.lineTo(path[i].x*scale,path[i].y*scale);
-     vector.closeSubpath();painter.drawPath(vector);
-    }
-    painter.end();preview->setPixmap(QPixmap::fromImage(image));
+    for(const auto& path:prepared->contours)nodes+=path.size();
     information->setText(QString("%1 contornos, %2 nós; %3 pequenos componentes removidos. Revisar texto pequeno.")
       .arg(prepared->contours.size()).arg(nodes).arg(prepared->discardedComponents));
     okay->setEnabled(true);
