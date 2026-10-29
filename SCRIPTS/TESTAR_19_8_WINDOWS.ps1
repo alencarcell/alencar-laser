@@ -203,7 +203,8 @@ try {
         Write-Host 'FOCO: texto direto na mesa, escala e rotacao por alcas.' -ForegroundColor Cyan
         $textSource = Join-Path $fontes 'tests\text_alignment_19_8_standalone.cpp'
         $textExecutable = Join-Path $build 'text_alignment_19_8_standalone.exe'
-        & $gpp -std=c++20 -O2 -Wall -Wextra $textSource -lboost_json -o $textExecutable
+        $boostJsonSource = Join-Path $fontes 'src\boost_json_impl.cpp'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $textSource $boostJsonSource -o $textExecutable
         Checar-Saida 'Compilacao C++ do texto editavel e alinhamento'
         & $textExecutable
         Checar-Saida 'Teste C++ de texto e alinhamento'
