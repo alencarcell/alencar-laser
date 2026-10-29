@@ -65,6 +65,51 @@ inline std::pair<Pt,Pt> boundsOf(const Document& d,const std::vector<int>& objs)
  if(!std::isfinite(lo.x))throw std::runtime_error("empty bounds");
  return {lo,hi};
 }
+// Endpoint snapping is pixel-scaled by the Qt view and converted to mm.
+// Only editable, ungrouped, single-subpath open contours on the chosen layer
+// are eligible. Never weld other layers, closed paths or group members.
+struct PathEndpointSnap {
+ Key key{};
+ bool atStart=false;
+ Pt point{};
+ double distanceMm=0;
+};
+inline std::optional<PathEndpointSnap> nearestOpenEndpoint(
+ const EditorState& state,Pt point,int layer,double toleranceMm,
+ std::optional<Key> exclude=std::nullopt){
+ if(!std::isfinite(point.x)||!std::isfinite(point.y)||
+    !std::isfinite(toleranceMm)||toleranceMm<=0||toleranceMm>100)
+  throw std::runtime_error("invalid endpoint snap request");
+ std::optional<PathEndpointSnap> winner;
+ double best=toleranceMm;
+ bool ambiguous=false;
+ for(const auto& c:state.doc.contours){
+  if(c.closed||c.nodes.size()<2||c.nodes.size()>50000||
+     (exclude&&*exclude==c.key))continue;
+  const auto it=state.objects.find(c.key.object);
+  if(it==state.objects.end()||it->second.layer!=layer||
+     it->second.group!=0||!editable(state,c.key.object))continue;
+  // Objects with multiple subpaths are not welded, preserving identity.
+  int paths=0;for(const auto& test:state.doc.contours)
+   if(test.key.object==c.key.object)++paths;
+  if(paths!=1)continue;
+  for(int endpoint=0;endpoint<2;++endpoint){
+   const Pt candidate=endpoint?c.nodes.back().p:c.nodes.front().p;
+   const double distance=dist(point,candidate);
+   if(distance>toleranceMm)continue;
+   // Two endpoints at virtually the same distance are ambiguous: no snap.
+   if(winner&&std::abs(distance-best)<1e-6&&
+      (winner->key!=c.key||winner->atStart!=(endpoint==0))){
+    ambiguous=true;continue;
+   }
+   if(!winner||distance<best-1e-6){
+    winner=PathEndpointSnap{c.key,endpoint==0,candidate,distance};
+    best=distance;ambiguous=false;
+   }
+  }
+ }
+ return ambiguous?std::nullopt:winner;
+}
 class Editor{
  EditorState current;
  std::vector<EditorState> past,future;
@@ -138,6 +183,91 @@ public:
     ids.push_back(next++);
    }
   });return ids;
+ }
+ // Commit one drawn path, optionally stitching matching OPEN endpoints.
+ // One undo item. Never modifies a closed shape, a locked layer, another
+ // layer, grouped objects, or ambiguous endpoints. Source IDs are preserved.
+ int commitJoinedPolyline(std::vector<Pt> draft,bool closed,int layer,
+                          double toleranceMm=0.05){
+  if(draft.size()<2||draft.size()>20000||(closed&&draft.size()<3))
+   throw std::runtime_error("invalid path drawing");
+  for(const Pt p:draft)
+   if(!std::isfinite(p.x)||!std::isfinite(p.y))
+    throw std::runtime_error("path contains invalid coordinates");
+  if(!current.layers.count(layer)||!current.layers.at(layer).visible||
+     current.layers.at(layer).locked)throw std::runtime_error("layer not editable");
+  // Only preserve explicitly snapped coordinates within controlled tolerance.
+  const auto first=closed?std::optional<PathEndpointSnap>{}:
+    nearestOpenEndpoint(current,draft.front(),layer,toleranceMm);
+  const auto last=closed?std::optional<PathEndpointSnap>{}:
+    nearestOpenEndpoint(current,draft.back(),layer,toleranceMm);
+  if(first)draft.front()=first->point;
+  if(last)draft.back()=last->point;
+  if(first&&last&&first->key==last->key&&first->atStart==last->atStart)
+   throw std::runtime_error("cannot join same open endpoint twice");
+  int resultingObject=0;
+  change([&](EditorState& state){
+   auto byKey=[&](Key k)->Contour*{
+    for(auto& c:state.doc.contours)if(c.key==k)return &c;
+    throw std::runtime_error("snap target disappeared");
+   };
+   auto appendPoints=[&](std::vector<Node>& to,const std::vector<Pt>& points,
+                         std::size_t begin,std::size_t end){
+    for(std::size_t i=begin;i<end;++i)
+     if(to.empty()||dist(to.back().p,points[i])>1e-9)
+      to.push_back({state.doc.nextId++,points[i]});
+   };
+   if(first&&last&&first->key==last->key){
+    if(first->atStart==last->atStart)
+     throw std::runtime_error("invalid self join");
+    Contour* target=byKey(first->key);
+    if(first->atStart){
+     // Draft goes source start -> source end: reverse its inside points.
+     std::reverse(draft.begin(),draft.end());
+    }
+    appendPoints(target->nodes,draft,1,draft.size()-1);
+    if(target->nodes.size()<3)throw std::runtime_error("closed contour too small");
+    target->closed=true;
+    resultingObject=target->key.object;
+   }else if(first||last){
+    std::vector<Node> path;
+    if(first){
+     Contour* head=byKey(first->key);
+     path=head->nodes;
+     if(first->atStart)std::reverse(path.begin(),path.end());
+     appendPoints(path,draft,1,draft.size());
+     resultingObject=head->key.object;
+    }else{
+     appendPoints(path,draft,0,draft.size()-1);
+     Contour* tail=byKey(last->key);
+     std::vector<Node> tailPoints=tail->nodes;
+     if(!last->atStart)std::reverse(tailPoints.begin(),tailPoints.end());
+     path.insert(path.end(),tailPoints.begin(),tailPoints.end());
+     resultingObject=tail->key.object;
+    }
+    if(first&&last){
+     // Prevent an orphaned subpath: second target must be a distinct
+     // ungrouped one-contour object in the SAME layer (pre-filtered above).
+     Contour* tail=byKey(last->key);
+     std::vector<Node> tailPoints=tail->nodes;
+     if(!last->atStart)std::reverse(tailPoints.begin(),tailPoints.end());
+     path.insert(path.end(),tailPoints.begin()+1,tailPoints.end());
+     const Key second=last->key;
+     state.doc.contours.erase(std::remove_if(state.doc.contours.begin(),
+        state.doc.contours.end(),[&](const Contour& c){return c.key==second;}),
+        state.doc.contours.end());
+     state.objects.erase(second.object);
+    }
+    byKey(first?first->key:last->key)->nodes=std::move(path);
+   }else{
+    resultingObject=nextObjectId(state.doc);
+    Contour c;c.key={resultingObject,0};c.closed=closed;
+    appendPoints(c.nodes,draft,0,draft.size());
+    state.doc.contours.push_back(std::move(c));
+    state.objects[resultingObject]={layer,0};
+   }
+  });
+  return resultingObject;
  }
  int line(Pt a,Pt b,int layer=0){if(dist(a,b)<1e-12)throw std::runtime_error("zero-length line");return addContour({a,b},false,layer);}
  int rectangle(Pt a,double w,double h,int layer=0){if(!std::isfinite(w)||!std::isfinite(h)||w<=0||h<=0)throw std::runtime_error("invalid rectangle");return addContour({a,{a.x+w,a.y},{a.x+w,a.y+h},{a.x,a.y+h}},true,layer);}
