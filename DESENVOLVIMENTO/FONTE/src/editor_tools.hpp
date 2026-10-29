@@ -184,6 +184,59 @@ public:
    }
   });return ids;
  }
+ // Explicit Alt+J action for TWO selected open contours; closest pair of
+ // free endpoints must be within tolerance. Only one history transaction.
+ int joinTwoOpenContours(int firstObject,int secondObject,double toleranceMm=0.5){
+  if(firstObject==secondObject||toleranceMm<=0||toleranceMm>5||
+     !std::isfinite(toleranceMm))
+   throw std::runtime_error("select two different open contours to join");
+  const Contour* a=nullptr;const Contour* b=nullptr;
+  int countA=0,countB=0;
+  for(const auto& c:current.doc.contours){
+   if(c.key.object==firstObject){a=&c;++countA;}
+   if(c.key.object==secondObject){b=&c;++countB;}
+  }
+  if(!a||!b||countA!=1||countB!=1||a->closed||b->closed||
+     a->nodes.size()<2||b->nodes.size()<2)
+   throw std::runtime_error("join requires two simple open contours");
+  const auto ma=current.objects.find(firstObject),mb=current.objects.find(secondObject);
+  if(ma==current.objects.end()||mb==current.objects.end()||
+     ma->second.layer!=mb->second.layer||ma->second.group!=0||
+     mb->second.group!=0||!editable(current,firstObject)||
+     !editable(current,secondObject))
+   throw std::runtime_error("join requires same editable ungrouped layer");
+  double best=std::numeric_limits<double>::infinity();
+  bool aStarts=false,bEnds=false;
+  for(int i=0;i<2;++i)for(int j=0;j<2;++j){
+   const double d=dist(i?a->nodes.front().p:a->nodes.back().p,
+                       j?b->nodes.back().p:b->nodes.front().p);
+   if(d<best){best=d;aStarts=(i==1);bEnds=(j==1);}
+  }
+  if(best>toleranceMm)
+   throw std::runtime_error("selected endpoints are too far apart");
+  const Key firstKey=a->key,secondKey=b->key;
+  change([&](EditorState& state){
+   Contour* head=nullptr;Contour* tail=nullptr;
+   for(auto& c:state.doc.contours){
+    if(c.key==firstKey)head=&c;
+    if(c.key==secondKey)tail=&c;
+   }
+   if(!head||!tail)throw std::runtime_error("joined contour missing");
+   std::vector<Node> points=head->nodes,other=tail->nodes;
+   if(aStarts)std::reverse(points.begin(),points.end());
+   if(bEnds)std::reverse(other.begin(),other.end());
+   const bool coincide=dist(points.back().p,other.front().p)<1e-9;
+   points.insert(points.end(),other.begin()+(coincide?1:0),other.end());
+   state.doc.contours.erase(std::remove_if(
+      state.doc.contours.begin(),state.doc.contours.end(),
+      [&](const Contour& c){return c.key==secondKey;}),state.doc.contours.end());
+   state.objects.erase(secondObject);
+   for(auto& c:state.doc.contours)if(c.key==firstKey){
+    c.nodes=std::move(points);break;
+   }
+  });
+  return firstObject;
+ }
  // Commit one drawn path, optionally stitching matching OPEN endpoints.
  // One undo item. Never modifies a closed shape, a locked layer, another
  // layer, grouped objects, or ambiguous endpoints. Source IDs are preserved.
