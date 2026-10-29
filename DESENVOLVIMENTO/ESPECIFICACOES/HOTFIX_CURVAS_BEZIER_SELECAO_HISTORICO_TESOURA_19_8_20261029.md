@@ -66,3 +66,9 @@ Não habilitar G-code, CAM, USB/TCP, comando M3/M4, motores ou emissão física.
 ## Próxima arquitetura recomendada
 
 Consolidar um **documento e histórico geométrico comuns** entre as curvas nativas e as polilinhas, com seleção, ferramentas, layer metadata e Undo global; evitar conversão destrutiva das curvas. Isso é necessário para equivalência mais completa ao LightBurn, mas não é pré-requisito para testar este hotfix.
+
+## Refinamento final da mesma correção
+
+- A barra inferior agora contabiliza uma curva Bézier nativa selecionada e distingue **"curva Bézier selecionada"** de **"editar nós Bézier"**, com instruções corretas de Delete, K e Ctrl+Z.
+- O teste Qt integrado verifica adicionalmente **Excluir formas selecionadas → curva removida → Desfazer → curva restaurada** usando a interface real, além da seleção e da Tesoura.
+- Rechecados os arquivos da branch após os commits. **Sem PASS novo de compilação Qt6 no Windows** nesta rodada; verificação da presença de símbolos não substitui teste executável. Usar `-SomenteDesenho` no próximo reteste e manter hardware desligado.
