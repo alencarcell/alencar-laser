@@ -50,6 +50,23 @@ int main(){
  align.alignObjects({a,b},1,a);
  ba=boundsOf(align.state().doc,{a});bb=boundsOf(align.state().doc,{b});
  assert(near(ba.second.x,bb.second.x));
+ // A group is aligned as one unit without changing relative geometry.
+ Editor grouped(Document{});
+ const int g1=grouped.rectangle({10,10},5,5);
+ const int g2=grouped.rectangle({25,10},5,5);
+ const int target=grouped.rectangle({100,40},12,12);
+ grouped.group({g1,g2});
+ const auto beforeG1=boundsOf(grouped.state().doc,{g1});
+ const auto beforeG2=boundsOf(grouped.state().doc,{g2});
+ const auto history=grouped.undoCount();
+ grouped.alignObjects({g1,target},0,target);
+ const auto afterG1=boundsOf(grouped.state().doc,{g1});
+ const auto afterG2=boundsOf(grouped.state().doc,{g2});
+ assert(near(afterG1.first.x,100.));
+ assert(near(afterG2.first.x-afterG1.first.x,beforeG2.first.x-beforeG1.first.x));
+ assert(grouped.undoCount()==history+1);
+ assert(grouped.undo()&&near(boundsOf(grouped.state().doc,{g1}).first.x,
+                             beforeG1.first.x));
  const auto snapshot=metadata(align.state());
  assert(align.undo());
  assert(metadata(align.state())==snapshot); // geometry changes, metadata stays unchanged
