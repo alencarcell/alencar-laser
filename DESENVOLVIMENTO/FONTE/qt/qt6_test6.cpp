@@ -4044,6 +4044,12 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* optimize=new QDoubleSpinBox;optimize->setRange(0,2);optimize->setDecimals(2);optimize->setSingleStep(.1);optimize->setValue(.45);
   auto* smooth=new QCheckBox("Arredondamento leve (pode deformar cantos)");
   auto* width=new QDoubleSpinBox;width->setRange(1,400);width->setSuffix(" mm");width->setValue(view.rasterBounds().width());
+  auto* traceProfile=new QComboBox;
+  traceProfile->addItem("Automático (Otsu)");
+  traceProfile->addItem("Logotipo / desenho sólido");
+  traceProfile->addItem("Texto e traços finos");
+  traceProfile->setToolTip("Pré-ajustes; nenhum reconhece magicamente o conteúdo. Confira o resultado.");
+  form->addRow("Perfil de limpeza",traceProfile);
   form->addRow("Limiar P&B",threshold);form->addRow("Ignorar ilhas menores",minPixels);
   form->addRow("Otimizar (px)",optimize);form->addRow("Suavizar",smooth);
   form->addRow("Largura física",width);
@@ -4055,18 +4061,40 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   connect(fitTrace,&QPushButton::clicked,preview,&TracePreviewCanvas198::resetView);
   auto* information=new QLabel("Limite 50 mil nós / 1000 contornos. Arquivo original preservado.");
   information->setWordWrap(true);layout->addWidget(information);
-  auto* previewButton=new QPushButton("Previsualizar vetores (roxo)");layout->addWidget(previewButton);
+  auto* previewButton=new QPushButton("Atualizar traçado (vetores roxos)");layout->addWidget(previewButton);
+  auto* livePreview=new QCheckBox("Atualizar automaticamente ao alterar ajustes");
+  livePreview->setChecked(true);layout->addWidget(livePreview);
+  auto* debounceTrace=new QTimer(&dlg);
+  debounceTrace->setSingleShot(true);debounceTrace->setInterval(220);
+  connect(debounceTrace,&QTimer::timeout,&dlg,[previewButton]{previewButton->click();});
   auto* actions=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
   auto* okay=actions->button(QDialogButtonBox::Ok);okay->setText("Criar traçado");okay->setEnabled(false);
   layout->addWidget(actions);
   std::optional<trace198::Result> prepared;
-  auto stale=[&]{prepared.reset();okay->setEnabled(false);information->setText("Atualize a prévia após alterar parâmetros.");};
+  auto stale=[&]{
+   prepared.reset();okay->setEnabled(false);
+   information->setText("Recalculando traçado... (o projeto não foi alterado)");
+   if(livePreview->isChecked())debounceTrace->start();
+  };
   connect(threshold,&QSlider::valueChanged,&dlg,[&](int){stale();});
   connect(minPixels,QOverload<int>::of(&QSpinBox::valueChanged),&dlg,[&](int){stale();});
   connect(optimize,QOverload<double>::of(&QDoubleSpinBox::valueChanged),&dlg,[&](double){stale();});
   connect(width,QOverload<double>::of(&QDoubleSpinBox::valueChanged),&dlg,[&](double){stale();});
   connect(smooth,&QCheckBox::toggled,&dlg,[&](bool){stale();});
+  connect(traceProfile,QOverload<int>::of(&QComboBox::currentIndexChanged),&dlg,[&](int profile){
+   if(profile==0){
+    threshold->setValue(std::clamp(trace198::otsuThreshold(trace198::grayscale(
+      view.rasterImage().scaled(960,960,Qt::KeepAspectRatio,Qt::SmoothTransformation))),1,254));
+    minPixels->setValue(5);optimize->setValue(.45);smooth->setChecked(false);
+   }else if(profile==1){
+    minPixels->setValue(12);optimize->setValue(.65);smooth->setChecked(false);
+   }else{
+    minPixels->setValue(2);optimize->setValue(.15);smooth->setChecked(false);
+   }
+   stale();
+  });
   connect(previewButton,&QPushButton::clicked,&dlg,[&]{
+   debounceTrace->stop();
    try{
     trace198::Options opts;opts.threshold=threshold->value();
     opts.minPixels=minPixels->value();opts.optimizePx=optimize->value();
