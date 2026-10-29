@@ -277,6 +277,24 @@ public:
    state.editableTexts[root]=updated;
   });
  }
+ // Converter texto em caminhos: a geometria ja e vetorial; somente a
+ // semantica/fonte editavel e removida, em UMA transacao reversivel.
+ // Nao aplica transformacao nem reamostragem aos contornos existentes.
+ bool convertEditableTextToPaths(int objectId){
+  const auto found=findEditableText(objectId);
+  if(!found)return false;
+  const int root=found->first;
+  change([&](EditorState& state){
+   auto it=state.editableTexts.find(root);
+   if(it==state.editableTexts.end())throw std::runtime_error("texto editavel nao encontrado");
+   for(int id:it->second.members){
+    if(!editable(state,id))throw std::runtime_error("texto bloqueado ou oculto");
+   }
+   for(int id:it->second.members)state.objects.at(id).group=0;
+   state.editableTexts.erase(it);
+  },false);
+  return true;
+ }
  // Explicit Alt+J action for TWO selected open contours; closest pair of
  // free endpoints must be within tolerance. Only one history transaction.
  int joinTwoOpenContours(int firstObject,int secondObject,double toleranceMm=0.5){
