@@ -39,3 +39,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\TESTAR_19_8_WINDO
 ```
 
 A pasta local `.vscode/` não deve ser apagada. Se outro teste falhar, usar a **primeira mensagem real de erro** e `RELATORIOS/COMPILACAO/BUILD_GITHUB_19_8.txt`, em vez de assumir que a correção do raster resolve todas as possíveis regressões.
+
+## Teste rápido adicional (sem Qt6)
+
+Foi acrescentado `-SomenteRaster` em `SCRIPTS/TESTAR_19_8_WINDOWS.ps1`. Esse parâmetro **não executa CMake nem compila a interface Qt6**: compila somente o teste portátil C++ de Fill/bitmap, e retorna falha se o executável não passar. Após `git pull --ff-only`, executar:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteRaster
+```
+
+Se aparecer `RASTER C++ PASS`, só então usar `-SomenteSimulacao` para os testes integrados. O comando rápido **não certifica** a prévia Qt6 nem a candidata completa.
