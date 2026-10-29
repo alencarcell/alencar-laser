@@ -1307,7 +1307,11 @@ protected:
   const QPoint angle=e->angleDelta(),pixel=e->pixelDelta();
   const double steps=angle.y()!=0 ? double(angle.y())/120.0 : double(pixel.y())/100.0;
   if(steps==0.0){QGraphicsView::wheelEvent(e);return;}
-  if(busy()){e->accept();return;}
+  // Zoom continua disponivel durante Linha e Desenhar curva, mesmo com
+  // uma sequencia de nos em construcao; os pontos ja criados nao mudam.
+  // Gestos de arraste/transformacao permanecem protegidos.
+  if(busy()&&!((tool==Tool::Line&&polylineDrawing_)||
+               (tool==Tool::DrawBezier&&bezierDrawing_))){e->accept();return;}
   const double oldZoom=currentZoom();
   if(!std::isfinite(oldZoom)||oldZoom<=0.0){e->accept();return;}
   const double newZoom=alaser::zoom196::applyWheel(oldZoom,steps);
@@ -1320,6 +1324,18 @@ protected:
   const QPoint mapped=mapFromScene(pinnedScene);
   horizontalScrollBar()->setValue(horizontalScrollBar()->value()+mapped.x()-cursor.x());
   verticalScrollBar()->setValue(verticalScrollBar()->value()+mapped.y()-cursor.y());
+  // Recalcular somente a pre-visualizacao apos a mudanca de escala.
+  // Nao reamostrar nem mover os nos canonicos da ferramenta.
+  if(tool==Tool::Line&&polylineDrawing_){
+   Pt at=snapPolyline(fromQt(mapToScene(cursor)),
+                      e->modifiers().testFlag(Qt::ShiftModifier));
+   polylineCursor_=toQt(magneticPolyline(at,
+                      e->modifiers().testFlag(Qt::ControlModifier)));
+   redrawPolyline();
+  }
+  if(tool==Tool::DrawBezier&&bezierDrawing_){
+   bezierCursor_=mapToScene(cursor);redrawBezierDraft();
+  }
   reportZoom();viewport()->update();sample(wheelMs,wheelTimer.nsecsElapsed()/1e6);e->accept();
  }
  void paintEvent(QPaintEvent* e)override{
