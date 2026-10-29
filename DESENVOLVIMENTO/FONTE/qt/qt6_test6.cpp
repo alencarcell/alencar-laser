@@ -5516,6 +5516,24 @@ static QJsonObject actualLightBurnFile198Test(const QString& input){
 }
 
 static QJsonObject textFormatting198Test(){
+ // Preserve the operator's preferences even when a test assertion throws.
+ struct RestoreTextPreferences{
+  QSettings settings{"AlencarLaser","DesktopBeta"};
+  std::map<QString,QVariant> previous;
+  RestoreTextPreferences(){
+   for(const QString& key:{"fontFamily","bold","italic","heightMm","spacingPercent","align"}){
+    const QString name="text/"+key;
+    previous[name]=settings.value(name);
+   }
+  }
+  ~RestoreTextPreferences(){
+   for(const auto& [key,value]:previous){
+    if(value.isValid())settings.setValue(key,value);
+    else settings.remove(key);
+   }
+   settings.sync();
+  }
+ } restorePreferences;
  // Use system font list as Qt/Windows exposes it. The selected font is
  // vectorized locally; no remote/downloaded font resource is required.
  LabWindow ui(Document{});
