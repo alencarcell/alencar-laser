@@ -147,9 +147,9 @@ int main(){
   const auto n0=get(ring.state().doc,{circle,0})->nodes.size();
   const int result=ring.removeScissorSpan(*arc);
   require(result==circle,"arco fechado deveria manter objeto original");
-  const auto* remainder=get(ring.state().doc,{circle,0});
-  require(remainder&&!remainder->closed,"arco fechado nao virou caminho aberto");
-  require(remainder->nodes.size()<n0&&remainder->nodes.size()>5,"arco removido de maneira fragmentada");
+  const auto* circleRemainder=get(ring.state().doc,{circle,0});
+  require(circleRemainder&&!circleRemainder->closed,"arco fechado nao virou caminho aberto");
+  require(circleRemainder->nodes.size()<n0&&circleRemainder->nodes.size()>5,"arco removido de maneira fragmentada");
   require(get(ring.state().doc,{knife,0})&&get(ring.state().doc,{knife,0})->nodes.size()==2,
           "corte alterou linha cruzadora");
   require(ring.undo()&&sameDoc(ringBefore,ring.state().doc),"undo do arco falhou");
