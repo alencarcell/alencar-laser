@@ -5274,6 +5274,77 @@ static QJsonObject actualLightBurnFile198Test(const QString& input){
   {"deterministic",true},{"hardware_commands_sent",false}};
 }
 
+static QJsonObject drawAndJoin198Test(){
+ // Model invariant: complete a rectangle by magnetically joining its
+ // two open endpoints, maintaining the SAME contour/object and undo unit.
+ Editor editor(Document{});
+ const int id=editor.addContour({{0,0},{30,0},{30,20},{0,20}},false);
+ const auto historyBefore=editor.undoCount();
+ const auto snapped=nearestOpenEndpoint(editor.state(),{0.01,20.01},0,.05);
+ check(snapped&&snapped->key.object==id,"Magnetismo nao detectou ponta aberta");
+ const int closed=editor.commitJoinedPolyline({{0,20},{0,0}},false,0,1e-5);
+ check(closed==id&&editor.state().doc.contours.size()==1&&
+       editor.state().doc.contours.front().closed,
+       "Reta de fechamento nao virou parte do retangulo original");
+ check(editor.undoCount()==historyBefore+1&&editor.undo()&&
+       !editor.state().doc.contours.front().closed&&editor.redo(),
+       "Auto-Join nao preservou um unico undo/redo");
+ CurveDragSession native(CurveDocument{});
+ const auto curve=native.addEditablePath(
+   {{0,{0,0},{0,0},{0,0}},{0,{10,0},{7,-4},{13,4}},
+    {0,{20,0},{20,0},{20,0}}},false,42);
+ check(curve.object==42&&native.committed().contours.size()==1&&
+       native.committed().contours[0].edgeKind.size()==2&&
+       native.committed().contours[0].edgeKind[0]==1,
+       "Clique-arraste nao criou aresta Bezier nativa");
+ check(native.undo()&&native.committed().contours.empty()&&
+       native.redo()&&native.committed().contours.size()==1,
+       "Novo desenho Bézier sem undo/redo");
+ // Real Qt viewport event path: no machine or CAM; success requires that
+ // the tool is reachable, and mouse gestures create geometries.
+ LabWindow ui(Document{});
+ ui.show();QApplication::processEvents();
+ check(ui.findChild<QPushButton*>("new_bezier")!=nullptr,
+       "Ferramenta de desenhar Bézier nao foi encontrada");
+ clickButton(ui,"new_bezier");
+ auto* viewport=ui.view.viewport();
+ const QPoint mid=viewport->rect().center();
+ const QPoint first=mid+QPoint(-65,-25),last=mid+QPoint(25,-25);
+ QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,first);
+ QTest::mousePress(viewport,Qt::LeftButton,Qt::NoModifier,last);
+ QTest::mouseMove(viewport,last+QPoint(22,-18));
+ QTest::mouseRelease(viewport,Qt::LeftButton,Qt::NoModifier,last+QPoint(22,-18));
+ QTest::mouseClick(viewport,Qt::RightButton,Qt::NoModifier,last);
+ QApplication::processEvents();
+ check(ui.view.nativeItemCount()==1&&ui.view.hasNativeDocument(),
+       "Cliques e arraste nao concluiram novo desenho Bézier na viewport");
+ ui.close();
+ LabWindow lineUi(Document{});
+ lineUi.show();QApplication::processEvents();
+ const QPointF center=lineUi.view.mapToScene(lineUi.view.viewport()->rect().center());
+ const Pt a{center.x()-35,center.y()-20};
+ const Pt b{center.x()+35,center.y()-20};
+ const Pt c{center.x()+35,center.y()+20};
+ const Pt d{center.x()-35,center.y()+20};
+ const int pathId=lineUi.view.editor.addContour({a,b,c,d},false);
+ lineUi.view.rebuild();
+ clickButton(lineUi,"line");
+ const QPoint pD=lineUi.view.mapFromScene(toQt(d));
+ const QPoint pA=lineUi.view.mapFromScene(toQt(a));
+ QTest::mouseClick(lineUi.view.viewport(),Qt::LeftButton,Qt::NoModifier,pD);
+ QTest::mouseClick(lineUi.view.viewport(),Qt::LeftButton,Qt::NoModifier,pA);
+ QApplication::processEvents();
+ check(lineUi.view.editor.state().doc.contours.size()==1&&
+       lineUi.view.editor.state().doc.contours.front().closed&&
+       lineUi.view.editor.state().doc.contours.front().key.object==pathId,
+       "Clique em duas pontas nao fechou retangulo no mesmo objeto");
+ lineUi.close();
+ return {{"status","PASS"},{"rectangle_join_atomic",true},
+  {"snap_endpoint",true},{"bezier_native_handles",true},
+  {"bezier_viewport_drag",true},{"line_viewport_auto_join",true},
+  {"undo_redo",true},{"hardware_commands_sent",false}};
+}
+
 int main(int argc,char** argv){
  QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";if(mode=="--recovery-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
@@ -5339,6 +5410,13 @@ int main(int argc,char** argv){
   QFile f(out+"/RESULTADO_PREVIA_MOVIMENTO_19_8.json");
   if(!f.open(QIODevice::WriteOnly))return 2;
   f.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--draw-join-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=drawAndJoin198Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile file(out+"/RESULTADO_DESENHO_UNIAO_19_8.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--inline-transforms-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=inlineTransforms198Test(out);}
