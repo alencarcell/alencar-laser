@@ -2421,8 +2421,9 @@ public:
   auto* inspector=new QVBoxLayout(layersTab);inspector->setContentsMargins(8,8,8,8);inspector->setSpacing(6);
   inspector->addWidget(titleLabel("CAMADAS E VISIBILIDADE"));
   // Cabecalho usa exatamente as mesmas larguras dos checkboxes da lista.
-  auto* header=new QWidget;
-  auto* headerLine=new QHBoxLayout(header);
+  // Unique name: topHeader is already declared in this constructor.
+  auto* layerListHeader=new QWidget;
+  auto* headerLine=new QHBoxLayout(layerListHeader);
   headerLine->setContentsMargins(1,0,1,0);headerLine->setSpacing(2);
   auto* headerName=new QLabel("Camada (duplo clique: configurar)");
   headerName->setObjectName("brandSub");headerLine->addWidget(headerName,1);
@@ -2432,7 +2433,7 @@ public:
    tag->setToolTip(code=="S"?"Saida virtual":(code=="V"?"Visibilidade":"Ar, apenas referencia"));
    headerLine->addWidget(tag,0,Qt::AlignCenter);
   }
-  inspector->addWidget(header);
+  inspector->addWidget(layerListHeader);
   auto* activeBox=new QWidget;activeBox->setObjectName("activeLayerList");
   activeLayerRows_=new QVBoxLayout(activeBox);activeLayerRows_->setContentsMargins(0,0,0,0);
   activeLayerRows_->setSpacing(1);inspector->addWidget(activeBox);
