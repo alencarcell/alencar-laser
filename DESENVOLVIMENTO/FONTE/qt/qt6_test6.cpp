@@ -1092,15 +1092,36 @@ public:
  void rebuild(){
   clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
   clearPolyline();clearBezierDraft();clearMarquee();scene_.clear();rasterOverlay_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
+  // Composite closed Fill paths per layer with the same parity rule used
+  // by the scan planner. One separate backdrop per layer, without selection.
+  if(fillPreview_){
+   std::map<int,QPainterPath> perLayer;
+   for(const auto& c:editor.state().doc.contours){
+    const auto mi=editor.state().objects.find(c.key.object);
+    if(mi==editor.state().objects.end())continue;
+    const auto li=editor.state().layers.find(mi->second.layer);
+    if(li==editor.state().layers.end()||!li->second.visible||
+       li->second.mode!="Fill"||!(c.closed||hasExactDuplicateClosure(c)))continue;
+    QPainterPath shape=pathOf(c);shape.closeSubpath();
+    perLayer[mi->second.layer].addPath(shape);
+   }
+   for(auto& [layerId,shape]:perLayer){
+    shape.setFillRule(Qt::OddEvenFill);
+    QColor tint=layerColor(layerId);tint.setAlpha(115);
+    auto* backdrop=scene_.addPath(shape,QPen(Qt::NoPen),QBrush(tint));
+    backdrop->setZValue(.4);
+    backdrop->setAcceptedMouseButtons(Qt::NoButton);
+    backdrop->setFlag(QGraphicsItem::ItemIsSelectable,false);
+    backdrop->setData(0,QStringLiteral("layer_fill_even_odd"));
+   }
+  }
   for(auto& c:editor.state().doc.contours){
     const auto meta=editor.state().objects.at(c.key.object);
     const auto layer=editor.state().layers.at(meta.layer);
-    auto* o=scene_.addPath(pathOf(c),QPen(layerColor(meta.layer),0));o->setZValue(1);
-    if(fillPreview_&&layer.mode=="Fill"&&(c.closed||hasExactDuplicateClosure(c))){
-     QColor translucent=layerColor(meta.layer);translucent.setAlpha(115);
-     o->setBrush(QBrush(translucent));
-    }
-    o->setVisible(layer.visible);objects_[c.key]=o;itemsByObject_[c.key.object].push_back(o);
+    auto* item=scene_.addPath(pathOf(c),QPen(layerColor(meta.layer),0));
+    item->setZValue(1);
+    item->setVisible(layer.visible);
+    objects_[c.key]=item;itemsByObject_[c.key.object].push_back(item);
   }
   for(auto it=selected.begin();it!=selected.end();)if(!editable(editor.state(),*it))it=selected.erase(it);else ++it;
   if(active_&&(!get(editor.state().doc,*active_)||!editable(editor.state(),active_->object)))active_.reset();
