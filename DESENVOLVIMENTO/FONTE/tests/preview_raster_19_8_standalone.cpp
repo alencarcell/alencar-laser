@@ -39,39 +39,39 @@ int main(){
  assert(!scene.state().layers.at(1001).output);
  // Two binary scan lines; image dimensions remain untouched.
  sim198::raster::Mask mask{4,2,{0,1,1,0,0,0,1,0}};
- cfg.intervalMm=10.;
+ cfg.intervalMm=5.; // maximum supported by the simulator/UI
  sim198::Plan pic;
- sim198::raster::appendMask(pic,mask,{0,0,40,20},cfg);
+ sim198::raster::appendMask(pic,mask,{0,0,40,10},cfg);
  assert(std::abs(pic.cutMm-30.)<1e-8);
  assert(std::abs(sim198::repeated(pic,2).cutMm-60.)<1e-8);
  // Unidirectional scanning must not change dark-pixel distances.
  cfg.bidirectional=false;
  sim198::Plan oneWay;
- sim198::raster::appendMask(oneWay,mask,{0,0,40,20},cfg);
+ sim198::raster::appendMask(oneWay,mask,{0,0,40,10},cfg);
  assert(std::abs(oneWay.cutMm-30.)<1e-8);
  // Image height that is not a multiple of the interval must NOT compress
- // the requested pitch (old implementation used 21/3=7 mm for 10 mm).
+ // the requested pitch (old implementation used 12.5/3 rather than 5 mm).
  cfg.bidirectional=true;
  sim198::raster::Mask allBlack{4,2,{1,1,1,1,1,1,1,1}};
  sim198::Plan fixedPitch;
- sim198::raster::appendMask(fixedPitch,allBlack,{0,0,40,21},cfg);
+ sim198::raster::appendMask(fixedPitch,allBlack,{0,0,40,12.5},cfg);
  std::vector<double> imageRows;
  for(const auto& move:fixedPitch.moves)
   if(move.laser)imageRows.push_back(move.from.y);
  assert(imageRows.size()==2);
- assert(std::abs(imageRows[0]-5.)<1e-8&&
-        std::abs(imageRows[1]-15.)<1e-8);
+ assert(std::abs(imageRows[0]-2.5)<1e-8&&
+        std::abs(imageRows[1]-7.5)<1e-8);
  sim198::Plan tiny;
- sim198::raster::appendMask(tiny,allBlack,{0,0,40,4},cfg);
+ sim198::raster::appendMask(tiny,allBlack,{0,0,40,2},cfg);
  int tinyOn=0;
  for(const auto& move:tiny.moves)if(move.laser){
-  ++tinyOn;assert(std::abs(move.from.y-2.)<1e-8);
+  ++tinyOn;assert(std::abs(move.from.y-1.)<1e-8);
  }
  assert(tinyOn==1);
  bool rejected=false;
  try{
   sim198::raster::Mask invalid{4,2,{1,0}};
-  sim198::Plan x;sim198::raster::appendMask(x,invalid,{0,0,40,20},cfg);
+  sim198::Plan x;sim198::raster::appendMask(x,invalid,{0,0,40,10},cfg);
  }catch(const std::runtime_error&){rejected=true;}
  assert(rejected);
  rejected=false;
@@ -93,8 +93,8 @@ int main(){
  assert(rejected); // 8192 vertices x 1000 scanlines > 6M budget
  rejected=false;
  try{
-  cfg.intervalMm=10.;cfg.overscanMm=21.;sim198::Plan x;
-  sim198::raster::appendMask(x,mask,{0,0,40,20},cfg);
+  cfg.intervalMm=5.;cfg.overscanMm=21.;sim198::Plan x;
+  sim198::raster::appendMask(x,mask,{0,0,40,10},cfg);
  }catch(const std::runtime_error&){rejected=true;}
  assert(rejected);
  (void)hole;
