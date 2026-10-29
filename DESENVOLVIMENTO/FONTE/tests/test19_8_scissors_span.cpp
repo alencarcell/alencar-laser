@@ -68,6 +68,39 @@ int main(){
   require(beforeOrigin->preview.size()==4,
           "arco de retorno recebeu limite incorreto");
 
+  // Caso real: depois de remover uma ponta da linha que cruza uma guia,
+  // o resto termina exatamente no cruzamento antigo. Deve ser possivel
+  // destacar e excluir o restante; tangencias INTERIORES ficam bloqueadas.
+  Editor residual(Document{});
+  const int segment=residual.line({0,0},{10,0});
+  const int boundary=residual.line({5,-3},{5,3});
+  planner.reset(residual.state().doc);
+  auto firstTail=planner.candidate(residual.state().doc,
+                      {{segment,0},0,0,{2.5,0}});
+  require(bool(firstTail)&&firstTail->preview.size()==2,
+          "nao identificou a primeira ponta excedente");
+  residual.removeScissorSpan(*firstTail);
+  planner.reset(residual.state().doc);
+  auto remaining=planner.candidate(residual.state().doc,
+                     {{segment,0},0,0,{7.5,0}});
+  require(bool(remaining)&&remaining->preview.size()==2,
+          "extremidade ja cortada bloqueou restante da linha aberta");
+  require(residual.removeScissorSpan(*remaining)==0,
+          "tesoura nao removeu o segundo excedente/contorno remanescente");
+  require(!get(residual.state().doc,{segment,0})&&
+          get(residual.state().doc,{boundary,0}),
+          "segundo corte alterou linha de referencia");
+  require(residual.undo()&&get(residual.state().doc,{segment,0}),
+          "undo do segundo corte nao restaurou linha remanescente");
+
+  Editor unsafeInterior(Document{});
+  const int base=unsafeInterior.addContour({{0,0},{5,0},{10,0}},false);
+  unsafeInterior.line({5,-3},{5,3});
+  planner.reset(unsafeInterior.state().doc);
+  auto ambiguous=planner.candidate(unsafeInterior.state().doc,
+                     {{base,0},0,0,{2.5,0}});
+  require(!ambiguous,"cruzamento no vertice interior foi excluido sem seguranca");
+
   Editor ring(Document{});
   const int circle=ring.ellipse({0,0},10,10,64);
   const int knife=ring.line({-20,2},{20,2});
