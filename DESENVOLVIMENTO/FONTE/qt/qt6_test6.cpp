@@ -5988,6 +5988,19 @@ static QJsonObject textFillAlign198Test(){
        ui.view.editor.state().editableTexts.at(liveRoot).text=="PRIMEIRO",
        "Undo apos reeditacao nao devolveu texto original");
  ui.view.editor.redo();ui.view.rebuild();
+ // Escape durante reedicao descarta rascunho e restaura desenho original.
+ const auto beforeCancel=stateText(ui.view.editor.state());
+ ui.editVectorTextObject(liveRoot);
+ check(ui.inlineTextEntry_&&ui.view.textEditingMemberHidden(liveRoot),
+       "Reedicao nao ocultou contornos antes de cancelar");
+ ui.inlineTextEntry_->setText("NAO SALVAR");
+ QTest::keyClick(ui.inlineTextEntry_,Qt::Key_Escape);
+ QApplication::processEvents();
+ check(!ui.inlineTextEntry_&&
+       !ui.view.textEditingMemberHidden(liveRoot)&&
+       ui.view.pathItem({liveRoot,0})->isVisible()&&
+       stateText(ui.view.editor.state())==beforeCancel,
+       "Escape nao cancelou reedicao/restaurou contornos e metadados");
  // Acao visivel em portugues para remover a semantica de fonte e liberar nos.
  auto* convert=ui.findChild<QPushButton*>("convert_text_paths_19_8");
  check(convert!=nullptr,"Acao Converter texto em caminhos nao aparece");
