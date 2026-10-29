@@ -40,6 +40,13 @@ int main(){
  // Two binary scan lines; image dimensions remain untouched.
  sim198::raster::Mask mask{4,2,{0,1,1,0,0,0,1,0}};
  cfg.intervalMm=5.; // maximum supported by the simulator/UI
+ sim198::raster::validate(cfg); // valid at the upper boundary
+ bool intervalRejected=false;
+ try{
+  auto invalidInterval=cfg;invalidInterval.intervalMm=10.;
+  sim198::raster::validate(invalidInterval);
+ }catch(const std::runtime_error&){intervalRejected=true;}
+ assert(intervalRejected); // 10 mm is intentionally NOT a supported pitch
  sim198::Plan pic;
  sim198::raster::appendMask(pic,mask,{0,0,40,10},cfg);
  assert(std::abs(pic.cutMm-30.)<1e-8);
