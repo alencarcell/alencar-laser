@@ -5737,6 +5737,89 @@ static QJsonObject textFormatting198Test(){
          {"text_preferences",true},{"physical_laser_commands",false}};
 }
 
+static QJsonObject textFillAlign198Test(){
+ // Editable text persists source metadata separately from the vector outlines.
+ Editor model(Document{});
+ EditableText record;record.text="ALENCAR";record.fontFamily="Arial";
+ record.bold=true;record.italic=false;record.heightMm=12;
+ record.spacingPercent=110;record.align=1;record.anchor={10,20};
+ const int root=model.addEditableText(
+   {{{10,20},{20,20},{20,30},{10,30}},
+    {{22,20},{26,20},{26,30},{22,30}}},record,0);
+ check(model.state().editableTexts.count(root)==1&&
+       model.state().editableTexts.at(root).members.size()==2,
+       "Texto editavel nao criou unidade e metadados originais");
+ auto reopened=fromMetadata(model.state().doc,metadata(model.state()));
+ check(reopened.editableTexts.at(root).text=="ALENCAR"&&
+       reopened.editableTexts.at(root).bold&&
+       reopened.editableTexts.at(root).spacingPercent==110,
+       "Salvamento da fonte editavel nao preservou texto/formato");
+ const auto beforeUndo=model.undoCount();
+ record.text="LASER";record.italic=true;
+ model.replaceEditableText(root,
+   {{{10,20},{25,20},{25,35},{10,35}}},record);
+ check(model.undoCount()==beforeUndo+1&&
+       model.state().editableTexts.at(root).text=="LASER",
+       "Reedicao nao atualizou frase num unico Undo");
+ check(model.undo()&&model.state().editableTexts.at(root).text=="ALENCAR"&&
+       model.redo()&&model.state().editableTexts.at(root).text=="LASER",
+       "Reedicao nao foi reversivel");
+ Editor alignment(Document{});
+ const int a=alignment.rectangle({0,0},10,10);
+ const int b=alignment.rectangle({30,40},20,5);
+ alignment.alignObjects({a,b},4,a);
+ auto boxA=boundsOf(alignment.state().doc,{a}),boxB=boundsOf(alignment.state().doc,{b});
+ check(std::abs(boxA.first.x+boxA.second.x-boxB.first.x-boxB.second.x)<1e-8,
+       "Alinhamento centro X falhou");
+ alignment.alignObjects({a,b},5,a);
+ boxA=boundsOf(alignment.state().doc,{a});boxB=boundsOf(alignment.state().doc,{b});
+ check(std::abs(boxA.first.y+boxA.second.y-boxB.first.y-boxB.second.y)<1e-8,
+       "Alinhamento centro Y falhou");
+ alignment.alignObjects({a,b},1,a);
+ boxA=boundsOf(alignment.state().doc,{a});boxB=boundsOf(alignment.state().doc,{b});
+ check(std::abs(boxA.second.x-boxB.second.x)<1e-8,
+       "Alinhamento a direita falhou");
+ LabWindow ui(Document{});
+ ui.show();QApplication::processEvents();
+ auto* edit=ui.findChild<QPushButton*>("edit_text_selected_19_8");
+ check(edit!=nullptr,"Acao de reeditar texto nao aparece no painel");
+ ui.view.editor.setLayerMode(0,"Fill");
+ const int outer=ui.view.editor.ellipse({100,100},45,45,128);
+ const int hole=ui.view.editor.ellipse({100,100},20,20,128);
+ (void)outer;(void)hole;
+ ui.view.setFillPreview(true);
+ bool found=false;
+ for(auto* item:ui.view.scene()->items()){
+  if(item->data(0).toString()!="layer_fill_even_odd")continue;
+  auto* pathItem=qgraphicsitem_cast<QGraphicsPathItem*>(item);
+  check(pathItem!=nullptr,"Fundo composto nao e QGraphicsPathItem");
+  const auto shape=pathItem->path();
+  check(shape.fillRule()==Qt::OddEvenFill&&
+        !shape.contains(QPointF(100,100))&&
+         shape.contains(QPointF(135,100)),
+        "Circulo interior na mesma camada nao formou buraco");
+  found=true;
+ }
+ check(found,"Compositor Fill por camada nao foi criado");
+ ui.close();
+ PreviewCanvas198 camera;
+ camera.resize(320,220);camera.show();
+ QImage picture(740,440,QImage::Format_ARGB32);picture.fill(Qt::black);
+ camera.showImage(picture);camera.resetView();
+ check(std::abs(camera.zoomLevel()-1.)<1e-7,"Vista inicial deve estar ajustada");
+ QWheelEvent wheel(QPointF(160,100),QPointF(160,100),QPoint(0,0),
+                   QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+ QApplication::sendEvent(camera.viewport(),&wheel);
+ check(camera.zoomLevel()>1.0,"Roda do mouse nao ampliou a previa");
+ camera.resetView();
+ check(std::abs(camera.zoomLevel()-1.)<1e-7,"Ajustar imagem nao restaurou camera");
+ camera.close();
+ return {{"status","PASS"},{"editable_text_metadata",true},
+   {"text_replace_undo",true},{"align_x_y_right",true},
+   {"fill_even_odd_visual",true},{"preview_wheel_zoom",true},
+   {"machine_commands_sent",false}};
+}
+
 static QJsonObject drawAndJoin198Test(){
  // Model invariant: complete a rectangle by magnetically joining its
  // two open endpoints, maintaining the SAME contour/object and undo unit.
@@ -5928,7 +6011,14 @@ int main(int argc,char** argv){
   QFile f(out+"/RESULTADO_PREVIA_MOVIMENTO_19_8.json");
   if(!f.open(QIODevice::WriteOnly))return 2;
   f.write(QJsonDocument(report).toJson());return pass?0:1;
- }if(mode=="--text-format-19-8-test"){
+ }if(mode=="--text-fill-align-19-8-test"){
+   QDir().mkpath(out);QJsonObject report;bool pass=true;
+   try{report=textFillAlign198Test();}
+   catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+   QFile file(out+"/RESULTADO_TEXTO_FILL_ALINHAMENTO_19_8.json");
+   if(!file.open(QIODevice::WriteOnly))return 2;
+   file.write(QJsonDocument(report).toJson());return pass?0:1;
+  }if(mode=="--text-format-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=textFormatting198Test();}
   catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
