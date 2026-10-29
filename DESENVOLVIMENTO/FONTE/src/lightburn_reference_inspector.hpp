@@ -153,7 +153,10 @@ inline GrblLogSummary readGrblLog(const QString& path){
   const auto line=f.readLine();++s.lines;
   if(line.size()>=12&&line.at(2)==':'&&line.at(5)==':'&&line.at(8)=='.'){
    const auto time=QString::fromLatin1(line.left(12));
-   if(s.firstTime.isEmpty())s.firstTime=time;s.lastTime=time;
+   if(s.firstTime.isEmpty()){
+    s.firstTime=time;
+   }
+   s.lastTime=time;
   }
   if(line.contains("Command sending with timeout"))++s.timeoutMessages;
   if(line.contains("Cut Bounds :"))++s.cutBounds;
