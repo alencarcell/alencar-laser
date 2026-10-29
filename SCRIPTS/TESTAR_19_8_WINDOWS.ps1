@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteSimulacao, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteSimulacao, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -83,6 +83,19 @@ try {
     Write-Host 'ALENCAR LASER 19.8 - VALIDACAO DA BRANCH GITHUB' -ForegroundColor Cyan
     Write-Host "Fontes: $fontes"
     Write-Host "Build isolado: $build"
+    if ($SomenteRaster) {
+        # Fast isolated check for raster fixtures: skips CMake and Qt6.
+        Write-Host 'TESTE RAPIDO: C++ raster offline, sem configuracao CMake e sem Qt6.' -ForegroundColor Cyan
+        New-Item -ItemType Directory -Path $build -Force | Out-Null
+        $rasterSource = Join-Path $fontes 'tests\preview_raster_19_8_standalone.cpp'
+        $rasterStandalone = Join-Path $build 'preview_raster_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $rasterSource -o $rasterStandalone
+        Checar-Saida 'Compilacao isolada do raster 19.8'
+        & $rasterStandalone
+        Checar-Saida 'Teste isolado do raster 19.8'
+        Write-Host 'RASTER C++ PASS. Ainda faltam os testes Qt6 e da suite integrada.' -ForegroundColor Green
+        return
+    }
     & $cmake -S $fontes -B $build -G Ninja `
         '-DCMAKE_BUILD_TYPE=Release' `
         '-DALENCAR_REQUIRE_QT=ON' `
