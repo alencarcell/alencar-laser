@@ -2049,6 +2049,12 @@ public:
  double inlineTextHeightMm_=12.;
  QFont inlineTextFont_{"Arial",12};
  Qt::AlignmentFlag inlineTextAlign_=Qt::AlignLeft;
+ QFontComboBox* textFamilyControl_=nullptr;
+ QDoubleSpinBox* textHeightControl_=nullptr;
+ QCheckBox* textBoldControl_=nullptr;
+ QCheckBox* textItalicControl_=nullptr;
+ QDoubleSpinBox* textSpacingControl_=nullptr;
+ QComboBox* textAlignControl_=nullptr;
  double inlineTextLetterSpacing_=100.;
  QTabWidget* textInspectorTabs_=nullptr;
  QWidget* textOptionsTab_=nullptr;
@@ -2953,6 +2959,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   textSpacing->setSingleStep(5);textSpacing->setSuffix("%");
   textSpacing->setToolTip("Distancia relativa entre letras; 100% = normal.");
   spacingRow->addWidget(textSpacing,1);textLayout->addLayout(spacingRow);
+  textFamilyControl_=fontFamily;textHeightControl_=sizeMm;
+  textBoldControl_=boldText;textItalicControl_=italicText;
+  textSpacingControl_=textSpacing;textAlignControl_=alignment;
   auto* example=new QLabel("Alencar Laser 123");
   example->setObjectName("text_format_sample");
   example->setAlignment(Qt::AlignCenter);
@@ -3756,6 +3765,21 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   inlineTextHeightMm_=record.heightMm;inlineTextLetterSpacing_=record.spacingPercent;
   inlineTextAlign_=record.align==1?Qt::AlignHCenter:
                    (record.align==2?Qt::AlignRight:Qt::AlignLeft);
+  if(textFamilyControl_){
+   QSignalBlocker guard0(textFamilyControl_);
+   QSignalBlocker guard1(textHeightControl_);
+   QSignalBlocker guard2(textBoldControl_);
+   QSignalBlocker guard3(textItalicControl_);
+   QSignalBlocker guard4(textSpacingControl_);
+   QSignalBlocker guard5(textAlignControl_);
+   textFamilyControl_->setCurrentFont(inlineTextFont_);
+   textHeightControl_->setValue(inlineTextHeightMm_);
+   textBoldControl_->setChecked(record.bold);
+   textItalicControl_->setChecked(record.italic);
+   textSpacingControl_->setValue(record.spacingPercent);
+   textAlignControl_->setCurrentIndex(
+      std::max(0,textAlignControl_->findData(int(inlineTextAlign_))));
+  }
   insertVectorText(anchor);
   if(!inlineTextEntry_)return;
   inlineTextEditRoot_=root;
