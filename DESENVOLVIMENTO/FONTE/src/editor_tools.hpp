@@ -83,6 +83,8 @@ inline std::optional<PathEndpointSnap> nearestOpenEndpoint(
  std::optional<PathEndpointSnap> winner;
  double best=toleranceMm;
  bool ambiguous=false;
+ std::map<int,int> pathCount;
+ for(const auto& c:state.doc.contours)++pathCount[c.key.object];
  for(const auto& c:state.doc.contours){
   if(c.closed||c.nodes.size()<2||c.nodes.size()>50000||
      (exclude&&*exclude==c.key))continue;
@@ -90,9 +92,7 @@ inline std::optional<PathEndpointSnap> nearestOpenEndpoint(
   if(it==state.objects.end()||it->second.layer!=layer||
      it->second.group!=0||!editable(state,c.key.object))continue;
   // Objects with multiple subpaths are not welded, preserving identity.
-  int paths=0;for(const auto& test:state.doc.contours)
-   if(test.key.object==c.key.object)++paths;
-  if(paths!=1)continue;
+  if(pathCount[c.key.object]!=1)continue;
   for(int endpoint=0;endpoint<2;++endpoint){
    const Pt candidate=endpoint?c.nodes.back().p:c.nodes.front().p;
    const double distance=dist(point,candidate);
