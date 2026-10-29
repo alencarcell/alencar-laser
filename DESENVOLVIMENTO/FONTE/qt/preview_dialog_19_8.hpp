@@ -252,9 +252,10 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
   const double now=timeline.totalSeconds*double(progress->value())/1000.0;
   timeLabel->setText(QString("%1 / %2 s").arg(now,0,'f',1).arg(timeline.totalSeconds,0,'f',1));
   // A antiga imagem fixa 740x440 ficava serrilhada ao ocupar uma janela
-  // maior. Renderizar em 2x logicos para planos moderados, mantendo o mesmo
-  // enquadramento e reduzindo o custo com trajetorias muito extensas.
-  const int supersample=shown.moves.size()<=30000?2:1;
+  // maior. Ao pausar, renderizar em 2x para planos moderados; durante a
+  // reproducao conservar 1x para evitar aumentar custo de cada frame.
+  // A imagem so afeta o canvas virtual; nao ha G-code ou hardware.
+  const int supersample=(!clock.isActive()&&shown.moves.size()<=30000)?2:1;
   QImage image(740*supersample,440*supersample,QImage::Format_ARGB32);
   image.setDevicePixelRatio(double(supersample));
   image.fill(QColor("#16252F"));
