@@ -5784,6 +5784,30 @@ static QJsonObject textFillAlign198Test(){
  ui.show();QApplication::processEvents();
  auto* edit=ui.findChild<QPushButton*>("edit_text_selected_19_8");
  check(edit!=nullptr,"Acao de reeditar texto nao aparece no painel");
+ ui.insertVectorText({160,170});
+ check(ui.inlineTextEntry_!=nullptr,"Campo de texto inicial nao abriu");
+ ui.inlineTextEntry_->setText("PRIMEIRO");
+ ui.finishInlineText(true);
+ check(ui.view.editor.state().editableTexts.size()==1,
+       "Criacao real de texto nao salvou registro editavel");
+ const int liveRoot=ui.view.editor.state().editableTexts.begin()->first;
+ const auto prior=ui.view.editor.undoCount();
+ ui.editVectorTextObject(liveRoot);
+ check(ui.inlineTextEntry_&&ui.inlineTextEntry_->text()=="PRIMEIRO",
+       "Reedicao nao recuperou frase original");
+ ui.inlineTextEntry_->setText("SEGUNDO");
+ ui.finishInlineText(true);
+ check(ui.view.editor.state().editableTexts.at(liveRoot).text=="SEGUNDO"&&
+       ui.view.editor.undoCount()==prior+1,
+       "Reedicao de texto ao vivo nao substituiu contornos em 1 Undo");
+ const auto liveMetadata=metadata(ui.view.editor.state());
+ const auto liveReloaded=fromMetadata(ui.view.editor.state().doc,liveMetadata);
+ check(liveReloaded.editableTexts.at(liveRoot).text=="SEGUNDO",
+       "Texto reeditado nao sobreviveu ao metadata roundtrip");
+ check(ui.view.editor.undo()&&
+       ui.view.editor.state().editableTexts.at(liveRoot).text=="PRIMEIRO",
+       "Undo apos reeditacao nao devolveu texto original");
+ ui.view.editor.redo();ui.view.rebuild();
  ui.view.editor.setLayerMode(0,"Fill");
  const int outer=ui.view.editor.ellipse({100,100},45,45,128);
  const int hole=ui.view.editor.ellipse({100,100},20,20,128);
