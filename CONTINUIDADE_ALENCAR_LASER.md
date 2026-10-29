@@ -493,3 +493,18 @@ Registrar mudanças, testes e pendências.
 - Especificação completa com cenários de aceitação e matriz de testes: `DESENVOLVIMENTO/ESPECIFICACOES/PROXIMA_ETAPA_FILL_VAZADOS_PREVIA_RESPONSIVA_19_8_20261029.md`.
 - **Nesta mensagem**: só registro dos requisitos no GitHub experimental; **nenhuma alteração de código, compilação nova ou teste concluído**. Não afirmar que correção visual ou zoom já estão prontos. `main`, versão homologada, `APLICATIVO` e controle físico intocados.
 - Quando o usuário concluir o teste atual e solicitar avançar, implementar na ordem: compositor visual de preenchimento por camada, modal responsivo com controles fixos, viewport independente com zoom/pan, reprodução coerente de trajetórias raster e testes guiados Windows.
+
+## 29/10/2026 — Correção experimental: curvas Bézier inacessíveis após concluir desenho
+
+- **Relato real do usuário:** criação de curvas e magnetismo funcionam, mas ao concluir a Bézier não consegue selecionar, editar, recortar ou desfazer; objeto permanece visível.
+- **Diagnóstico na fonte:** desenho Bézier v5 salvo no `CurveDragSession`, enquanto modo Seleção usa `Editor` polilinhas. Troca para Seleção desligava `nativeMode_`; Ctrl+Z e Delete dependiam só do estado da ferramenta `bezierToolActive_`. Undo nativo só atualizava paths existentes e não removia `QGraphicsPathItem` de objetos desfeitos, causando risco de curvas fantasmas.
+- **Hotfix publicado apenas na branch experimental**:
+  - Hit-test do modo **Seleção** reconhece Bézier nativa, destaca a curva e permite mover contorno completo arrastando; troca para edição de Bézier mostra âncoras e alças sem alterar a forma.
+  - `QtEditorLab::nativeHistory` reconstrói todos os objetos QGraphicsPathItem após Undo/Redo; `CurveDragSession::undo/redo` remove seleção pendurada se o objeto não existir mais.
+  - Ctrl+Z/Y/Shift+Z e botões de histórico consideram a última edição nativa independentemente da ferramenta, com comparação de geração do Editor para escolher a pilha correspondente. **Histórico global unificado ainda não implementado**.
+  - Delete ou botão Excluir em Seleção removem curva; edição de nós preserva Delete nó e Ctrl+Delete contorno.
+  - Tesoura sobre Bézier nativa agora subdivide curva por de Casteljau em um ponto interno: uma forma aberta vira duas; curva fechada abre no ponto. **Não substitui a tesoura de remoção de intervalo entre cruzamentos**.
+- **Regressões adicionadas** ao `tests/preview_draw_join_19_8_standalone.cpp` e `qt6_test6.cpp --draw-join-19-8-test`: ciclo completo desenho → seleção → Undo sem fantasma → Redo → editar alças → dividir com tesoura → Undo, e validação de subdivisão exata. Comando existente `-SomenteDesenho`.
+- Documento detalhado: `DESENVOLVIMENTO/ESPECIFICACOES/HOTFIX_CURVAS_BEZIER_SELECAO_HISTORICO_TESOURA_19_8_20261029.md`.
+- **Status:** código e testes registrados no GitHub; **SEM compilação Qt6 Windows nem confirmação PASS deste hotfix**. Testes anteriores do usuário aprovavam os gestos, mas comprovavam a falha pós-criação. Preservados `main`, base homologada, `APLICATIVO`, projetos locais, conexão física e emissão.
+- Próximo passo: `git status --short`, `git pull --ff-only origin feat/refino-curvas-rastreio-diagnosticos-19-8` se árvore segura, `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteDesenho`; caso erro verificar primeira linha `error:` dos logs antes de novas features. Testar sem laser.
