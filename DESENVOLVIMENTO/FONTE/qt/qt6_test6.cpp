@@ -1401,6 +1401,11 @@ void mousePressEvent(QMouseEvent* e)override{
   }
   if(tool==Tool::DrawBezier){
    if(!nativeSession_){if(toolWarning)toolWarning("Sessao de desenho Bézier indisponivel");e->accept();return;}
+   const auto layer=editor.state().layers.find(targetLayer());
+   if(layer==editor.state().layers.end()||!layer->second.visible||layer->second.locked){
+    if(toolWarning)toolWarning("Desenho Bézier requer camada visivel e desbloqueada");
+    e->accept();return;
+   }
    const QPointF at=mapToScene(e->position().toPoint());
    const Pt anchor=fromQt(at);
    if(bezierDrawing_&&bezierNodes_.size()>=3){
