@@ -68,3 +68,8 @@ Se PASS, `-Abrir` para teste manual:
 - O `Alt+J` está limitado a dois caminhos selecionados com até **0,5 mm de separação**; é uma tolerância configurada na experiência 19.8, não a tolerância padrão de todos os comandos LightBurn.
 - Sem comparação visual real dos gestos e sem compilação Windows posterior, comportamento e ergonomia permanecem experimentais.
 - Não houve mudança em G-code, CAM, GRBL, M3/M4 físicos ou na controladora.
+
+## Complemento de segurança e testes
+
+- O modo **Desenhar curva** também verifica a camada escolhida antes de colocar o primeiro nó: deve existir, estar visível e desbloqueada. Isso evita novos objetos nativos enquanto o usuário tenta desenhar em layer bloqueado; como o modelo de curvas v5 ainda não registra metadados por camada em todos os caminhos, **a associação definitiva dos objetos Bézier nativos a camadas continua uma pendência arquitetural**.
+- O teste Qt exige a existência da ação `join_open_endpoints` além do botão `new_bezier`. A versão experimental ainda requer compilação e observação visual antes de chamar essa ergonomia de aprovada.
