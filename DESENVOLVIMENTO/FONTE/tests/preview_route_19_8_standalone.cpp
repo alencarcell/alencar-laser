@@ -38,6 +38,28 @@ int main(){
  const auto repeated=sim198::repeatedByLayer(result,three.state(),2);
  assert(close(repeated.cutMm,2*result.cutMm));
  assert(close(repeated.cutMm,2*baseline.cutMm));
+ // The pass planner must never silently teleport with an active beam.
+ for(const sim198::Plan* p:{&result,&repeated}){
+  for(std::size_t i=1;i<p->moves.size();++i)
+   assert(std::hypot(p->moves[i-1].to.x-p->moves[i].from.x,
+                     p->moves[i-1].to.y-p->moves[i].from.y)<1e-8);
+ }
+ // Different per-layer pass counts do not cause active jumps or multiply
+ // another layer's cutting path.
+ Editor multi(Document{});
+ multi.rectangle({10,10},2,2);
+ multi.rectangle({20,20},2,2);
+ multi.addLayer(1,"Layer 1");
+ multi.rectangle({100,100},2,2,1);
+ auto l0=multi.state().layers.at(0);l0.passes=2;multi.configureLayer(0,l0);
+ auto l1=multi.state().layers.at(1);l1.passes=3;multi.configureLayer(1,l1);
+ const auto multiBase=sim198::route::nearestNeighborLines(multi.state());
+ const auto multiPass=sim198::repeatedByLayer(multiBase,multi.state(),2);
+ assert(close(multiBase.cutMm,24));
+ assert(close(multiPass.cutMm,112));
+ for(std::size_t i=1;i<multiPass.moves.size();++i)
+  assert(std::hypot(multiPass.moves[i-1].to.x-multiPass.moves[i].from.x,
+                    multiPass.moves[i-1].to.y-multiPass.moves[i].from.y)<1e-8);
  std::size_t offDeps=99;
  const auto off=sim198::route::nearestNeighborLines(
     three.state(),300000,1500,false,&offDeps);
