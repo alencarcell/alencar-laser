@@ -2995,6 +2995,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* editMenu=mainMenu->addMenu("Editar");
   command(editMenu,"Desfazer","undo");command(editMenu,"Refazer","redo");command(editMenu,"Duplicar seleção","duplicate_obj");
   command(editMenu,"Excluir formas selecionadas","delete_shapes");
+  auto* joinEndsAction=editMenu->addAction("Unir pontas selecionadas (Alt+J)");
+  joinEndsAction->setObjectName("join_open_endpoints");
+  connect(joinEndsAction,&QAction::triggered,this,[this]{
+   run([this]{
+    check(!bezierToolActive_,"Unir pontas: selecione polilinhas no modo Selecao.");
+    const auto ids=selection();
+    check(ids.size()==2,"Unir pontas: selecione exatamente dois contornos abertos.");
+    const int kept=view.editor.joinTwoOpenContours(ids[0],ids[1],0.5);
+    view.clearSelection();view.rebuild();view.activate({kept,0});
+    recoveryPolicy_.edited();captureEvent("endpoints_joined");
+    status->setText("Pontas unidas em um unico caminho; Ctrl+Z desfaz.");
+   });
+  });
   command(editMenu,"Selecionar (Esc / V)","select");command(editMenu,"Tesoura (K)","scissors");
   auto* arrangeMenu=mainMenu->addMenu("Organizar");
   command(arrangeMenu,"Agrupar","group");command(arrangeMenu,"Desagrupar","ungroup");
@@ -3108,6 +3121,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     editingShortcuts_.push_back(sc);
     connect(sc,&QShortcut::activated,this,[this,fn]{run(fn);});
    };
+  shortcut("Alt+J",[joinEndsAction]{joinEndsAction->trigger();});
   shortcut("Ctrl+Z",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(false);}else view.history(false);});
   shortcut("Ctrl+Y",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(true);}else view.history(true);});
   shortcut("Ctrl+Shift+Z",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(true);}else view.history(true);});
