@@ -112,6 +112,13 @@ inline Constraints build(const std::vector<const Contour*>& shapes,
  std::vector<Bounds> boxes;boxes.reserve(shapes.size());
  for(const auto* c:shapes)boxes.push_back(bounds(*c));
  std::size_t checks=0;
+ // Tri-state cache avoids recomputing O(edges^2) simplicity checks.
+ std::vector<int> simpleCache(shapes.size(),-1);
+ auto isSimple=[&](std::size_t i){
+  if(simpleCache[i]<0)
+   simpleCache[i]=simpleClosed(*shapes[i],checks,maxChecks)?1:0;
+  return simpleCache[i]==1;
+ };
  for(std::size_t parent=0;parent<shapes.size();++parent){
   if(!shapes[parent]->closed)continue;
   // Avoid O(nodes²) unless some other box can actually fit inside.
@@ -120,9 +127,13 @@ inline Constraints build(const std::vector<const Contour*>& shapes,
    if(parent!=child&&boundsStrictlyInside(boxes[child],boxes[parent])){
     possible=true;break;
    }
-  if(!possible||!simpleClosed(*shapes[parent],checks,maxChecks))continue;
+  if(!possible||!isSimple(parent))continue;
   for(std::size_t child=0;child<shapes.size();++child){
    if(parent==child)continue;
+   // Closed but self-crossing inner shapes are excluded from strict
+   // precedence; open internal paths remain valid when fully enclosed.
+   if(!boundsStrictlyInside(boxes[child],boxes[parent]))continue;
+   if(shapes[child]->closed&&!isSimple(child))continue;
    if(strictlyContains(*shapes[parent],*shapes[child],
                        boxes[parent],boxes[child],checks,maxChecks)){
     result.children[parent].push_back(child);
