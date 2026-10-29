@@ -229,6 +229,7 @@ class QtEditorLab final:public QGraphicsView{
  bool polylineStartedOnPress_=false;
  QPointF polylineDown_{};
  std::vector<Pt> polylinePoints_;
+ std::optional<PathEndpointSnap> polylineEndpointHover_;
  QPointF polylineCursor_{};
  QGraphicsPathItem* polylinePreview_=nullptr;
  bool marqueeActive_=false;
@@ -297,11 +298,28 @@ class QtEditorLab final:public QGraphicsView{
   const double angle=std::round(std::atan2(dy,dx)/step)*step;
   return {last.x+length*std::cos(angle),last.y+length*std::sin(angle)};
  }
+ Pt magneticPolyline(Pt point,bool disableSnap=false){
+  polylineEndpointHover_.reset();
+  if(disableSnap)return point;
+  // 10 physical screen pixels. Never weld unrelated layers, locked objects,
+  // groups or closed contours. No fractional coordinate approximation.
+  const double scale=nativePxPerMm()*viewport()->devicePixelRatioF();
+  const double mm=std::clamp(10.0/std::max(scale,1e-8),0.00001,30.0);
+  polylineEndpointHover_=nearestOpenEndpoint(editor.state(),point,targetLayer(),mm);
+  return polylineEndpointHover_?polylineEndpointHover_->point:point;
+ }
  void redrawPolyline(){
   if(!polylinePreview_||polylinePoints_.empty())return;
   QPainterPath path;path.moveTo(toQt(polylinePoints_.front()));
   for(size_t i=1;i<polylinePoints_.size();++i)path.lineTo(toQt(polylinePoints_[i]));
-  path.lineTo(polylineCursor_);polylinePreview_->setPath(path);
+  path.lineTo(polylineCursor_);
+  if(polylineEndpointHover_){
+   // Magnetic marker exists ONLY in the temporary preview.
+   const QPointF center=toQt(polylineEndpointHover_->point);
+   path.addEllipse(center,4.0/std::max(0.001,currentZoom()),
+                          4.0/std::max(0.001,currentZoom()));
+  }
+  polylinePreview_->setPath(path);
  }
  void clearMarquee(){
   marqueeActive_=false;
@@ -375,6 +393,7 @@ class QtEditorLab final:public QGraphicsView{
  }
  void clearPolyline(){
   polylineDrawing_=false;polylineStartedOnPress_=false;polylinePoints_.clear();
+  polylineEndpointHover_.reset();
   if(polylinePreview_){scene_.removeItem(polylinePreview_);delete polylinePreview_;polylinePreview_=nullptr;}
   viewport()->update();
  }
@@ -383,7 +402,7 @@ class QtEditorLab final:public QGraphicsView{
   auto points=std::move(polylinePoints_);clearPolyline();
   if(points.size()<2||(closed&&points.size()<3))return;
   try{
-   lastCreated_=editor.addContour(std::move(points),closed,targetLayer());
+   lastCreated_=editor.commitJoinedPolyline(std::move(points),closed,targetLayer(),0.00001);
    ++toolCreates;rebuild();activate({lastCreated_,0});
    if(diagnosticEvent)diagnosticEvent(closed?"polyline_closed":"polyline_created",1);
    if(stateChanged)stateChanged();
@@ -1321,6 +1340,7 @@ void mousePressEvent(QMouseEvent* e)override{
    if(!layer.visible||layer.locked){e->accept();return;}
    Pt at=snapPolyline(fromQt(mapToScene(e->position().toPoint())),
                       e->modifiers().testFlag(Qt::ShiftModifier));
+   at=magneticPolyline(at,e->modifiers().testFlag(Qt::ControlModifier));
    if(!polylineDrawing_){
     polylineDrawing_=true;polylineStartedOnPress_=true;polylineDown_=e->position();
     polylinePoints_={at};polylineCursor_=toQt(at);
@@ -1332,8 +1352,15 @@ void mousePressEvent(QMouseEvent* e)override{
     const QPointF firstPx=viewportTransform().map(toQt(polylinePoints_.front()));
     const bool close=polylinePoints_.size()>=3&&QLineF(firstPx,e->position()).length()<=10.;
     if(close){finishPolyline(true);e->accept();return;}
-    if(polylinePoints_.size()<20000&&dist(polylinePoints_.back(),at)>1e-6)
+    if(polylinePoints_.size()<20000&&dist(polylinePoints_.back(),at)>1e-6){
      polylinePoints_.push_back(at);
+     // A segment joining two eligible open-path endpoints completes the
+     // gesture automatically. finishPolyline commits ONE joined contour.
+     const auto target=polylineEndpointHover_;
+     if(target&&polylinePoints_.size()>=2){
+      finishPolyline(false);e->accept();return;
+     }
+    }
     polylineCursor_=toQt(at);
    }
    redrawPolyline();e->accept();return;
@@ -1426,6 +1453,7 @@ void mouseMoveEvent(QMouseEvent* e)override{
   if(polylineDrawing_&&tool==Tool::Line){
    Pt at=snapPolyline(fromQt(mapToScene(e->position().toPoint())),
                       e->modifiers().testFlag(Qt::ShiftModifier));
+   at=magneticPolyline(at,e->modifiers().testFlag(Qt::ControlModifier));
    polylineCursor_=toQt(at);redrawPolyline();++frameUpdates;
    e->accept();return;
   }
@@ -1471,8 +1499,9 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   if(tool==Tool::Line&&polylineDrawing_){
    // Mantem gesto legada: arrastar logo no primeiro segmento cria uma linha.
    if(polylineStartedOnPress_&&QLineF(polylineDown_,e->position()).length()>4.){
-    const Pt at=snapPolyline(fromQt(mapToScene(e->position().toPoint())),
+    Pt at=snapPolyline(fromQt(mapToScene(e->position().toPoint())),
                              e->modifiers().testFlag(Qt::ShiftModifier));
+    at=magneticPolyline(at,e->modifiers().testFlag(Qt::ControlModifier));
     if(dist(polylinePoints_.front(),at)>1e-6){
      polylinePoints_.push_back(at);
      finishPolyline(false);
