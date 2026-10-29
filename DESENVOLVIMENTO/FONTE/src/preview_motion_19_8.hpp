@@ -65,6 +65,25 @@ inline double startStopSeconds(double distance,double speed,double accel){
  if(distance<=rampDistance)return 2.0*std::sqrt(distance/accel);
  return 2.0*speed/accel+(distance-rampDistance)/speed;
 }
+// Shared nominal estimate for GUI, JSON report and portable regression.
+ // Feed policy is evaluated on ON segments only; travel uses rapid feed.
+ // This is distance/feed, not motion dynamics or actual GRBL timing.
+template<typename Plan,typename FeedForLayer>
+double nominalSecondsWithFeeds(const Plan& plan,const Settings& s,FeedForLayer layerFeed){
+ validate(s);
+ double seconds=0.0;
+ for(const auto& m:plan.moves){
+  const double length=std::hypot(m.to.x-m.from.x,m.to.y-m.from.y);
+  if(!std::isfinite(length))throw std::runtime_error("Segmento nominal invalido");
+  const double feed=m.laser?layerFeed(m.layer):s.rapidMmMin;
+  if(!std::isfinite(feed)||feed<=0)
+   throw std::runtime_error("Velocidade nominal da camada invalida");
+  seconds+=length/feed*60.0;
+  if(!std::isfinite(seconds))
+   throw std::runtime_error("Tempo nominal virtual excedeu limite");
+ }
+ return seconds;
+}
 template<typename Plan,typename FeedForLayer>
 Timeline estimateWithFeeds(const Plan& plan,const Settings& s,FeedForLayer layerFeed){
  validate(s);
