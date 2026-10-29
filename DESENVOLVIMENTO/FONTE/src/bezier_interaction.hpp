@@ -162,6 +162,39 @@ public:
  const CurveDocument& visible()const{return preview_?*preview_:history_.document();}
  std::optional<Key> selected()const{return selected_;}
  bool dragging()const{return dragging_.has_value()||contourMoving_.has_value();}
+ // Draw Lines interaction: corner nodes are clicks, smooth nodes derive
+ // symmetric tangents from click-and-drag. One atomic history entry.
+ Key addEditablePath(std::vector<CurveNode> points,bool closed,int objectId){
+  if(dragging()||objectId<=0||points.size()<2||points.size()>20000||
+     (closed&&points.size()<3))
+   throw std::runtime_error("invalid native path creation");
+  for(const auto& n:points){
+   for(Pt p:{n.anchor,n.handleIn,n.handleOut})
+    if(!std::isfinite(p.x)||!std::isfinite(p.y))
+     throw std::runtime_error("nonfinite native path point");
+  }
+  Key key{objectId,0};
+  for(const auto& old:committed().contours)
+   if(old.key==key)throw std::runtime_error("native path ID already used");
+  history_.change([&](CurveDocument& d){
+   CurveContour contour;contour.key=key;contour.closed=closed;
+   for(auto p:points){
+    p.id=d.nextId++;
+    contour.nodes.push_back(p);
+   }
+   const std::size_t edges=contour.nodes.size()-1+(closed?1:0);
+   for(std::size_t i=0;i<edges;++i){
+    const auto& a=contour.nodes[i];
+    const auto& b=contour.nodes[(i+1)%contour.nodes.size()];
+    const bool curve=dist(a.handleOut,a.anchor)>1e-8||
+                     dist(b.handleIn,b.anchor)>1e-8;
+    contour.edgeKind.push_back(curve?1:0);
+   }
+   d.contours.push_back(std::move(contour));
+  });
+  selected_=key;index_.reset();
+  return key;
+ }
  // Nova curva cúbica nativa com âncoras/alças e Ctrl+Z na mesma sessão.
  Key addEditableCubic(Pt a,Pt out,Pt in,Pt b,int objectId){
   if(dragging()||objectId<=0||dist(a,b)<1e-6)
