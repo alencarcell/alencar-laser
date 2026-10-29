@@ -3094,13 +3094,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    QFont sample=inlineTextFont_;sample.setPixelSize(20);
    sample.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
    example->setFont(sample);example->setAlignment(inlineTextAlign_);
-   if(inlineTextEntry_){
-    QFont live=inlineTextFont_;
-    live.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
-    live.setPixelSize(int(std::clamp(inlineTextHeightMm_*view.currentZoom(),12.,82.)));
-    inlineTextEntry_->setFont(live);
-    inlineTextEntry_->setAlignment(inlineTextAlign_);
-   }
+   updateInlineTextOverlay();
    QSettings prefs("AlencarLaser","DesktopBeta");
    prefs.setValue("text/fontFamily",inlineTextFont_.family());
    prefs.setValue("text/bold",inlineTextFont_.bold());
@@ -3512,9 +3506,11 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    view.requestTextAt=[this](Pt at){insertVectorText(at);};
    view.requestEditTextObject=[this](int id){editVectorTextObject(id);};
    view.requestTraceImage=[this]{traceImageDialog();};
-   connect(qApp,&QApplication::focusChanged,this,[this](QWidget* previous,QWidget* next){
+   connect(qApp,&QApplication::focusChanged,this,[this,zoom](QWidget* previous,QWidget* next){
     if(!inlineTextEntry_||previous!=inlineTextEntry_||next==inlineTextEntry_)return;
-    // Using the text formatting tab must not forcibly convert live text to outlines.
+    // Mudar o zoom ou os controles de texto nao finaliza a edicao.
+    if(next&&(next==zoom||zoom->isAncestorOf(next)||next==&view||
+              next==view.viewport()))return;
     if(textOptionsTab_&&next&&(next==textOptionsTab_||textOptionsTab_->isAncestorOf(next)))return;
     QTimer::singleShot(0,this,[this]{
      if(inlineTextEntry_&&QApplication::focusWidget()!=inlineTextEntry_)
