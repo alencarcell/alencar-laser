@@ -104,6 +104,12 @@ try {
         Checar-Saida 'Compilacao C++ do raster virtual'
         & $rasterStandalone
         Checar-Saida 'Teste C++ de Fill e bitmap'
+        $routeSource = Join-Path $fontes 'tests\preview_route_19_8_standalone.cpp'
+        $routeStandalone = Join-Path $build 'preview_route_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall $routeSource -o $routeStandalone
+        Checar-Saida 'Compilacao C++ da rota virtual'
+        & $routeStandalone
+        Checar-Saida 'Teste C++ de precedencia/rota virtual'
         Compilar-QtComDiagnostico
         $app = Join-Path $build 'alencar_test7_qt6.exe'
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
