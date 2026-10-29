@@ -5515,6 +5515,60 @@ static QJsonObject actualLightBurnFile198Test(const QString& input){
   {"deterministic",true},{"hardware_commands_sent",false}};
 }
 
+static QJsonObject textFormatting198Test(){
+ // Use system font list as Qt/Windows exposes it. The selected font is
+ // vectorized locally; no remote/downloaded font resource is required.
+ LabWindow ui(Document{});
+ ui.show();QApplication::processEvents();
+ auto* font=ui.findChild<QFontComboBox*>("text_font_windows");
+ auto* height=ui.findChild<QDoubleSpinBox*>("text_height_mm");
+ auto* bold=ui.findChild<QCheckBox*>("text_bold");
+ auto* italic=ui.findChild<QCheckBox*>("text_italic");
+ auto* align=ui.findChild<QComboBox*>("text_align");
+ auto* spacing=ui.findChild<QDoubleSpinBox*>("text_letter_spacing");
+ check(font&&height&&bold&&italic&&align&&spacing,
+       "Painel de formatacao de texto nao foi criado");
+ check(font->count()>0,"Nenhuma fonte do sistema foi encontrada");
+ clickButton(ui,"text");
+ QCoreApplication::processEvents();
+ height->setValue(16.0);
+ bold->setChecked(true);italic->setChecked(true);
+ spacing->setValue(125.);
+ align->setCurrentIndex(align->findData(int(Qt::AlignHCenter)));
+ check(ui.inlineTextFont_.bold()&&ui.inlineTextFont_.italic()&&
+       std::abs(ui.inlineTextHeightMm_-16.)<1e-7&&
+       ui.inlineTextAlign_==Qt::AlignHCenter,
+       "Controles de fonte nao aplicaram o estilo selecionado");
+ QFont selected=font->currentFont();
+ selected.setBold(true);selected.setItalic(true);
+ selected.setLetterSpacing(QFont::PercentageSpacing,125.);
+ const auto left=vectorTextOutlines("ALENCAR",selected,16.,{100,100},Qt::AlignLeft);
+ const auto center=vectorTextOutlines("ALENCAR",selected,16.,{100,100},Qt::AlignHCenter);
+ const auto right=vectorTextOutlines("ALENCAR",selected,16.,{100,100},Qt::AlignRight);
+ auto extents=[](const auto& paths){
+  double lo=1e30,hi=-1e30;
+  for(const auto& ring:paths)for(Pt p:ring){
+   lo=std::min(lo,p.x);hi=std::max(hi,p.x);
+  }
+  return std::pair<double,double>{lo,hi};
+ };
+ const auto l=extents(left),c=extents(center),r=extents(right);
+ check(std::abs(l.first-100.)<1e-6&&
+       std::abs((c.first+c.second)/2.-100.)<1e-6&&
+       std::abs(r.second-100.)<1e-6,
+       "Alinhamento do texto vetorial nao corresponde ao ponto de ancora");
+ check(left.size()==center.size()&&center.size()==right.size(),
+       "Alinhar texto alterou a topologia das letras");
+ QSettings prefs("AlencarLaser","DesktopBeta");
+ check(prefs.value("text/bold").toBool()&&prefs.value("text/italic").toBool()&&
+       std::abs(prefs.value("text/spacingPercent").toDouble()-125.)<1e-7,
+       "Preferencias de formatacao nao persistiram");
+ ui.close();
+ return {{"status","PASS"},{"windows_fonts",true},{"bold_italic",true},
+         {"text_height",true},{"spacing",true},{"alignment_left_center_right",true},
+         {"text_preferences",true},{"physical_laser_commands",false}};
+}
+
 static QJsonObject drawAndJoin198Test(){
  // Model invariant: complete a rectangle by magnetically joining its
  // two open endpoints, maintaining the SAME contour/object and undo unit.
@@ -5706,6 +5760,13 @@ int main(int argc,char** argv){
   QFile f(out+"/RESULTADO_PREVIA_MOVIMENTO_19_8.json");
   if(!f.open(QIODevice::WriteOnly))return 2;
   f.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--text-format-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=textFormatting198Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile file(out+"/RESULTADO_FORMATACAO_TEXTO_19_8.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--draw-join-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=drawAndJoin198Test();}
