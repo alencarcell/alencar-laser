@@ -161,7 +161,61 @@ public:
  const CurveDocument& committed()const{return history_.document();}
  const CurveDocument& visible()const{return preview_?*preview_:history_.document();}
  std::optional<Key> selected()const{return selected_;}
+ void clearSelection(){if(dragging())return;selected_.reset();}
+ void reconcileSelection(){
+  if(!selected_)return;
+  for(const auto& c:committed().contours)if(c.key==*selected_)return;
+  selected_.reset();
+ }
  bool dragging()const{return dragging_.has_value()||contourMoving_.has_value();}
+ // Draw Lines interaction: corner nodes are clicks, smooth nodes derive
+ // symmetric tangents from click-and-drag. One atomic history entry.
+ Key addEditablePath(std::vector<CurveNode> points,bool closed,int objectId){
+  if(dragging()||objectId<=0||points.size()<2||points.size()>20000||
+     (closed&&points.size()<3))
+   throw std::runtime_error("invalid native path creation");
+  for(const auto& n:points){
+   for(Pt p:{n.anchor,n.handleIn,n.handleOut})
+    if(!std::isfinite(p.x)||!std::isfinite(p.y))
+     throw std::runtime_error("nonfinite native path point");
+  }
+  Key key{objectId,0};
+  for(const auto& old:committed().contours)
+   if(old.key==key)throw std::runtime_error("native path ID already used");
+  history_.change([&](CurveDocument& d){
+   CurveContour contour;contour.key=key;contour.closed=closed;
+   for(auto p:points){
+    p.id=d.nextId++;
+    contour.nodes.push_back(p);
+   }
+   const std::size_t edges=contour.nodes.size()-1+(closed?1:0);
+   for(std::size_t i=0;i<edges;++i){
+    const auto& a=contour.nodes[i];
+    const auto& b=contour.nodes[(i+1)%contour.nodes.size()];
+    const bool curve=dist(a.handleOut,a.anchor)>1e-8||
+                     dist(b.handleIn,b.anchor)>1e-8;
+    contour.edgeKind.push_back(curve?1:0);
+   }
+   d.contours.push_back(std::move(contour));
+  });
+  selected_=key;index_.reset();
+  return key;
+ }
+ // Nova curva cúbica nativa com âncoras/alças e Ctrl+Z na mesma sessão.
+ Key addEditableCubic(Pt a,Pt out,Pt in,Pt b,int objectId){
+  if(dragging()||objectId<=0||dist(a,b)<1e-6)
+   throw std::runtime_error("invalid cubic creation");
+  const Key key{objectId,0};
+  history_.change([&](CurveDocument& d){
+   for(const auto& c:d.contours)if(c.key==key)
+    throw std::runtime_error("duplicate native curve object");
+   CurveContour c;c.key=key;c.closed=false;c.edgeKind={1};
+   c.nodes.push_back({d.nextId++,a,a,out});
+   c.nodes.push_back({d.nextId++,b,in,b});
+   d.contours.push_back(std::move(c));
+  });
+  selected_=key;index_.reset();return key;
+ }
  void select(Key key){
   if(dragging())throw std::runtime_error("cannot select while dragging");
   for(auto& c:history_.document().contours)if(c.key==key){selected_=key;return;}
@@ -196,8 +250,18 @@ public:
   dragging_.reset();preview_.reset();return changed;
  }
  void cancel(){preview_.reset();dragging_.reset();contourMoving_.reset();}
- bool undo(){if(dragging())cancel();bool changed=history_.undo();if(changed)index_.reset();return changed;}
- bool redo(){if(dragging())cancel();bool changed=history_.redo();if(changed)index_.reset();return changed;}
+ bool undo(){
+  if(dragging())cancel();
+  bool changed=history_.undo();
+  if(changed){index_.reset();reconcileSelection();}
+  return changed;
+ }
+ bool redo(){
+  if(dragging())cancel();
+  bool changed=history_.redo();
+  if(changed){index_.reset();reconcileSelection();}
+  return changed;
+ }
  size_t undoCount()const{return history_.undoCount();}
  size_t redoCount()const{return history_.redoCount();}
  // Inserção de âncora no parâmetro t da aresta atingida (0<t<1). Retorna o id do novo nó.
@@ -214,6 +278,50 @@ public:
   });
   index_.reset();
   return created;
+ }
+ // Scissors on a NATIVE cubic: split an open path into two editable
+ // contours or open a closed path at the clicked position. Exact de
+ // Casteljau subdivision preserves the curve; one undo transaction.
+ // The new object ID is supplied by the editor to avoid ID collisions.
+ bool cutContourAtEdge(const CurveHit& hit,int newObjectId){
+  if(dragging()||hit.part!=CurvePart::Edge||
+     !std::isfinite(hit.t)||hit.t<=0.01||hit.t>=0.99||
+     newObjectId<=0)return false;
+  for(const auto& c:committed().contours)
+   if(c.key.object==newObjectId)return false;
+  history_.change([&](CurveDocument& d){
+   std::size_t index=0;
+   while(index<d.contours.size()&&d.contours[index].key!=hit.key)++index;
+   if(index>=d.contours.size())throw std::runtime_error("Bezier cut target missing");
+   const bool wasClosed=d.contours[index].closed;
+   const size_t edge=size_t(hit.edge);
+   if(hit.edge<0||edge>=edgeCount(d.contours[index]))
+    throw std::runtime_error("Bezier cut invalid edge");
+   splitEdge(d,index,edge,hit.t);
+   CurveContour& original=d.contours[index];
+   const size_t pivot=edge+1;
+   if(wasClosed){
+    // Rotate the ring so the inserted node is the first and duplicate
+    // only its ID at the end; do not flatten or drop the closing edge.
+    std::rotate(original.nodes.begin(),original.nodes.begin()+pivot,original.nodes.end());
+    std::rotate(original.edgeKind.begin(),original.edgeKind.begin()+pivot,original.edgeKind.end());
+    CurveNode tail=original.nodes.front();tail.id=d.nextId++;
+    original.nodes.push_back(tail);
+    original.closed=false;
+   }else{
+    CurveContour right;
+    right.key={newObjectId,0};right.closed=false;
+    right.nodes.assign(original.nodes.begin()+pivot,original.nodes.end());
+    right.edgeKind.assign(original.edgeKind.begin()+pivot,original.edgeKind.end());
+    // Both subpaths share the cut coordinate, but may not share node IDs.
+    right.nodes.front().id=d.nextId++;
+    original.nodes.erase(original.nodes.begin()+pivot+1,original.nodes.end());
+    original.edgeKind.erase(original.edgeKind.begin()+pivot,original.edgeKind.end());
+    d.contours.push_back(std::move(right));
+   }
+  });
+  selected_=hit.key;index_.reset();
+  return true;
  }
  // Remove âncora do contorno selecionado.
  // Delega a removeCurveNode (política: ponte reta sobre o nó removido).

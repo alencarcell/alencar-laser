@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -31,6 +31,36 @@ function Checar-Saida([string]$etapa) {
         throw "$etapa falhou (codigo $LASTEXITCODE). Veja $relatorio"
     }
 }
+
+# Captura ambos os fluxos do processo nativo. Start-Transcript sozinho pode
+# nao registrar o stderr emitido pelo g++/ninja no Windows PowerShell 5.1.
+function Compilar-QtComDiagnostico {
+    $saidaPadrao = Join-Path $relatorios 'BUILD_QT_19_8_STDOUT.txt'
+    $saidaErros = Join-Path $relatorios 'BUILD_QT_19_8_STDERR.txt'
+    Write-Host 'Compilando Qt em modo diagnostico (1 processo); saida em arquivos separados...' -ForegroundColor Cyan
+    $processo = Start-Process -FilePath $cmake -ArgumentList @(
+        '--build', $build, '--parallel', '1', '--target', 'alencar_test7_qt6'
+    ) -WorkingDirectory $raiz -PassThru -Wait -NoNewWindow `
+      -RedirectStandardOutput $saidaPadrao -RedirectStandardError $saidaErros
+    if ($processo.ExitCode -ne 0) {
+        Write-Host "Compilacao Qt falhou (codigo $($processo.ExitCode)). PRIMEIROS ERROS REAIS:" -ForegroundColor Red
+        $ocorrencias = @(Select-String -Path @($saidaPadrao, $saidaErros) `
+            -Pattern 'error:', 'fatal error:', 'FAILED:', 'undefined reference', 'collect2:', 'killed', 'terminated' `
+            -Context 3,4 | Select-Object -First 12)
+        if ($ocorrencias.Count -gt 0) {
+            $ocorrencias | Out-String -Width 240 | Write-Host
+        } else {
+            Write-Host 'Nenhum marcador de erro encontrado; ultimas 70 linhas de cada fluxo:' -ForegroundColor Yellow
+            Get-Content -LiteralPath $saidaPadrao -Tail 70 | Out-Host
+            Get-Content -LiteralPath $saidaErros -Tail 70 | Out-Host
+        }
+        Write-Host "LOG STDOUT: $saidaPadrao" -ForegroundColor Yellow
+        Write-Host "LOG STDERR: $saidaErros" -ForegroundColor Yellow
+        throw "Compilacao Qt de refinamento falhou (codigo $($processo.ExitCode)). Erros exibidos acima."
+    }
+    Write-Host 'Compilacao Qt concluida. Iniciando testes de refino.' -ForegroundColor Green
+}
+
 # Os executaveis GUI escrevem a causa real em JSON, inclusive ao retornar codigo 1.
 # Exibir o relatorio no proprio terminal evita outro ciclo de compilacao as cegas.
 function Checar-ResultadoQt([string]$etapa, [string]$arquivo) {
@@ -53,6 +83,19 @@ try {
     Write-Host 'ALENCAR LASER 19.8 - VALIDACAO DA BRANCH GITHUB' -ForegroundColor Cyan
     Write-Host "Fontes: $fontes"
     Write-Host "Build isolado: $build"
+    if ($SomenteRaster) {
+        # Fast isolated check for raster fixtures: skips CMake and Qt6.
+        Write-Host 'TESTE RAPIDO: C++ raster offline, sem configuracao CMake e sem Qt6.' -ForegroundColor Cyan
+        New-Item -ItemType Directory -Path $build -Force | Out-Null
+        $rasterSource = Join-Path $fontes 'tests\preview_raster_19_8_standalone.cpp'
+        $rasterStandalone = Join-Path $build 'preview_raster_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $rasterSource -o $rasterStandalone
+        Checar-Saida 'Compilacao isolada do raster 19.8'
+        & $rasterStandalone
+        Checar-Saida 'Teste isolado do raster 19.8'
+        Write-Host 'RASTER C++ PASS. Ainda faltam os testes Qt6 e da suite integrada.' -ForegroundColor Green
+        return
+    }
     & $cmake -S $fontes -B $build -G Ninja `
         '-DCMAKE_BUILD_TYPE=Release' `
         '-DALENCAR_REQUIRE_QT=ON' `
@@ -60,6 +103,76 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteDesenho) {
+        Write-Host 'DESENHO 19.8: snap/Auto-Join, cliques e arraste Bézier sem hardware.' -ForegroundColor Cyan
+        $testSource = Join-Path $fontes 'tests\preview_draw_join_19_8_standalone.cpp'
+        $testExe = Join-Path $build 'preview_draw_join_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $testSource -o $testExe
+        Checar-Saida 'Compilacao standalone de snap, Auto-Join e Bezier'
+        & $testExe
+        Checar-Saida 'Teste standalone de desenho'
+        Compilar-QtComDiagnostico
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\desenho_uniao'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --draw-join-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Desenhar Bezier e unir extremidades' (Join-Path $destino 'RESULTADO_DESENHO_UNIAO_19_8.json')
+        & $app --text-format-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Painel de fontes e formatacao de texto' (Join-Path $destino 'RESULTADO_FORMATACAO_TEXTO_19_8.json')
+        & $app --text-fill-align-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Texto reeditavel, Fill vazado, alinhamento e zoom' (Join-Path $destino 'RESULTADO_TEXTO_FILL_ALINHAMENTO_19_8.json')
+        Write-Host 'DESENHO C++ + Qt PASS sintetico; teste manual do mouse ainda necessario.' -ForegroundColor Green
+        return
+    }
+    if ($SomenteSimulacao) {
+        Write-Host 'PREVIA OFFLINE: teste C++20 independente + Qt com relatorio JSON.' -ForegroundColor Cyan
+        $source = Join-Path $fontes 'tests\preview_motion_19_8_standalone.cpp'
+        $standalone = Join-Path $build 'preview_motion_19_8_standalone.exe'
+        & $gpp -std=c++20 -Wall -Wextra -Werror -O2 $source -o $standalone
+        Checar-Saida 'Compilacao do simulador C++ independente'
+        & $standalone
+        Checar-Saida 'Teste C++ de movimento'
+        $rasterSource = Join-Path $fontes 'tests\preview_raster_19_8_standalone.cpp'
+        $rasterStandalone = Join-Path $build 'preview_raster_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall $rasterSource -o $rasterStandalone
+        Checar-Saida 'Compilacao C++ do raster virtual'
+        & $rasterStandalone
+        Checar-Saida 'Teste C++ de Fill e bitmap'
+        $routeSource = Join-Path $fontes 'tests\preview_route_19_8_standalone.cpp'
+        $routeStandalone = Join-Path $build 'preview_route_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall $routeSource -o $routeStandalone
+        Checar-Saida 'Compilacao C++ da rota virtual'
+        & $routeStandalone
+        Checar-Saida 'Teste C++ de precedencia/rota virtual'
+        Compilar-QtComDiagnostico
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\simulacao'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --simulation-motion-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Previa virtual cinemática' (Join-Path $destino 'RESULTADO_PREVIA_MOVIMENTO_19_8.json')
+        & $app --simulation-raster-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Previa virtual Fill e imagem P&B' (Join-Path $destino 'RESULTADO_PREVIA_RASTER_19_8.json')
+        & $app --layer-route-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Camadas compactas, parametros e rota heuristica' (Join-Path $destino 'RESULTADO_CAMADA_ROTA_19_8.json')
+        & $app --route-nesting-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Roteiro de contornos internos primeiro' (Join-Path $destino 'RESULTADO_CONTORNOS_INTERNOS_19_8.json')
+        Write-Host 'SIMULACAO (MOVIMENTO + RASTER + CAMADAS/ROTA) PASS sintetico; controle fisico bloqueado.' -ForegroundColor Green
+        return
+    }
+    if ($SomenteRefino) {
+        Write-Host 'REFINO: curvas de texto R/O, raster P&B e diagnosticos da Tesoura.' -ForegroundColor Cyan
+        Compilar-QtComDiagnostico
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\refino'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --refine-curves-trace-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Texto R/O, imagem P&B e Tesoura' (Join-Path $destino 'RESULTADO_REFINO_19_8.json')
+        Write-Host 'Refino PASS nos testes sinteticos. Mouse real e imagem do cliente ainda necessarios.' -ForegroundColor Green
+        return
+    }
     if ($SomenteCasoReal) {
         Write-Host 'TESTE REAL: fecho duplicado Tesoura, alca central, paleta e LBRN2 arredondado.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test7_qt6
@@ -88,6 +201,13 @@ try {
     }
     if ($SomenteInteracao) {
         Write-Host 'FOCO: texto direto na mesa, escala e rotacao por alcas.' -ForegroundColor Cyan
+        $textSource = Join-Path $fontes 'tests\text_alignment_19_8_standalone.cpp'
+        $textExecutable = Join-Path $build 'text_alignment_19_8_standalone.exe'
+        $boostJsonSource = Join-Path $fontes 'src\boost_json_impl.cpp'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $textSource $boostJsonSource -o $textExecutable
+        Checar-Saida 'Compilacao C++ do texto editavel e alinhamento'
+        & $textExecutable
+        Checar-Saida 'Teste C++ de texto e alinhamento'
         & $cmake --build $build --parallel 2 --target alencar_test7_qt6
         Checar-Saida 'Compilacao Qt de interacao'
         $app = Join-Path $build 'alencar_test7_qt6.exe'
@@ -96,6 +216,10 @@ try {
         New-Item -ItemType Directory -Path $destino -Force | Out-Null
         & $app --inline-transforms-19-8-test $fixture $destino
         Checar-ResultadoQt 'Texto e transformacoes' (Join-Path $destino 'RESULTADO_TEXTO_TRANSFORMACOES_19_8.json')
+        & $app --text-format-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Painel de formatacao de texto' (Join-Path $destino 'RESULTADO_FORMATACAO_TEXTO_19_8.json')
+        & $app --text-fill-align-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Texto reeditavel, Fill vazado, alinhamento e zoom' (Join-Path $destino 'RESULTADO_TEXTO_FILL_ALINHAMENTO_19_8.json')
         Write-Host 'Texto/alcas PASS automatico; mouse fisico ainda obrigatorio.' -ForegroundColor Green
         return
     }
@@ -215,6 +339,24 @@ try {
     & $app --editor-multitool-19-8-test $fixture $dirEditor
     Checar-ResultadoQt 'Editor: linha continua e selecao por area' (Join-Path $dirEditor 'RESULTADO_EDITOR_MULTIFERRAMENTAS_19_8.json')
 
+    $dirSim = Join-Path $destino 'simulacao'
+    New-Item -ItemType Directory -Path $dirSim -Force | Out-Null
+    $dirDrawing = Join-Path $destino 'desenho_uniao'
+    New-Item -ItemType Directory -Path $dirDrawing -Force | Out-Null
+    & $app --draw-join-19-8-test $fixture $dirDrawing
+    Checar-ResultadoQt 'Desenho por arraste e Auto-Join 19.8' (Join-Path $dirDrawing 'RESULTADO_DESENHO_UNIAO_19_8.json')
+    & $app --text-format-19-8-test $fixture $dirDrawing
+    Checar-ResultadoQt 'Formatacao de texto Windows 19.8' (Join-Path $dirDrawing 'RESULTADO_FORMATACAO_TEXTO_19_8.json')
+    & $app --text-fill-align-19-8-test $fixture $dirDrawing
+    Checar-ResultadoQt 'Texto reeditavel, Fill vazado, alinhamento e zoom' (Join-Path $dirDrawing 'RESULTADO_TEXTO_FILL_ALINHAMENTO_19_8.json')
+    & $app --simulation-motion-19-8-test $fixture $dirSim
+    Checar-ResultadoQt 'Simulacao cinemática 19.8' (Join-Path $dirSim 'RESULTADO_PREVIA_MOVIMENTO_19_8.json')
+    & $app --simulation-raster-19-8-test $fixture $dirSim
+    Checar-ResultadoQt 'Simulacao Fill e bitmap P&B 19.8' (Join-Path $dirSim 'RESULTADO_PREVIA_RASTER_19_8.json')
+    & $app --layer-route-19-8-test $fixture $dirSim
+    Checar-ResultadoQt 'Configuracao por camada e rota 19.8' (Join-Path $dirSim 'RESULTADO_CAMADA_ROTA_19_8.json')
+    & $app --route-nesting-19-8-test $fixture $dirSim
+    Checar-ResultadoQt 'Contornos internos primeiro 19.8' (Join-Path $dirSim 'RESULTADO_CONTORNOS_INTERNOS_19_8.json')
     $dirInteracao = Join-Path $destino 'interacao'
     New-Item -ItemType Directory -Path $dirInteracao -Force | Out-Null
     & $app --inline-transforms-19-8-test $fixture $dirInteracao
@@ -227,6 +369,10 @@ try {
     New-Item -ItemType Directory -Path $dirCasoReal -Force | Out-Null
     & $app --scissor-closures-19-8-test $fixture $dirCasoReal
     Checar-ResultadoQt 'Regressao caso real Tesoura/Alca/Paleta/LBRN2' (Join-Path $dirCasoReal 'RESULTADO_CASO_REAL_19_8.json')
+    $refino = Join-Path $destino 'refino'
+    New-Item -ItemType Directory -Path $refino -Force | Out-Null
+    & $app --refine-curves-trace-19-8-test $fixture $refino
+    Checar-ResultadoQt 'Curvas de texto, P&B, coleta Tesoura' (Join-Path $refino 'RESULTADO_REFINO_19_8.json')
     Write-Host 'BUILD E REGRESSOES AUTOMATIZADAS PASSARAM. AVALIACAO VISUAL AINDA NECESSARIA.' -ForegroundColor Green
     if ($Abrir) {
         Write-Host 'Abrindo editor em modo de desenvolvimento; mantenha o laser desconectado.' -ForegroundColor Yellow

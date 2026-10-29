@@ -21,6 +21,17 @@ inline QIcon toolGlyph(const QString& id){
  }else if(id=="bezier"){
   QPainterPath path;path.moveTo(5,24);path.cubicTo(5,4,27,28,27,7);p.drawPath(path);
   p.setBrush(QColor("#DE914C"));p.drawEllipse(QPointF(5,24),2.5,2.5);p.drawEllipse(QPointF(27,7),2.5,2.5);
+ }else if(id=="new_bezier"){
+  QPainterPath path;path.moveTo(5,24);path.cubicTo(11,3,24,27,27,7);
+  p.drawPath(path);p.drawLine(5,24,11,5);p.drawLine(27,7,24,27);
+  p.setBrush(QColor("#DE914C"));p.drawEllipse(QPointF(5,24),2.2,2.2);
+  p.drawEllipse(QPointF(27,7),2.2,2.2);
+ }else if(id=="image"){
+  p.drawRect(QRectF(4,6,24,21));
+  p.drawEllipse(QPointF(11,12),2.2,2.2);
+  QPolygonF hills;hills<<QPointF(6,24)<<QPointF(14,16)<<QPointF(18,20)
+                        <<QPointF(22,14)<<QPointF(27,24);
+  p.drawPolyline(hills);
  }else if(id=="scissors"){
   p.drawEllipse(QPointF(9,23),4,4);p.drawEllipse(QPointF(23,23),4,4);
   p.drawLine(11,20,25,5);p.drawLine(21,20,7,5);
