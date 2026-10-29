@@ -2967,9 +2967,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   example->setAlignment(Qt::AlignCenter);
   example->setWordWrap(true);
   example->setMinimumHeight(48);textLayout->addWidget(example);
-  auto* note=new QLabel("Fontes do Windows. Apos pressionar Enter, o texto vira "
-       "contornos vetoriais; editar as letras depois exige uma etapa futura. "
-       "Sem G-code nem controle fisico nesta versao.");
+  auto* note=new QLabel("Fontes do Windows. Apos Enter, o texto possui contornos "
+       "vetoriais e origem editavel. Selecione e clique em Editar texto ou de "
+       "duplo clique; projetos antigos sem origem continuam apenas vetoriais. "
+       "Sem G-code nem comando fisico.");
   note->setWordWrap(true);textLayout->addWidget(note);
   textLayout->addStretch();
   {
