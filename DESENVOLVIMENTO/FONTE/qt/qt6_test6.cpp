@@ -2842,6 +2842,110 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });});properties->addWidget(alignLeftBtn);
   properties->addStretch();inspectorTabs->addTab(propsTab,"Objetos");
 
+  // The system font picker enumerates installed Windows fonts via Qt.
+  // Text still becomes vector contours on Enter; no unsafe font download or
+  // promise of a fully editable text entity in the current project schema.
+  textInspectorTabs_=inspectorTabs;
+  auto* textTab=new QWidget; textTab->setObjectName("textOptionsTab");
+  textOptionsTab_=textTab;
+  auto* textLayout=new QVBoxLayout(textTab);
+  textLayout->setContentsMargins(9,9,9,9);
+  textLayout->addWidget(titleLabel("FORMATACAO DE TEXTO"));
+  auto* fontFamily=new QFontComboBox;
+  fontFamily->setObjectName("text_font_windows");
+  fontFamily->setToolTip("Fontes instaladas no Windows; fontes SHX ainda nao suportadas.");
+  textLayout->addWidget(fontFamily);
+  auto* sizeRow=new QHBoxLayout;
+  auto* sizeLabel=new QLabel("Altura (mm)");
+  auto* sizeMm=new QDoubleSpinBox;sizeMm->setObjectName("text_height_mm");
+  sizeMm->setRange(1.,150.);sizeMm->setDecimals(1);sizeMm->setSuffix(" mm");
+  sizeRow->addWidget(sizeLabel);sizeRow->addWidget(sizeMm,1);
+  textLayout->addLayout(sizeRow);
+  auto* styleRow=new QHBoxLayout;
+  auto* boldText=new QCheckBox("Negrito");
+  boldText->setObjectName("text_bold");
+  auto* italicText=new QCheckBox("Italico");
+  italicText->setObjectName("text_italic");
+  styleRow->addWidget(boldText);styleRow->addWidget(italicText);
+  textLayout->addLayout(styleRow);
+  auto* alignRow=new QHBoxLayout;
+  alignRow->addWidget(new QLabel("Alinhamento"));
+  auto* alignment=new QComboBox;alignment->setObjectName("text_align");
+  alignment->addItem("Esquerda",int(Qt::AlignLeft));
+  alignment->addItem("Centro",int(Qt::AlignHCenter));
+  alignment->addItem("Direita",int(Qt::AlignRight));
+  alignRow->addWidget(alignment,1);textLayout->addLayout(alignRow);
+  auto* spacingRow=new QHBoxLayout;
+  spacingRow->addWidget(new QLabel("Espacamento"));
+  auto* textSpacing=new QDoubleSpinBox;
+  textSpacing->setObjectName("text_letter_spacing");
+  textSpacing->setRange(60.,200.);textSpacing->setDecimals(0);
+  textSpacing->setSingleStep(5);textSpacing->setSuffix("%");
+  textSpacing->setToolTip("Distancia relativa entre letras; 100% = normal.");
+  spacingRow->addWidget(textSpacing,1);textLayout->addLayout(spacingRow);
+  auto* example=new QLabel("Alencar Laser 123");
+  example->setObjectName("text_format_sample");
+  example->setAlignment(Qt::AlignCenter);
+  example->setWordWrap(true);
+  example->setMinimumHeight(48);textLayout->addWidget(example);
+  auto* note=new QLabel("Fontes do Windows. Apos pressionar Enter, o texto vira "
+       "contornos vetoriais; editar as letras depois exige uma etapa futura. "
+       "Sem G-code nem controle fisico nesta versao.");
+  note->setWordWrap(true);textLayout->addWidget(note);
+  textLayout->addStretch();
+  {
+   QSettings prefs("AlencarLaser","DesktopBeta");
+   inlineTextFont_.setFamily(prefs.value("text/fontFamily","Arial").toString());
+   inlineTextFont_.setBold(prefs.value("text/bold",false).toBool());
+   inlineTextFont_.setItalic(prefs.value("text/italic",false).toBool());
+   inlineTextHeightMm_=std::clamp(prefs.value("text/heightMm",12.).toDouble(),1.,150.);
+   inlineTextLetterSpacing_=std::clamp(prefs.value("text/spacingPercent",100.).toDouble(),60.,200.);
+   const int savedAlign=prefs.value("text/align",int(Qt::AlignLeft)).toInt();
+   inlineTextAlign_=savedAlign==int(Qt::AlignHCenter)?Qt::AlignHCenter:
+                    savedAlign==int(Qt::AlignRight)?Qt::AlignRight:Qt::AlignLeft;
+  }
+  fontFamily->setCurrentFont(inlineTextFont_);
+  sizeMm->setValue(inlineTextHeightMm_);
+  boldText->setChecked(inlineTextFont_.bold());
+  italicText->setChecked(inlineTextFont_.italic());
+  textSpacing->setValue(inlineTextLetterSpacing_);
+  alignment->setCurrentIndex(std::max(0,alignment->findData(int(inlineTextAlign_))));
+  auto applyTextStyle=[this,fontFamily,sizeMm,boldText,italicText,textSpacing,alignment,example]{
+   inlineTextFont_.setFamily(fontFamily->currentFont().family());
+   inlineTextFont_.setBold(boldText->isChecked());
+   inlineTextFont_.setItalic(italicText->isChecked());
+   inlineTextHeightMm_=sizeMm->value();
+   inlineTextLetterSpacing_=textSpacing->value();
+   const int requested=alignment->currentData().toInt();
+   inlineTextAlign_=requested==int(Qt::AlignHCenter)?Qt::AlignHCenter:
+                    requested==int(Qt::AlignRight)?Qt::AlignRight:Qt::AlignLeft;
+   QFont sample=inlineTextFont_;sample.setPixelSize(20);
+   sample.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
+   example->setFont(sample);example->setAlignment(inlineTextAlign_);
+   if(inlineTextEntry_){
+    QFont live=inlineTextFont_;
+    live.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
+    live.setPixelSize(int(std::clamp(inlineTextHeightMm_*view.currentZoom(),12.,82.)));
+    inlineTextEntry_->setFont(live);
+    inlineTextEntry_->setAlignment(inlineTextAlign_);
+   }
+   QSettings prefs("AlencarLaser","DesktopBeta");
+   prefs.setValue("text/fontFamily",inlineTextFont_.family());
+   prefs.setValue("text/bold",inlineTextFont_.bold());
+   prefs.setValue("text/italic",inlineTextFont_.italic());
+   prefs.setValue("text/heightMm",inlineTextHeightMm_);
+   prefs.setValue("text/spacingPercent",inlineTextLetterSpacing_);
+   prefs.setValue("text/align",int(inlineTextAlign_));
+  };
+  connect(fontFamily,&QFontComboBox::currentFontChanged,this,[applyTextStyle](const QFont&){applyTextStyle();});
+  connect(sizeMm,QOverload<double>::of(&QDoubleSpinBox::valueChanged),this,[applyTextStyle](double){applyTextStyle();});
+  connect(boldText,&QCheckBox::toggled,this,[applyTextStyle](bool){applyTextStyle();});
+  connect(italicText,&QCheckBox::toggled,this,[applyTextStyle](bool){applyTextStyle();});
+  connect(textSpacing,QOverload<double>::of(&QDoubleSpinBox::valueChanged),this,[applyTextStyle](double){applyTextStyle();});
+  connect(alignment,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[applyTextStyle](int){applyTextStyle();});
+  applyTextStyle();
+  inspectorTabs->addTab(textTab,"Texto");
+
   auto* referenceTab=new QWidget;
   auto* referenceLayout=new QVBoxLayout(referenceTab);referenceLayout->setContentsMargins(9,9,9,9);
   referenceLayout->addWidget(titleLabel("ARQUIVOS REAIS / INSPEÇÃO"));
@@ -3220,6 +3324,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    view.requestTraceImage=[this]{traceImageDialog();};
    connect(qApp,&QApplication::focusChanged,this,[this](QWidget* previous,QWidget* next){
     if(!inlineTextEntry_||previous!=inlineTextEntry_||next==inlineTextEntry_)return;
+    // Using the text formatting tab must not forcibly convert live text to outlines.
+    if(textOptionsTab_&&next&&(next==textOptionsTab_||textOptionsTab_->isAncestorOf(next)))return;
     QTimer::singleShot(0,this,[this]{
      if(inlineTextEntry_&&QApplication::focusWidget()!=inlineTextEntry_)
       finishInlineText(!inlineTextEntry_->text().trimmed().isEmpty());
