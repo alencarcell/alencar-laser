@@ -74,6 +74,10 @@ inline void appendFill(Plan& out,const EditorState& state,const Settings& settin
       !layer->second.output||layer->second.mode!="Fill")continue;
   groups[layer->first].push_back(&c);
  }
+ // The preview dialog recalculates synchronously; cap potential intersection
+ // work before entering an O(rows * vertices) raster scan.
+ std::size_t scanBudget=0;
+ constexpr std::size_t maxScanChecks=6000000;
  for(const auto& [layer,paths]:groups){
   double ymin=std::numeric_limits<double>::infinity(),ymax=-ymin;
   for(const auto* c:paths)for(const auto& node:c->nodes){
@@ -86,6 +90,18 @@ inline void appendFill(Plan& out,const EditorState& state,const Settings& settin
   if(range<=0)continue;
   const double rows=std::ceil(range/settings.intervalMm);
   if(rows>1500)throw std::runtime_error("Fill ultrapassa 1500 linhas virtuais");
+  std::size_t edges=0;
+  for(const Contour* shape:paths){
+   if(shape->nodes.size()>maxScanChecks)
+    throw std::runtime_error("Fill com contorno complexo demais para a previa");
+   edges+=shape->nodes.size();
+   if(edges>maxScanChecks)
+    throw std::runtime_error("Fill com vertices demais para a previa");
+  }
+  const auto rowCount=std::size_t(rows);
+  if(rowCount>0&&edges>(maxScanChecks-scanBudget)/rowCount)
+   throw std::runtime_error("Fill excedeu limite de intersecoes virtuais");
+  scanBudget+=edges*rowCount;
   int row=0;
   for(double y=ymin+settings.intervalMm*0.5;y<ymax;++row,y=ymin+settings.intervalMm*(row+0.5)){
    std::vector<double> xs;
