@@ -55,7 +55,8 @@ public:
   setObjectName("preview_canvas_zoom_19_8");
   setScene(&scene_);
   picture_=scene_.addPixmap(QPixmap());
-  setRenderHint(QPainter::Antialiasing,true);
+  picture_->setTransformationMode(Qt::SmoothTransformation);
+  setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
   setBackgroundBrush(QColor("#16252F"));
   setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
   setResizeAnchor(QGraphicsView::AnchorViewCenter);
@@ -250,8 +251,16 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  auto render=[&](){
   const double now=timeline.totalSeconds*double(progress->value())/1000.0;
   timeLabel->setText(QString("%1 / %2 s").arg(now,0,'f',1).arg(timeline.totalSeconds,0,'f',1));
-  QImage image(740,440,QImage::Format_ARGB32);image.fill(QColor("#16252F"));
-  QPainter painter(&image);painter.setRenderHint(QPainter::Antialiasing,true);
+  // A antiga imagem fixa 740x440 ficava serrilhada ao ocupar uma janela
+  // maior. Renderizar em 2x logicos para planos moderados, mantendo o mesmo
+  // enquadramento e reduzindo o custo com trajetorias muito extensas.
+  const int supersample=shown.moves.size()<=30000?2:1;
+  QImage image(740*supersample,440*supersample,QImage::Format_ARGB32);
+  image.setDevicePixelRatio(double(supersample));
+  image.fill(QColor("#16252F"));
+  QPainter painter(&image);
+  painter.setRenderHints(QPainter::Antialiasing|QPainter::TextAntialiasing,true);
+  painter.scale(supersample,supersample);
   const double w=std::max(1.0,drawingWidthMm),h=std::max(1.0,drawingHeightMm);
   const double factor=std::min(660.0/w,365.0/h);
   const auto map=[&](Pt p){return QPointF(35+p.x*factor,35+p.y*factor);};
