@@ -5320,6 +5320,8 @@ static QJsonObject drawAndJoin198Test(){
  ui.show();QApplication::processEvents();
  check(ui.findChild<QPushButton*>("new_bezier")!=nullptr,
        "Ferramenta de desenhar Bézier nao foi encontrada");
+ check(ui.findChild<QAction*>("join_open_endpoints")!=nullptr,
+       "Acao Editar/Alt+J de unir pontas nao foi encontrada");
  clickButton(ui,"new_bezier");
  auto* viewport=ui.view.viewport();
  const QPoint mid=viewport->rect().center();
