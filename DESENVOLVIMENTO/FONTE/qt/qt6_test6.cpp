@@ -2030,6 +2030,20 @@ static std::vector<std::vector<Pt>> vectorTextOutlines(const QString& value,QFon
  size_t total=0;
  for(const auto& polygon:shapes)total+=polygon.size();
  if(shapes.empty()||total>80000)throw std::runtime_error("Texto sem contornos validos ou muito complexo");
+ // O QPainterPath usa extremos exatos das Bezier, mas os caminhos exportados
+ // sao polilinhas aproximadas (tolerancia 0.016 mm). Alinhar pelos nos
+ // efetivamente salvos garante que a ancora corresponda ao vetor produzido.
+ double actualLeft=std::numeric_limits<double>::infinity();
+ double actualRight=-std::numeric_limits<double>::infinity();
+ for(const auto& ring:shapes)for(const Pt& p:ring){
+  actualLeft=std::min(actualLeft,p.x);
+  actualRight=std::max(actualRight,p.x);
+ }
+ const double actualAnchor=(align==Qt::AlignHCenter)
+   ?(actualLeft+actualRight)*.5
+   :(align==Qt::AlignRight?actualRight:actualLeft);
+ const double shiftX=origin.x-actualAnchor;
+ for(auto& ring:shapes)for(Pt& p:ring)p.x+=shiftX;
  return shapes;
 }
 
