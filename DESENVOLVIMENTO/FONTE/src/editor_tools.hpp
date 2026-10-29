@@ -639,6 +639,59 @@ public:
    auto meta=s.objects.at(original);meta.group=0;s.objects[obj]=meta;
   });return obj;
  }
+ // Align in a single Undo step. Reference is the last selected object.
+ // Modes: left=0, right=1, top=2, bottom=3, center-X=4,
+ // center-Y=5, both centers=6. Groups are moved as an indivisible unit.
+ void alignObjects(std::vector<int> ids,int mode,int reference){
+  if(ids.size()<2||mode<0||mode>6||
+     std::find(ids.begin(),ids.end(),reference)==ids.end())
+   throw std::runtime_error("select two shapes and an active reference");
+  change([&](EditorState& st){
+   std::map<int,int> unitOf;
+   std::set<int> selected(ids.begin(),ids.end());
+   for(int id:ids){
+    auto it=st.objects.find(id);
+    if(it==st.objects.end()||!editable(st,id))
+     throw std::runtime_error("invalid alignment selection");
+    unitOf[id]=it->second.group>0?-it->second.group:id;
+   }
+   const int referenceUnit=unitOf.at(reference);
+   std::map<int,std::set<int>> units;
+   for(const auto& [id,meta]:st.objects){
+    const int unit=meta.group>0?-meta.group:id;
+    if(std::any_of(unitOf.begin(),unitOf.end(),
+                   [&](const auto& item){return item.second==unit;})){
+     if(!editable(st,id))throw std::runtime_error("alignment group locked");
+     units[unit].insert(id);
+    }
+   }
+   if(units.size()<2)throw std::runtime_error("choose independent objects/groups");
+   auto bounds=[&](const std::set<int>& members){
+    return boundsOf(st.doc,std::vector<int>(members.begin(),members.end()));
+   };
+   auto target=bounds(units.at(referenceUnit));
+   auto coordinate=[&](const std::pair<Pt,Pt>& box){
+    if(mode==0)return box.first.x;
+    if(mode==1)return box.second.x;
+    if(mode==2)return box.first.y;
+    if(mode==3)return box.second.y;
+    if(mode==4)return (box.first.x+box.second.x)*.5;
+    return (box.first.y+box.second.y)*.5;
+   };
+   for(const auto& [key,unit]:units){
+    if(key==referenceUnit)continue;
+    const auto box=bounds(unit);
+    Pt delta{};
+    if(mode==6){
+     delta={(target.first.x+target.second.x-box.first.x-box.second.x)*.5,
+            (target.first.y+target.second.y-box.first.y-box.second.y)*.5};
+    }else if(mode==0||mode==1||mode==4)delta.x=coordinate(target)-coordinate(box);
+    else delta.y=coordinate(target)-coordinate(box);
+    for(auto& contour:st.doc.contours)if(unit.count(contour.key.object))
+     for(auto& n:contour.nodes)n.p=n.p+delta;
+   }
+  });
+ }
  void alignLeft(std::vector<int> ids){
   if(ids.size()<2)throw std::runtime_error("align requires 2 objects");
   auto [lo,hi]=boundsOf(current.doc,ids);(void)hi;
