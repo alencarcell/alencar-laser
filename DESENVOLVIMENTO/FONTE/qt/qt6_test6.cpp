@@ -4285,8 +4285,8 @@ static QJsonObject previewRaster198Test(){
  mask.width=4;mask.height=2;
  mask.black={0,1,1,0, 0,0,1,0};
  sim198::Plan imagePlan;
- scan.intervalMm=10.;
- sim198::raster::appendMask(imagePlan,mask,{0,0,40,20},scan);
+ scan.intervalMm=5.; // valid maximum for preview raster
+ sim198::raster::appendMask(imagePlan,mask,{0,0,40,10},scan);
  check(std::abs(imagePlan.cutMm-30.)<1e-6,
        "Imagem mascara 4x2: linhas P&B incorretas");
  const auto imageOnePass=imagePlan.cutMm;
@@ -4297,12 +4297,12 @@ static QJsonObject previewRaster198Test(){
  // is not a multiple of the requested interval.
  sim198::raster::Mask black{4,2,{1,1,1,1,1,1,1,1}};
  sim198::Plan fixedPitch;
- sim198::raster::appendMask(fixedPitch,black,{0,0,40,21},scan);
+ sim198::raster::appendMask(fixedPitch,black,{0,0,40,12.5},scan);
  std::vector<double> rowY;
  for(const auto& move:fixedPitch.moves)
   if(move.laser)rowY.push_back(move.from.y);
- check(rowY.size()==2&&std::abs(rowY[0]-5.)<1e-8&&
-       std::abs(rowY[1]-15.)<1e-8,
+ check(rowY.size()==2&&std::abs(rowY[0]-2.5)<1e-8&&
+       std::abs(rowY[1]-7.5)<1e-8,
        "Intervalo raster em mm foi comprimido ao dividir pela altura da imagem");
  bool bad=false;
  try{
