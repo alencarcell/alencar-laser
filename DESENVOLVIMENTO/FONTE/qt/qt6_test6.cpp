@@ -2751,8 +2751,11 @@ public:
   });
   addVertical(inspector,"move","Mover +1 mm",[this]{view.editor.moveObjects(selection(),{1,0});view.rebuild();captureEvent("shapes_moved",int(selection().size()));});
   addVertical(inspector,"delete_shapes","Excluir formas selecionadas",[this]{
-   check(!bezierToolActive_,"Para excluir uma curva nativa, use Ctrl+Delete no modo Bézier.");
-   check(view.deleteSelectedShapes(),"Selecione uma ou mais formas editáveis.");
+   if(view.nativeModeActive()){
+    check(view.nativeDeleteContour(),"Selecione uma curva Bézier para excluir.");
+   }else{
+    check(view.deleteSelectedShapes(),"Selecione uma ou mais formas editáveis.");
+   }
   });
   addVertical(inspector,"delete_curve","Excluir curva Bézier selecionada",[this]{
    check(bezierToolActive_,"Ative o modo Bézier e selecione uma curva.");
