@@ -1,0 +1,57 @@
+// Alencar Laser TESTE 19.8 — source-editable text and alignment, offline C++20.
+#include "../src/editor_tools.hpp"
+#include <cassert>
+#include <cmath>
+#include <iostream>
+using namespace alaser;
+static bool near(double a,double b){return std::abs(a-b)<1e-7;}
+int main(){
+ Editor editor(Document{});
+ EditableText source;source.text="ALENCAR";source.fontFamily="Arial";
+ source.heightMm=12;source.spacingPercent=100;source.bold=true;
+ source.align=1;source.anchor={10,20};
+ const int root=editor.addEditableText(
+  {{{10,20},{20,20},{20,30},{10,30}},
+   {{25,20},{30,20},{30,30},{25,30}}},source,0);
+ assert(editor.state().editableTexts.at(root).members.size()==2);
+ assert(editor.state().objects.at(root).group>0);
+ const auto loaded=fromMetadata(editor.state().doc,metadata(editor.state()));
+ assert(loaded.editableTexts.at(root).text=="ALENCAR");
+ assert(loaded.editableTexts.at(root).fontFamily=="Arial");
+ assert(loaded.editableTexts.at(root).bold);
+ const auto before=editor.undoCount();
+ source.text="LASER";source.italic=true;
+ editor.replaceEditableText(root,
+  {{{10,20},{35,20},{35,35},{10,35}}},source);
+ assert(editor.undoCount()==before+1);
+ assert(editor.state().editableTexts.at(root).text=="LASER");
+ assert(editor.state().objects.count(root));
+ assert(editor.undo()&&editor.state().editableTexts.at(root).text=="ALENCAR");
+ assert(editor.redo()&&editor.state().editableTexts.at(root).text=="LASER");
+ const auto again=fromMetadata(editor.state().doc,metadata(editor.state()));
+ assert(again.editableTexts.at(root).text=="LASER");
+ // Existing legacy metadata without editableTexts remains readable.
+ auto legacy=metadata(editor.state());legacy.erase("editableTexts");
+ const auto old=fromMetadata(editor.state().doc,legacy);
+ assert(old.editableTexts.empty());
+ // Alignment: X center, Y center, left and right, all using a reference shape.
+ Editor align(Document{});
+ const int a=align.rectangle({0,0},10,10);
+ const int b=align.rectangle({30,40},20,5);
+ align.alignObjects({a,b},4,a);
+ auto ba=boundsOf(align.state().doc,{a}),bb=boundsOf(align.state().doc,{b});
+ assert(near(ba.first.x+ba.second.x,bb.first.x+bb.second.x));
+ align.alignObjects({a,b},5,a);
+ ba=boundsOf(align.state().doc,{a});bb=boundsOf(align.state().doc,{b});
+ assert(near(ba.first.y+ba.second.y,bb.first.y+bb.second.y));
+ align.alignObjects({a,b},0,a);
+ ba=boundsOf(align.state().doc,{a});bb=boundsOf(align.state().doc,{b});
+ assert(near(ba.first.x,bb.first.x));
+ align.alignObjects({a,b},1,a);
+ ba=boundsOf(align.state().doc,{a});bb=boundsOf(align.state().doc,{b});
+ assert(near(ba.second.x,bb.second.x));
+ const auto snapshot=metadata(align.state());
+ assert(align.undo());
+ assert(metadata(align.state())==snapshot); // geometry changes, metadata stays unchanged
+ std::cout<<"PASS: editable text metadata/redo/legacy, 4 align modes; no hardware\n";
+}
