@@ -23,6 +23,10 @@
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QGraphicsPixmapItem>
+#include <QGraphicsPathItem>
+#include <QGraphicsRectItem>
+#include <QPainterPath>
+#include <QPen>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QWheelEvent>
@@ -47,6 +51,10 @@ namespace alaser::sim198 {
 class PreviewCanvas198 final:public QGraphicsView {
  QGraphicsScene scene_;
  QGraphicsPixmapItem* picture_=nullptr;
+ QGraphicsRectItem* bed_=nullptr;
+ QGraphicsPathItem* linePaths_=nullptr;
+ QGraphicsPathItem* travelPaths_=nullptr;
+ QGraphicsPathItem* activePath_=nullptr;
  double zoom_=1.0;
  bool moving_=false;
  QPoint last_{};
@@ -56,6 +64,20 @@ public:
   setScene(&scene_);
   picture_=scene_.addPixmap(QPixmap());
   picture_->setTransformationMode(Qt::SmoothTransformation);
+  bed_=scene_.addRect(QRectF(35,35,660,365),QPen(QColor("#598777"),1.0));
+  linePaths_=scene_.addPath(QPainterPath());
+  travelPaths_=scene_.addPath(QPainterPath());
+  activePath_=scene_.addPath(QPainterPath());
+  QPen cutting(QColor("#E8ECEC"),1.3);
+  QPen moving(QColor("#F26969"),1.0);
+  QPen active(QColor("#F6C068"),1.6);
+  for(QPen* pen:{&cutting,&moving,&active})pen->setCosmetic(true);
+  linePaths_->setPen(cutting);travelPaths_->setPen(moving);activePath_->setPen(active);
+  for(QGraphicsPathItem* item:{linePaths_,travelPaths_,activePath_}){
+   item->setBrush(Qt::NoBrush);item->setAcceptedMouseButtons(Qt::NoButton);
+   item->setVisible(false);
+  }
+  bed_->setVisible(false);bed_->setAcceptedMouseButtons(Qt::NoButton);
   setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
   setBackgroundBrush(QColor("#16252F"));
   setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
@@ -65,8 +87,25 @@ public:
  ~PreviewCanvas198()override{setScene(nullptr);}
  void showImage(const QImage& image){
   picture_->setPixmap(QPixmap::fromImage(image));
+  picture_->setVisible(true);bed_->setVisible(false);
+  for(QGraphicsPathItem* item:{linePaths_,travelPaths_,activePath_})item->setVisible(false);
   scene_.setSceneRect(picture_->boundingRect());
  }
+ // Mantem a geometria vetorial na cena, sem QImage 740x440 esticada no zoom.
+ // Cores, larguras e trajetos sao apenas visuais: nenhuma emissao ou G-code.
+ void showPaths(const QPainterPath& lines,const QPainterPath& travels,
+                const QPainterPath& current,bool showTravel,
+                double drawingWidth,double drawingHeight){
+  picture_->setVisible(false);
+  const double w=std::max(1.,drawingWidth),h=std::max(1.,drawingHeight);
+  const double factor=std::min(660./w,365./h);
+  bed_->setRect(QRectF(35,35,w*factor,h*factor));bed_->setVisible(true);
+  linePaths_->setPath(lines);linePaths_->setVisible(true);
+  travelPaths_->setPath(travels);travelPaths_->setVisible(showTravel);
+  activePath_->setPath(current);activePath_->setVisible(!current.isEmpty());
+  scene_.setSceneRect(QRectF(0,0,740,440));
+ }
+ bool vectorMode()const{return !picture_->isVisible();}
  void resetView(){
   if(scene_.sceneRect().isEmpty())return;
   resetTransform();
