@@ -20,6 +20,15 @@
 #include <QPushButton>
 #include <QImage>
 #include <QPixmap>
+#include <QGraphicsView>
+#include <QGraphicsScene>
+#include <QGraphicsPixmapItem>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QWheelEvent>
+#include <QMouseEvent>
+#include <QScreen>
+#include <QGuiApplication>
 #include <QPainter>
 #include <QColor>
 #include <QTimer>
@@ -34,6 +43,68 @@
 #include <utility>
 
 namespace alaser::sim198 {
+// Preview camera only. Wheel zoom never changes plan, speed, time or geometry.
+class PreviewCanvas198 final:public QGraphicsView {
+ QGraphicsScene scene_;
+ QGraphicsPixmapItem* picture_=nullptr;
+ double zoom_=1.0;
+ bool moving_=false;
+ QPoint last_{};
+public:
+ explicit PreviewCanvas198(QWidget* parent=nullptr):QGraphicsView(parent){
+  setObjectName("preview_canvas_zoom_19_8");
+  setScene(&scene_);
+  picture_=scene_.addPixmap(QPixmap());
+  setRenderHint(QPainter::Antialiasing,true);
+  setBackgroundBrush(QColor("#16252F"));
+  setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+  setResizeAnchor(QGraphicsView::AnchorViewCenter);
+  setFrameShape(QFrame::NoFrame);
+ }
+ void showImage(const QImage& image){
+  picture_->setPixmap(QPixmap::fromImage(image));
+  scene_.setSceneRect(picture_->boundingRect());
+ }
+ void resetView(){
+  if(scene_.sceneRect().isEmpty())return;
+  resetTransform();
+  fitInView(scene_.sceneRect(),Qt::KeepAspectRatio);
+  zoom_=1.0;
+ }
+ double zoomLevel()const{return zoom_;}
+protected:
+ void wheelEvent(QWheelEvent* event)override{
+  if(event->angleDelta().y()==0){event->ignore();return;}
+  const double factor=event->angleDelta().y()>0?1.22:1./1.22;
+  if(zoom_*factor>=.1&&zoom_*factor<=20.){
+   scale(factor,factor);zoom_*=factor;
+  }
+  event->accept();
+ }
+ void mousePressEvent(QMouseEvent* event)override{
+  if(event->button()==Qt::MiddleButton){
+   moving_=true;last_=event->position().toPoint();
+   viewport()->setCursor(Qt::ClosedHandCursor);event->accept();return;
+  }
+  QGraphicsView::mousePressEvent(event);
+ }
+ void mouseMoveEvent(QMouseEvent* event)override{
+  if(moving_){
+   QPoint delta=event->position().toPoint()-last_;last_=event->position().toPoint();
+   horizontalScrollBar()->setValue(horizontalScrollBar()->value()-delta.x());
+   verticalScrollBar()->setValue(verticalScrollBar()->value()-delta.y());
+   event->accept();return;
+  }
+  QGraphicsView::mouseMoveEvent(event);
+ }
+ void mouseReleaseEvent(QMouseEvent* event)override{
+  if(moving_&&event->button()==Qt::MiddleButton){
+   moving_=false;viewport()->setCursor(Qt::ArrowCursor);
+   event->accept();return;
+  }
+  QGraphicsView::mouseReleaseEvent(event);
+ }
+};
 inline void showPreviewDialog(QWidget* parent,const EditorState& source,
                                double drawingWidthMm,double drawingHeightMm,
                                const QImage& sourceImage=QImage(),
@@ -44,14 +115,22 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  motion::Timeline timeline;
  QDialog dialog(parent);
  dialog.setWindowTitle("Alencar Laser 19.8 - Simulacao OFFLINE (sem disparos)");
- dialog.resize(880,800);
+ const QScreen* screen=parent?parent->screen():QGuiApplication::primaryScreen();
+ const QRect area=screen?screen->availableGeometry():QRect(0,0,1000,700);
+ dialog.resize(std::min(980,std::max(520,area.width()-38)),
+               std::min(740,std::max(410,area.height()-50)));
  auto* column=new QVBoxLayout(&dialog);
+ column->setContentsMargins(9,7,9,7);
+ auto* settingsBody=new QWidget;
+ auto* settingsColumn=new QVBoxLayout(settingsBody);
+ settingsColumn->setContentsMargins(5,4,5,4);
+ settingsColumn->setSpacing(4);
  auto* note=new QLabel(
    "PREVIA EXPERIMENTAL OFFLINE: contornos Line, Fill vetorial e bitmap P&B "
    "com trajetorias de varredura simplificadas; overscan apenas visual. "
    "Nao replica o planejador GRBL/LightBurn, nem calibra potencia ou movimento fisico. "
    "Sem envio de G-code, rede ou comandos ao laser.");
- note->setWordWrap(true);column->addWidget(note);
+ note->setWordWrap(true);settingsColumn->addWidget(note);
  auto* settingsGrid=new QGridLayout;
  auto* cut=new QDoubleSpinBox;cut->setRange(10,100000);cut->setValue(3000);
  auto* rapid=new QDoubleSpinBox;rapid->setRange(10,100000);rapid->setValue(7000);
@@ -76,7 +155,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  place(2,0,"Aceleracao linha X",accelX);place(2,1,"Aceleracao linha Y",accelY);
  place(3,0,"Aceleracao viagem X",rapidAx);place(3,1,"Aceleracao viagem Y",rapidAy);
  place(4,0,"Passagens (plano inteiro)",passes);
- column->addLayout(settingsGrid);
+ settingsColumn->addLayout(settingsGrid);
  // Roteiros de Fill/Imagem sao virtuais; sourceImage nunca e modificada.
  auto* rasterControls=new QGridLayout;
  auto* enableFill=new QCheckBox("Simular Fill vetorial (contornos fechados)");
@@ -109,7 +188,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  rasterControls->addWidget(bidirectional,2,0,1,2);
  rasterControls->addWidget(bitmapMode,2,2);
  rasterControls->addWidget(bitmapThreshold,2,3);
- column->addLayout(rasterControls);
+ settingsColumn->addLayout(rasterControls);
  auto* optimizeTravel=new QCheckBox("Reduzir deslocamentos (heuristica local por camada)");
  optimizeTravel->setToolTip("Vizinho mais proximo; reordena apenas Line, nao garante a rota global mais curta. Sem modificar o projeto.");
  auto* innerFirst=new QCheckBox("Contornos internos primeiro (corte virtual)");
@@ -121,21 +200,33 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  auto* useLayerFeeds=new QCheckBox("Utilizar velocidades virtuais salvas por camada");
  useLayerFeeds->setChecked(true);
  useLayerFeeds->setToolTip("Velocidade e passes de cada camada influenciam a simulacao. Potencia/M3/M4 continuam apenas registrados.");
- column->addWidget(optimizeTravel);column->addWidget(innerFirst);
- column->addWidget(useLayerFeeds);
- auto* stats=new QLabel;stats->setWordWrap(true);column->addWidget(stats);
- auto* canvas=new QLabel;canvas->setMinimumHeight(280);
- canvas->setAlignment(Qt::AlignCenter);column->addWidget(canvas,1);
+ settingsColumn->addWidget(optimizeTravel);settingsColumn->addWidget(innerFirst);
+ settingsColumn->addWidget(useLayerFeeds);
+ auto* stats=new QLabel;stats->setWordWrap(true);settingsColumn->addWidget(stats);
+ auto* optionsScroll=new QScrollArea;
+ optionsScroll->setObjectName("preview_settings_scroll_19_8");
+ optionsScroll->setWidgetResizable(true);
+ optionsScroll->setWidget(settingsBody);
+ optionsScroll->setMinimumHeight(95);
+ optionsScroll->setMaximumHeight(265);
+ column->addWidget(optionsScroll,0);
+ auto* canvas=new PreviewCanvas198(&dialog);
+ canvas->setMinimumHeight(110);
+ column->addWidget(canvas,1);
  auto* progress=new QSlider(Qt::Horizontal);progress->setRange(0,1000);
  progress->setValue(1000);progress->setToolTip("Percorrer o TEMPO virtual, nao apenas o numero de linhas");
  column->addWidget(progress);
  auto* controls=new QHBoxLayout;
  auto* play=new QPushButton("▶ Reproduzir");play->setObjectName("preview_play");
+ auto* resetZoom=new QPushButton("Ajustar imagem");
+ resetZoom->setObjectName("preview_fit_19_8");
+ resetZoom->setToolTip("Roda do mouse: zoom no ponteiro. Botao do meio: mover.");
  auto* speed=new QDoubleSpinBox;speed->setRange(0.1,40);speed->setValue(10);
  speed->setSingleStep(1);speed->setSuffix("×");speed->setToolTip("Velocidade apenas da animacao");
  auto* timeLabel=new QLabel("0 / 0 s");timeLabel->setObjectName("preview_time");
  auto* showTravel=new QCheckBox("Mostrar viagens em vermelho");showTravel->setChecked(true);
- controls->addWidget(play);controls->addWidget(speed);controls->addWidget(timeLabel);
+ controls->addWidget(play);controls->addWidget(resetZoom);
+ controls->addWidget(speed);controls->addWidget(timeLabel);
  controls->addStretch();controls->addWidget(showTravel);column->addLayout(controls);
  auto* footer=new QHBoxLayout;
  auto* exportReport=new QPushButton("Exportar relatorio JSON");
@@ -145,6 +236,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  footer->addWidget(exportReport);footer->addStretch();footer->addWidget(close);
  column->addLayout(footer);
  QObject::connect(close,&QPushButton::clicked,&dialog,&QDialog::accept);
+ QObject::connect(resetZoom,&QPushButton::clicked,canvas,&PreviewCanvas198::resetView);
  QTimer clock(&dialog);clock.setInterval(60);
  QElapsedTimer elapsedClock;
  double playbackTime=0;
@@ -191,7 +283,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
     painter.drawLine(map(move.from),map(partial));
    }
   }
-  painter.end();canvas->setPixmap(QPixmap::fromImage(image));
+  painter.end();canvas->showImage(image);
  };
  auto recalculate=[&](){
   stop();
@@ -342,6 +434,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
   progress->setValue(int(std::clamp(playbackTime/timeline.totalSeconds*1000.0,0.0,1000.0)));
  });
  recalculate();
+ QTimer::singleShot(0,canvas,&PreviewCanvas198::resetView);
  dialog.exec();
 }
 } // namespace alaser::sim198
