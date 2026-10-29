@@ -265,7 +265,8 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  auto* speed=new QDoubleSpinBox;speed->setRange(0.1,40);speed->setValue(10);
  speed->setSingleStep(1);speed->setSuffix("×");speed->setToolTip("Velocidade apenas da animacao");
  auto* timeLabel=new QLabel("0 / 0 s");timeLabel->setObjectName("preview_time");
- auto* showTravel=new QCheckBox("Mostrar viagens em vermelho");showTravel->setChecked(true);
+ auto* showTravel=new QCheckBox("Mostrar viagens em vermelho");showTravel->setChecked(false);
+ showTravel->setToolTip("Exibir deslocamentos sem gravação; desligado para destacar os contornos de gravação.");
  controls->addWidget(play);controls->addWidget(resetZoom);
  controls->addWidget(speed);controls->addWidget(timeLabel);
  controls->addStretch();controls->addWidget(showTravel);column->addLayout(controls);
@@ -287,25 +288,16 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  auto stop=[&](){
   clock.stop();play->setText("▶ Reproduzir");
  };
+ // Cache incremental: durante reproducao avanca so o trecho novo;
+ // ao retroceder pelo slider, reconstrói a partir do inicio.
+ std::size_t renderedMoves=0;
+ QPainterPath renderedLines,renderedTravels;
  auto render=[&](){
   const double now=timeline.totalSeconds*double(progress->value())/1000.0;
   timeLabel->setText(QString("%1 / %2 s").arg(now,0,'f',1).arg(timeline.totalSeconds,0,'f',1));
-  // A antiga imagem fixa 740x440 ficava serrilhada ao ocupar uma janela
-  // maior. Ao pausar, renderizar em 2x para planos moderados; durante a
-  // reproducao conservar 1x para evitar aumentar custo de cada frame.
-  // A imagem so afeta o canvas virtual; nao ha G-code ou hardware.
-  const int supersample=(!clock.isActive()&&shown.moves.size()<=30000)?2:1;
-  QImage image(740*supersample,440*supersample,QImage::Format_ARGB32);
-  image.setDevicePixelRatio(double(supersample));
-  image.fill(QColor("#16252F"));
-  QPainter painter(&image);
-  painter.setRenderHints(QPainter::Antialiasing|QPainter::TextAntialiasing,true);
-  painter.scale(supersample,supersample);
   const double w=std::max(1.0,drawingWidthMm),h=std::max(1.0,drawingHeightMm);
   const double factor=std::min(660.0/w,365.0/h);
   const auto map=[&](Pt p){return QPointF(35+p.x*factor,35+p.y*factor);};
-  painter.setPen(QPen(QColor("#598777"),1.4));
-  painter.drawRect(QRectF(35,35,w*factor,h*factor));
   const std::size_t count=shown.moves.size();
   std::size_t completed=0;
   if(progress->value()==1000)completed=count;
@@ -313,30 +305,33 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    completed=std::size_t(std::lower_bound(timeline.endSeconds.begin(),
                       timeline.endSeconds.end(),now)-timeline.endSeconds.begin());
   }
-  // Limite visual para manter o slider responsivo com imagens densas.
-  const std::size_t stride=std::max<std::size_t>(1,shown.moves.size()/25000);
-  for(std::size_t i=0;i<completed;i+=stride){
-   const auto& move=shown.moves[i];
-   if(!move.laser&&!showTravel->isChecked())continue;
-   painter.setPen(QPen(move.laser?QColor("#E8ECEC"):QColor("#F26969"),move.laser?1.3:1.0));
-   painter.drawLine(map(move.from),map(move.to));
+  if(completed<renderedMoves){
+   renderedMoves=0;renderedLines=QPainterPath();renderedTravels=QPainterPath();
   }
-  if(completed<count&&progress->value()>0){
+  for(std::size_t i=renderedMoves;i<completed;++i){
+   const auto& move=shown.moves[i];
+   QPainterPath& target=move.laser?renderedLines:renderedTravels;
+   target.moveTo(map(move.from));target.lineTo(map(move.to));
+  }
+  renderedMoves=completed;
+  QPainterPath partial;
+  if(completed<count&&progress->value()>0&&completed<timeline.endSeconds.size()){
    const double start=completed?timeline.endSeconds[completed-1]:0.0;
    const double finish=timeline.endSeconds[completed];
    const double fraction=finish>start?std::clamp((now-start)/(finish-start),0.0,1.0):0.0;
    const auto& move=shown.moves[completed];
    if(move.laser||showTravel->isChecked()){
-    const Pt partial{move.from.x+(move.to.x-move.from.x)*fraction,
-                     move.from.y+(move.to.y-move.from.y)*fraction};
-    painter.setPen(QPen(move.laser?QColor("#E8ECEC"):QColor("#F26969"),1.3));
-    painter.drawLine(map(move.from),map(partial));
+    const Pt tip{move.from.x+(move.to.x-move.from.x)*fraction,
+                 move.from.y+(move.to.y-move.from.y)*fraction};
+    partial.moveTo(map(move.from));partial.lineTo(map(tip));
    }
   }
-  painter.end();canvas->showImage(image);
+  canvas->showPaths(renderedLines,renderedTravels,partial,
+                    showTravel->isChecked(),drawingWidthMm,drawingHeightMm);
  };
  auto recalculate=[&](){
   stop();
+  renderedMoves=0;renderedLines=QPainterPath();renderedTravels=QPainterPath();
   try{
    settings.cutMmMin=cut->value();settings.rapidMmMin=rapid->value();
    settings.maxXmmMin=maxX->value();settings.maxYmmMin=maxY->value();
