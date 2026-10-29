@@ -4293,6 +4293,17 @@ static QJsonObject previewRaster198Test(){
  const auto imageTwice=sim198::repeated(imagePlan,2);
  check(std::abs(imageTwice.cutMm-imageOnePass*2)<1e-8,
        "Raster duas passagens: distancia incorreta");
+ // Scan interval remains in physical millimetres, even when image height
+ // is not a multiple of the requested interval.
+ sim198::raster::Mask black{4,2,{1,1,1,1,1,1,1,1}};
+ sim198::Plan fixedPitch;
+ sim198::raster::appendMask(fixedPitch,black,{0,0,40,21},scan);
+ std::vector<double> rowY;
+ for(const auto& move:fixedPitch.moves)
+  if(move.laser)rowY.push_back(move.from.y);
+ check(rowY.size()==2&&std::abs(rowY[0]-5.)<1e-8&&
+       std::abs(rowY[1]-15.)<1e-8,
+       "Intervalo raster em mm foi comprimido ao dividir pela altura da imagem");
  bool bad=false;
  try{
   sim198::raster::Mask invalid{2,2,{1,0}};
