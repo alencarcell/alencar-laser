@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteSimulacao, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -103,6 +103,24 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteDesenho) {
+        Write-Host 'DESENHO 19.8: snap/Auto-Join, cliques e arraste Bézier sem hardware.' -ForegroundColor Cyan
+        $testSource = Join-Path $fontes 'tests\preview_draw_join_19_8_standalone.cpp'
+        $testExe = Join-Path $build 'preview_draw_join_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $testSource -o $testExe
+        Checar-Saida 'Compilacao standalone de snap, Auto-Join e Bezier'
+        & $testExe
+        Checar-Saida 'Teste standalone de desenho'
+        Compilar-QtComDiagnostico
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\desenho_uniao'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --draw-join-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Desenhar Bezier e unir extremidades' (Join-Path $destino 'RESULTADO_DESENHO_UNIAO_19_8.json')
+        Write-Host 'DESENHO C++ + Qt PASS sintetico; teste manual do mouse ainda necessario.' -ForegroundColor Green
+        return
+    }
     if ($SomenteSimulacao) {
         Write-Host 'PREVIA OFFLINE: teste C++20 independente + Qt com relatorio JSON.' -ForegroundColor Cyan
         $source = Join-Path $fontes 'tests\preview_motion_19_8_standalone.cpp'
@@ -308,6 +326,10 @@ try {
 
     $dirSim = Join-Path $destino 'simulacao'
     New-Item -ItemType Directory -Path $dirSim -Force | Out-Null
+    $dirDrawing = Join-Path $destino 'desenho_uniao'
+    New-Item -ItemType Directory -Path $dirDrawing -Force | Out-Null
+    & $app --draw-join-19-8-test $fixture $dirDrawing
+    Checar-ResultadoQt 'Desenho por arraste e Auto-Join 19.8' (Join-Path $dirDrawing 'RESULTADO_DESENHO_UNIAO_19_8.json')
     & $app --simulation-motion-19-8-test $fixture $dirSim
     Checar-ResultadoQt 'Simulacao cinemática 19.8' (Join-Path $dirSim 'RESULTADO_PREVIA_MOVIMENTO_19_8.json')
     & $app --simulation-raster-19-8-test $fixture $dirSim
