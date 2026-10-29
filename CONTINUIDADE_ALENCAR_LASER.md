@@ -427,3 +427,15 @@ Registrar mudanças, testes e pendências.
 - Relatório: `DESENVOLVIMENTO/ESPECIFICACOES/AUDITORIA_CONSISTENCIA_PREVIA_19_8_20261028.md`.
 - **Estado:** correções PUBLICADAS no GitHub experimental; **NÃO afirmar que compilaram ou passaram** a suíte Qt/Windows nesta rodada. GitHub Actions ainda sem PASS verificado. O último PASS do usuário comprovava apenas estágio anterior da simulação. `main`/`APLICATIVO`/laser não alterados.
 - Próxima ação Windows: `git status --short` (preservar `.vscode/`), `git pull --ff-only origin feat/refino-curvas-rastreio-diagnosticos-19-8` somente se seguro; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteSimulacao`. Após PASS, `-SomenteInteracao`, `-Abrir` e comparação com LightBurn. Não mesclar branch nem iniciar máquina nesta etapa.
+
+## 29/10/2026 — HOTFIX de teste C++ raster invalidado por intervalo 10 mm
+
+- **Evidência real do usuário:** captura VS Code com `TESTAR_19_8_WINDOWS.ps1 -SomenteSimulacao`. Configuração CMake PASS e teste C++ cinemático PASS (1000 trajetórias). Em seguida, teste C++ de Fill/bitmap lança `std::runtime_error: Intervalo ou overscan virtual fora dos limites`; PowerShell interrompe o gate. Não chegou à compilação Qt6 nesse ciclo.
+- **Causa raiz confirmada no GitHub:** `src/preview_raster_19_8.hpp::validate` limita `intervalMm` a **0,05–5,00 mm**, em acordo com UI; o teste portátil `tests/preview_raster_19_8_standalone.cpp` e o equivalente Qt `qt6_test6.cpp::previewRaster198Test()` estavam configurando **10 mm** e esperando sucesso. Erro dos **testes**, não evidência de máquina/hardware.
+- **Correção publicada** na branch `feat/refino-curvas-rastreio-diagnosticos-19-8`:
+  - Fixtures raster com intervalo **5 mm** e dimensões ajustadas: imagem 40×10 para máscara P&B 4×2; passo exato com altura **12,5 mm**, centros `y=2,5` e `7,5`; imagem de 2 mm usa uma linha em `y=1`.
+  - Overscan inválido de 21 mm testado isoladamente com intervalo válido de 5 mm.
+  - Regressão do motor confirma **aceita 5 mm, rejeita 10 mm**. Nenhuma alteração nos limites físicos, no Qt ou hardware.
+- Documento: `DESENVOLVIMENTO/ESPECIFICACOES/HOTFIX_TESTE_RASTER_INTERVALO_19_8_20261029.md`.
+- **Status:** hotfix enviado ao GitHub; **ainda sem execução nem PASS no Windows após esses commits**. O PASS cinemático anterior continua comprovado; raster/Qt novos devem ser testados. `main`, `APLICATIVO` e comandos físicos preservados.
+- Comando quando usuário estiver no computador: `git status --short`; `git pull --ff-only origin feat/refino-curvas-rastreio-diagnosticos-19-8` se seguro; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteSimulacao`. Preservar `.vscode/` e código local. Se houver outra falha, investigar primeira mensagem de erro e `RELATORIOS/COMPILACAO/BUILD_GITHUB_19_8.txt`, sem tratar todos os futuros erros como raster.
