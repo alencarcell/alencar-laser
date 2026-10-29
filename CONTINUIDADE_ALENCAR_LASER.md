@@ -551,3 +551,12 @@ Registrar mudanças, testes e pendências.
 - Relatorio detalhado e limites: `DESENVOLVIMENTO/ESPECIFICACOES/HOTFIX_TEXTO_FILL_PREVIA_ALINHAMENTO_19_8_20261029.md`.
 - **STATUS HONESTO: CODIGO PUBLICADO NA BRANCH EXPERIMENTAL; COMPILACAO E TESTES DESSA RODADA NO WINDOWS AINDA NAO EXECUTADOS.** Os PASS anteriores de `-SomenteSimulacao` e `-SomenteDesenho` eram anteriores a este lote e não homologam estas correcoes. `main`, `APLICATIVO`, controle fisico, CAM e G-code permanecem preservados.
 - Proximo passo no Windows, sem maquina conectada: `git status --short`; `git pull --ff-only origin feat/refino-curvas-rastreio-diagnosticos-19-8` se seguro (preservar `.vscode/`); `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteInteracao`. Se PASS, testar `-Abrir`, salvar/reabrir copia `.alaser`, reeditar texto e conferir janela da previa em tela menor.
+
+
+## 29/10/2026 — Hotfix Qt: qualificar PreviewCanvas198 no teste de interacao
+
+- **Evidência Windows:** captura do VS Code após `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteInteracao` registrou erro C++ em `qt/qt6_test6.cpp`: `PreviewCanvas198 was not declared in this scope` e erro em cascata `camera was not declared in this scope`, interrompendo Ninja com código 1. A suíte Qt dessa rodada não foi aprovada.
+- **Causa confirmada na fonte do GitHub:** a classe está definida em `qt/preview_dialog_19_8.hpp` dentro do namespace `alaser::sim198`, enquanto o teste `textFillAlign198Test()` instanciava `PreviewCanvas198 camera;` sem o namespace.
+- **Hotfix mínimo:** `sim198::PreviewCanvas198 camera;` no arquivo `DESENVOLVIMENTO/FONTE/qt/qt6_test6.cpp`. Commit `64adac405015efe4ed2d42efa3534426871797e9` na branch experimental; validação de código lido novamente via GitHub confirmou a linha corrigida.
+- **Não afirmar PASS:** alteração publicada e conferida estaticamente, mas não há recompilação Windows após o hotfix. Não modificar a geometria nem adicionar novas funções antes do reteste.
+- **Próxima etapa:** preservar mudanças locais de `.vscode/` e outros arquivos, executar `git status --short`; se seguro, `git pull --ff-only origin feat/refino-curvas-rastreio-diagnosticos-19-8`; rodar `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteInteracao`. Se PASS, prosseguir com `-Abrir` e avaliação manual: texto reeditável, Fill com vazados, zoom/pan da prévia e alinhamento. `main`, `APLICATIVO`, máquina e emissão física preservados.
