@@ -2441,6 +2441,9 @@ public:
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Nodes);});
   [[maybe_unused]] auto* bezier=compact(editorGrid,2,0,"bezier","⌁ Bézier","Editar âncoras e alças Bézier nativas",
    [this]{if(!curves){status->setText("Abra um projeto com curvas v5.");return;}
+     // Switching from DrawBezier must commit the draft before enabling
+     // native node editing; enableNative() alone refuses while busy.
+     view.setTool(QtEditorLab::Tool::Select);
      bezierToolActive_=true;view.enableNative(true);
      captureEvent("tool_bezier_activated");
      status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
