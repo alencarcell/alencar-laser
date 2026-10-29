@@ -143,8 +143,15 @@ public:
   // Exatamente um cruzamento no contorno fechado continua ambiguo.
   if(c->closed&&bs.crossings.size()==1)return {};
   if(bs.crossings.empty()){
-   // Sobreposicoes e tangencias nao resolvidas precisam ser recusadas.
-   if(!bs.unsafe.empty())return {};
+   // Apos o primeiro corte, a extremidade do caminho aberto pode coincidir
+   // exatamente com a linha usada como limite. Essa intersecao terminal
+   // NAO deve impedir o recorte posterior do resto (caso real 29/10).
+   // Manter bloqueios para sobreposicoes e tangencias no MEIO do caminho.
+   for(const auto& bad:bs.unsafe){
+    const bool onlyOpenEndpoint=!c->closed&&
+      (bad.second<=1e-5||bad.first>=double(m)-1e-5);
+    if(!onlyOpenEndpoint)return {};
+   }
    return ScissorSpan{hit.key,0.,double(m),c->closed,
                       spanPoints(*c,0.,double(m))};
   }
