@@ -837,6 +837,7 @@ public:
  std::function<void()> stateChanged;
  std::function<void(const QString&)> toolWarning;
  std::function<void(Pt)> requestTextAt;
+ std::function<void(int)> requestEditTextObject;
  std::function<void()> requestTraceImage;
  std::function<void()> requestSelectTool;
  std::function<void(Tool)> requestToolChange;
@@ -1388,6 +1389,21 @@ protected:
   if(draggedMarker){p->setBrush(QColor(255,186,84));p->drawEllipse(*draggedMarker,4./markerScale,4./markerScale);++markerDraws;}
   p->restore();
  }
+void mouseDoubleClickEvent(QMouseEvent* e)override{
+ if(e->button()==Qt::LeftButton&&requestEditTextObject&&
+    (tool==Tool::Select||tool==Tool::Text)){
+  const Pt point=fromQt(mapToScene(e->position().toPoint()));
+  const auto hits=editor.selectableHits(point,10./std::max(0.001,currentZoom()));
+  for(const auto& hit:hits)if(editor.findEditableText(hit.key.object)){
+   const int id=hit.key.object;
+   QTimer::singleShot(0,this,[this,id]{
+    if(requestEditTextObject)requestEditTextObject(id);
+   });
+   e->accept();return;
+  }
+ }
+ QGraphicsView::mouseDoubleClickEvent(e);
+}
 void mousePressEvent(QMouseEvent* e)override{
  if(e->button()==Qt::MiddleButton){
   if(!busy()){
@@ -2027,6 +2043,7 @@ public:
  std::optional<IntegratedProject> loadedProject_; // operações, origem e metadados adicionais preservados
  bool bezierToolActive_=false;
  QLineEdit* inlineTextEntry_=nullptr;
+ std::optional<int> inlineTextEditRoot_;
  Pt inlineTextAnchor_{};
  double inlineTextHeightMm_=12.;
  QFont inlineTextFont_{"Arial",12};
@@ -2872,6 +2889,15 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* textLayout=new QVBoxLayout(textTab);
   textLayout->setContentsMargins(9,9,9,9);
   textLayout->addWidget(titleLabel("FORMATACAO DE TEXTO"));
+  auto* editExistingText=new QPushButton("Editar texto selecionado");
+  editExistingText->setObjectName("edit_text_selected_19_8");
+  textLayout->addWidget(editExistingText);
+  connect(editExistingText,&QPushButton::clicked,this,[this]{
+   for(int id:selection())if(view.editor.findEditableText(id)){
+    editVectorTextObject(id);return;
+   }
+   status->setText("Selecione um texto editavel criado nesta versao.");
+  });
   auto* fontFamily=new QFontComboBox;
   fontFamily->setObjectName("text_font_windows");
   fontFamily->setToolTip("Fontes instaladas no Windows; fontes SHX ainda nao suportadas.");
@@ -3342,6 +3368,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   };
   view.drawingLayer=[this]{return layers->currentData().toInt();};
    view.requestTextAt=[this](Pt at){insertVectorText(at);};
+   view.requestEditTextObject=[this](int id){editVectorTextObject(id);};
    view.requestTraceImage=[this]{traceImageDialog();};
    connect(qApp,&QApplication::focusChanged,this,[this](QWidget* previous,QWidget* next){
     if(!inlineTextEntry_||previous!=inlineTextEntry_||next==inlineTextEntry_)return;
@@ -3639,25 +3666,62 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   return QWidget::eventFilter(object,event);
  }
   void finishInlineText(bool commit){
-   if(!inlineTextEntry_)return;
+  if(!inlineTextEntry_)return;
   QLineEdit* field=inlineTextEntry_;
-  const QString message=field->text();const Pt anchor=inlineTextAnchor_;
-   inlineTextEntry_=nullptr;
-   field->removeEventFilter(this);field->hide();field->deleteLater();
-   for(QShortcut* shortcut:editingShortcuts_)shortcut->setEnabled(true);
+  const QString message=field->text();
+  const Pt anchor=inlineTextAnchor_;
+  const auto editing=inlineTextEditRoot_;
+  inlineTextEditRoot_.reset();inlineTextEntry_=nullptr;
+  field->removeEventFilter(this);field->hide();field->deleteLater();
+  for(QShortcut* sc:editingShortcuts_)sc->setEnabled(true);
   if(!commit||message.trimmed().isEmpty()){view.setFocus();return;}
   try{
    if(message.size()>100)throw std::runtime_error("Texto limitado a 100 caracteres");
-   QFont chosen=inlineTextFont_;
-   chosen.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
-   auto outlines=vectorTextOutlines(message,chosen,inlineTextHeightMm_,anchor,inlineTextAlign_);
-   const auto ids=view.editor.addContours(std::move(outlines),true,layers->currentData().toInt());
+   QFont font=inlineTextFont_;
+   font.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
+   auto polygons=vectorTextOutlines(message,font,inlineTextHeightMm_,anchor,inlineTextAlign_);
+   EditableText info;
+   info.text=message.toStdString();info.fontFamily=font.family().toStdString();
+   info.bold=font.bold();info.italic=font.italic();
+   info.heightMm=inlineTextHeightMm_;info.spacingPercent=inlineTextLetterSpacing_;
+   info.anchor=anchor;
+   info.align=inlineTextAlign_==Qt::AlignHCenter?1:(inlineTextAlign_==Qt::AlignRight?2:0);
+   int root=0;
+   if(editing){
+    root=*editing;
+    view.editor.replaceEditableText(root,std::move(polygons),info);
+   }else root=view.editor.addEditableText(std::move(polygons),info,layers->currentData().toInt());
    view.clearSelection();view.invalidateSelectionCache();view.rebuild();
-   view.activate({ids.front(),0});recoveryPolicy_.edited();
-   captureEvent("vector_text_created");
-   status->setText(QString("Texto inserido na mesa: %1 contornos; Ctrl+Z desfaz.").arg(ids.size()));
+   view.activate({root,0});recoveryPolicy_.edited();
+   captureEvent(editing?"vector_text_reedited":"vector_text_created");
+   status->setText(editing?
+     "Texto alterado com fonte original; Ctrl+Z desfaz.":
+     "Texto editavel criado: duplo clique para reeditar.");
   }catch(const std::exception& ex){status->setText(QString::fromUtf8(ex.what()));}
   view.setFocus();
+ }
+ void editVectorTextObject(int object){
+  if(inlineTextEntry_)finishInlineText(true);
+  const auto found=view.editor.findEditableText(object);
+  if(!found){status->setText("Texto original nao encontrado nesta forma.");return;}
+  const int root=found->first;
+  const auto record=found->second;
+  for(int id:record.members)if(!editable(view.editor.state(),id)){
+   status->setText("Texto em camada bloqueada ou oculta.");return;
+  }
+  const Pt bounds=boundsOf(view.editor.state().doc,record.members).first;
+  const Pt anchor=record.anchor+(bounds-record.sourceBoundsMin);
+  inlineTextFont_.setFamily(QString::fromStdString(record.fontFamily));
+  inlineTextFont_.setBold(record.bold);inlineTextFont_.setItalic(record.italic);
+  inlineTextHeightMm_=record.heightMm;inlineTextLetterSpacing_=record.spacingPercent;
+  inlineTextAlign_=record.align==1?Qt::AlignHCenter:
+                   (record.align==2?Qt::AlignRight:Qt::AlignLeft);
+  insertVectorText(anchor);
+  if(!inlineTextEntry_)return;
+  inlineTextEditRoot_=root;
+  inlineTextEntry_->setText(QString::fromStdString(record.text));
+  inlineTextEntry_->selectAll();
+  status->setText("Editando texto original. Enter confirma; Esc cancela.");
  }
  void insertVectorText(Pt at){
   if(inlineTextEntry_)finishInlineText(true);
@@ -3667,6 +3731,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    status->setText("Texto: camada deve estar visivel e desbloqueada.");return;
   }
   inlineTextAnchor_=at;
+  inlineTextEditRoot_.reset();
   auto* field=new QLineEdit(view.viewport());
   inlineTextEntry_=field;field->setObjectName("inlineTextEdit");
   field->setMaxLength(100);field->setPlaceholderText("Digite texto...");
