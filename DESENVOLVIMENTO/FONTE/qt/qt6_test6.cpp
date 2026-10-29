@@ -1134,6 +1134,7 @@ public:
   fullRebuilds++;viewport()->update();
   if(stateChanged)stateChanged();
  }
+ int activeObjectId()const{return active_?active_->object:0;}
  void activate(Key key,bool replace=true){
   bool changedActive=!active_.has_value()||*active_!=key;
   active_=key;if(replace){selected.clear();selected.insert(key.object);}
@@ -2878,6 +2879,28 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     throw std::runtime_error("Alinhamento de grupos exige desagrupar primeiro.");
    view.editor.alignLeft(ids);view.rebuild();
   });});properties->addWidget(alignLeftBtn);
+  auto* alignmentSection=new QGroupBox("Alinhamento (2 ou mais)");
+  auto* alignGrid=new QGridLayout(alignmentSection);
+  const std::vector<std::pair<QString,int>> choices={
+   {"Esquerda",0},{"Direita",1},{"Topo",2},{"Base",3},
+   {"Centro X",4},{"Centro Y",5},{"Ambos centros",6}};
+  for(size_t i=0;i<choices.size();++i){
+   const auto [name,mode]=choices[i];
+   auto* button=new QPushButton(name);
+   button->setObjectName(QString("align_mode_%1_19_8").arg(mode));
+   alignGrid->addWidget(button,int(i)/2,int(i)%2);
+   connect(button,&QPushButton::clicked,this,[this,mode]{
+    run([this,mode]{
+     const auto ids=selection();
+     const int active=view.activeObjectId();
+     const int ref=std::find(ids.begin(),ids.end(),active)!=ids.end()?active:
+                   (ids.empty()?0:ids.back());
+     view.editor.alignObjects(ids,mode,ref);view.rebuild();
+     captureEvent("objects_aligned");
+    });
+   });
+  }
+  properties->addWidget(alignmentSection);
   properties->addStretch();inspectorTabs->addTab(propsTab,"Objetos");
 
   // The system font picker enumerates installed Windows fonts via Qt.
@@ -3272,7 +3295,24 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* arrangeMenu=mainMenu->addMenu("Organizar");
   command(arrangeMenu,"Agrupar","group");command(arrangeMenu,"Desagrupar","ungroup");
   command(arrangeMenu,"Enviar selecao para camada ativa (Ctrl+L)","move_layer");
-  command(arrangeMenu,"Girar 90°","rotate_90");command(arrangeMenu,"Alinhar à esquerda","align_left_195");
+  command(arrangeMenu,"Girar 90°","rotate_90");
+  auto* alignMenu=arrangeMenu->addMenu("Alinhar formas");
+  for(const auto& [label,mode]:std::vector<std::pair<QString,int>>{
+       {"Esquerda",0},{"Direita",1},{"Topo",2},{"Base",3},
+       {"Centro X",4},{"Centro Y",5},{"Ambos centros",6}}){
+   auto* action=alignMenu->addAction(label);
+   action->setObjectName(QString("align_action_%1_19_8").arg(mode));
+   connect(action,&QAction::triggered,this,[this,mode]{
+    run([this,mode]{
+     const auto ids=selection();
+     const int active=view.activeObjectId();
+     const int ref=std::find(ids.begin(),ids.end(),active)!=ids.end()?active:
+                   (ids.empty()?0:ids.back());
+     view.editor.alignObjects(ids,mode,ref);view.rebuild();
+     captureEvent("objects_aligned");
+    });
+   });
+  }
   auto* laserMenu=mainMenu->addMenu("Laser");
   auto* wifiEntry=laserMenu->addAction("USB / Wi-Fi — Diagnóstico apenas");
   connect(wifiEntry,&QAction::triggered,this,[wifiLauncher]{wifiLauncher->click();});
