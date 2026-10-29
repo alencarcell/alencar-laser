@@ -150,6 +150,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  double playbackTime=0;
  std::size_t nestedPairs=0;
  double optimizedLineTravelMm=sourcePlan.travelMm;
+ double nominalSeconds=0.0;
  auto stop=[&](){
   clock.stop();play->setText("▶ Reproduzir");
  };
@@ -240,12 +241,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
       it->second.speedMmMin:settings.cutMmMin;
    };
    timeline=motion::estimateWithFeeds(shown,settings,layerSpeed);
-   double nominal=0;
-   for(const auto& move:shown.moves){
-    const double length=std::hypot(move.to.x-move.from.x,move.to.y-move.from.y);
-    const double feed=move.laser?layerSpeed(move.layer):settings.rapidMmMin;
-    nominal+=length/feed*60.0;
-   }
+   nominalSeconds=motion::nominalSecondsWithFeeds(shown,settings,layerSpeed);
    stats->setText(QString("Movimento virtual ativo %1 mm | viagem %2 mm | tempo nominal %3 s | "
      "tempo c/ aceleracao %4 s | grupos %5 | "
      "Fill omitido %6, Saida off %7, T1/T2 %8. "
@@ -253,7 +249,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
      "restricoes interno-antes-externo %11. "
      "A precedencia pode aumentar a viagem. M3/M4 apenas referencia.")
      .arg(shown.cutMm,0,'f',1).arg(shown.travelMm,0,'f',1)
-     .arg(nominal,0,'f',1).arg(timeline.totalSeconds,0,'f',1)
+     .arg(nominalSeconds,0,'f',1).arg(timeline.totalSeconds,0,'f',1)
      .arg(qulonglong(timeline.runs)).arg(qulonglong(shown.ignoredFill))
      .arg(qulonglong(shown.ignoredDisabled)).arg(qulonglong(shown.ignoredTool))
      .arg(sourcePlan.travelMm,0,'f',1).arg(optimizedLineTravelMm,0,'f',1)
@@ -261,7 +257,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    play->setEnabled(!shown.moves.empty()&&timeline.totalSeconds>0);
    render();
   }catch(const std::exception& e){
-   shown={};timeline={};
+   shown={};timeline={};nominalSeconds=0.0;
    stats->setText(QString("Previa limitada: %1").arg(QString::fromUtf8(e.what())));
    play->setEnabled(false);render();
   }
@@ -295,7 +291,8 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"image_mode",bitmapMode->currentIndex()==1?"ordered_dither":"threshold"},
    {"image_threshold",bitmapThreshold->value()},
    {"cut_distance_mm",shown.cutMm},{"travel_distance_mm",shown.travelMm},
-   {"nominal_seconds",minutes(shown,settings.cutMmMin,settings.rapidMmMin)*60.0},
+   {"nominal_seconds",nominalSeconds},
+   {"nominal_speed_model","layer_feed_when_enabled_else_global"},
    {"accel_estimated_seconds",timeline.totalSeconds},
    {"line_seconds",timeline.lineSeconds},{"travel_seconds",timeline.travelSeconds},
    {"motion_runs",int(timeline.runs)},
