@@ -2775,7 +2775,8 @@ public:
   configureBed->setToolTip("Configurar área de desenho e mesa");
   fitBed->setToolTip("Enquadrar a mesa configurada");
   fit->setToolTip("Ajustar desenho à área disponível");
-  view.zoomChanged=[zoom](double level){
+  view.zoomChanged=[this,zoom](double level){
+   updateInlineTextOverlay();
    QSignalBlocker block(zoom);
    int ix=-1;
    for(int i=0;i<zoom->count()-1;++i)
@@ -2788,11 +2789,14 @@ public:
    if(index<0||zoom->itemData(index).toDouble()<=0)return;
    QPointF focus=view.mapToScene(view.viewport()->rect().center());
    const double scale=alaser::zoom196::clampScale(zoom->itemData(index).toDouble());
-   view.setTransform(QTransform::fromScale(scale,scale));view.centerOn(focus);view.reportZoom();view.setFocus();
+   view.setTransform(QTransform::fromScale(scale,scale));view.centerOn(focus);view.reportZoom();
+   if(!inlineTextEntry_)view.setFocus();
   });
   canvasLayout->addLayout(canvasBar);
   view.setObjectName("drawingCanvas");view.setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding);
   canvasLayout->addWidget(&view,1);
+  connect(view.horizontalScrollBar(),&QScrollBar::valueChanged,this,[this](int){updateInlineTextOverlay();});
+  connect(view.verticalScrollBar(),&QScrollBar::valueChanged,this,[this](int){updateInlineTextOverlay();});
   splitter->addWidget(center);
 
   auto* right=new QFrame;right->setObjectName("rightPanel");right->setMinimumWidth(260);right->setMaximumWidth(420);
@@ -3772,6 +3776,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    return true;
   }
   if(object==view.viewport()){
+   if(event->type()==QEvent::Resize&&inlineTextEntry_){
+    QTimer::singleShot(0,this,[this]{updateInlineTextOverlay();});
+   }
    if(event->type()==QEvent::DragEnter){
     dragEnterEvent(static_cast<QDragEnterEvent*>(event));return true;
    }
@@ -3799,7 +3806,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    }
    if(event->type()==QEvent::KeyPress){
     auto* key=static_cast<QKeyEvent*>(event);
-    if(key->key()==Qt::Key_Escape){finishInlineText(true);return true;}
+    if(key->key()==Qt::Key_Escape){finishInlineText(false);return true;}
    }
   }
   return QWidget::eventFilter(object,event);
@@ -3812,6 +3819,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const auto editing=inlineTextEditRoot_;
   inlineTextEditRoot_.reset();inlineTextEntry_=nullptr;
   field->removeEventFilter(this);field->hide();field->deleteLater();
+  // Restaurar renderizacao anterior mesmo se o operador cancelar/errar.
+  view.setTextEditingMembersHidden({});
   for(QShortcut* sc:editingShortcuts_)sc->setEnabled(true);
   if(!commit||message.trimmed().isEmpty()){view.setFocus();return;}
   try{
@@ -3870,18 +3879,20 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    textAlignControl_->setCurrentIndex(
       std::max(0,textAlignControl_->findData(int(inlineTextAlign_))));
   }
-  insertVectorText(anchor);
+  insertVectorText(anchor,true);
   if(!inlineTextEntry_)return;
   inlineTextEditRoot_=root;
+  view.clearSelection();
+  view.setTextEditingMembersHidden(record.members);
   inlineTextEntry_->setText(QString::fromStdString(record.text));
   inlineTextEntry_->selectAll();
   status->setText("Editando texto original. Enter confirma; Esc cancela.");
  }
- void insertVectorText(Pt at){
+ void insertVectorText(Pt at,bool editingExisting=false){
   if(inlineTextEntry_)finishInlineText(true);
   if(view.busy()||layers->currentIndex()<0)return;
   const auto layer=view.editor.state().layers.at(layers->currentData().toInt());
-  if(!layer.visible||layer.locked){
+  if(!editingExisting&&(!layer.visible||layer.locked)){
    status->setText("Texto: camada deve estar visivel e desbloqueada.");return;
   }
   inlineTextAnchor_=at;
