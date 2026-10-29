@@ -1314,7 +1314,9 @@ protected:
   }
    p->restore();
    paintSelectionHandles(p);
-   if(nativeMode_&&nativeSession_&&nativeSession_->selected()){
+   // Normal selection highlights the curve; handles appear only in
+   // dedicated native Bézier node-editing mode.
+   if(nativeMode_&&nativeEditHandles_&&nativeSession_&&nativeSession_->selected()){
    const auto* c=findNativeCurve(nativeSession_->visible(),*nativeSession_->selected());
    if(!c)return;
    const QTransform transform=viewportTransform();
