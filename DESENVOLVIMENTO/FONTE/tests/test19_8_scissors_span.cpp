@@ -101,6 +101,39 @@ int main(){
                      {{base,0},0,0,{2.5,0}});
   require(!ambiguous,"cruzamento no vertice interior foi excluido sem seguranca");
 
+  // Reproducao numerica da geometria enviada pelo operador: objeto 575.
+  // O caminho aberto tem uma ponta acima do triangulo e termina com um
+  // vertice sobre a PRIMEIRA aresta, uma junção em T de ponta externa.
+  Editor realTriangle(Document{});
+  const int triangle=realTriangle.addContour({
+     {36.42090666666665,171.17826133333327},
+     {36.42090666666666,234.15374697766455},
+     {85.90379017754454,234.15374697766455},
+     {36.42090666666665,184.67086346678667}},false);
+  const Document triangleBefore=realTriangle.state().doc;
+  planner.reset(realTriangle.state().doc);
+  auto excess=planner.candidate(realTriangle.state().doc,
+          {{triangle,0},0,0,{36.42090666666665,174.}});
+  require(bool(excess),"objeto 575: ponta externa na junta T nao ficou em laranja");
+  require(excess->from<1e-7&&excess->to>0.20&&excess->to<0.23,
+          "objeto 575: ponta excedente nao termina na junta T");
+  realTriangle.removeScissorSpan(*excess);
+  const auto* onlyShape=get(realTriangle.state().doc,{triangle,0});
+  require(onlyShape&&hasExactDuplicateClosure(*onlyShape),
+          "objeto 575: primeiro recorte nao deixou triangulo fechado logicamente");
+  planner.reset(realTriangle.state().doc);
+  auto remainder=planner.candidate(realTriangle.state().doc,
+          {{triangle,0},1,0,{60.,234.15374697766455}});
+  require(bool(remainder)&&remainder->closed,
+          "objeto 575: resto do triangulo nao recebeu contorno laranja");
+  require(realTriangle.removeScissorSpan(*remainder)==0&&
+          realTriangle.state().doc.contours.empty(),
+          "objeto 575: Tesoura nao apagou segunda forma restante");
+  require(realTriangle.undo()&&get(realTriangle.state().doc,{triangle,0}),
+          "objeto 575: segundo recorte nao pode ser desfeito");
+  require(realTriangle.undo()&&sameDoc(triangleBefore,realTriangle.state().doc),
+          "objeto 575: segundo Undo nao restaurou original binario");
+
   Editor ring(Document{});
   const int circle=ring.ellipse({0,0},10,10,64);
   const int knife=ring.line({-20,2},{20,2});
