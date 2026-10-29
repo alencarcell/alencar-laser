@@ -195,6 +195,7 @@ class QtEditorLab final:public QGraphicsView{
  bool lastNativeAction_=false;
  uint64_t lastEditorGenerationSeen_=0;
  bool fillPreview_=false; // Editor LightBurn mostra linhas por padrao.
+ std::set<int> hiddenTextEditingMembers_; // somente visual; geometria canonica intacta
  QImage rasterSource_; // preview temporario fora do arquivo .alaser
  QRectF rasterRect_;
  QGraphicsPixmapItem* rasterOverlay_=nullptr;
@@ -851,6 +852,16 @@ public:
   if(fillPreview_==enabled)return;
   fillPreview_=enabled;rebuild();
  }
+ // Esconder o texto antigo enquanto sua origem e reeditada, sem apagar
+ // contornos, metadata, undo, ou o arquivo de projeto. Tambem oculta Fill.
+ void setTextEditingMembersHidden(const std::vector<int>& members){
+  const std::set<int> next(members.begin(),members.end());
+  if(next==hiddenTextEditingMembers_)return;
+  hiddenTextEditingMembers_=next;rebuild();
+ }
+ bool textEditingMemberHidden(int id)const{
+  return hiddenTextEditingMembers_.count(id)!=0;
+ }
  std::function<int()> drawingLayer;
  int targetLayer()const{return drawingLayer?drawingLayer():0;}
  bool busy()const{return draggingNode_.has_value()||shapeDragging_||transformDragging_||strokeDrawing_||polylineDrawing_||bezierDrawing_||marqueeActive_||nativePressing_||nativeContourPressing_;}
@@ -1099,7 +1110,7 @@ public:
    std::map<int,QPainterPath> perLayer;
    for(const auto& c:editor.state().doc.contours){
     const auto mi=editor.state().objects.find(c.key.object);
-    if(mi==editor.state().objects.end())continue;
+    if(mi==editor.state().objects.end()||hiddenTextEditingMembers_.count(c.key.object))continue;
     const auto li=editor.state().layers.find(mi->second.layer);
     if(li==editor.state().layers.end()||!li->second.visible||
        li->second.mode!="Fill"||!(c.closed||hasExactDuplicateClosure(c)))continue;
@@ -1121,7 +1132,7 @@ public:
     const auto layer=editor.state().layers.at(meta.layer);
     auto* item=scene_.addPath(pathOf(c),QPen(layerColor(meta.layer),0));
     item->setZValue(1);
-    item->setVisible(layer.visible);
+    item->setVisible(layer.visible&&!hiddenTextEditingMembers_.count(c.key.object));
     objects_[c.key]=item;itemsByObject_[c.key.object].push_back(item);
   }
   for(auto it=selected.begin();it!=selected.end();)if(!editable(editor.state(),*it))it=selected.erase(it);else ++it;
