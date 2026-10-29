@@ -24,6 +24,13 @@ inline QIcon toolGlyph(const QString& id){
  }else if(id=="scissors"){
   p.drawEllipse(QPointF(9,23),4,4);p.drawEllipse(QPointF(23,23),4,4);
   p.drawLine(11,20,25,5);p.drawLine(21,20,7,5);
+ }else if(id=="pencil"){
+  p.drawLine(7,24,24,7);p.drawLine(5,27,12,25);
+  QPolygonF tip;tip<<QPointF(24,7)<<QPointF(28,11)<<QPointF(12,27)<<QPointF(7,23);
+  p.drawPolyline(tip);
+ }else if(id=="text"){
+  QFont f=p.font();f.setBold(true);f.setPixelSize(25);p.setFont(f);
+  p.drawText(QRectF(4,2,24,28),Qt::AlignCenter,"T");
  }else if(id=="line")p.drawLine(5,26,27,5);
  else if(id=="rectangle")p.drawRect(QRectF(6,7,20,18));
  else if(id=="ellipse")p.drawEllipse(QRectF(5,7,22,18));

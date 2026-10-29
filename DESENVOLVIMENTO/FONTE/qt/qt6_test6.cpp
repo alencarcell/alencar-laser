@@ -50,6 +50,8 @@
 #include <QTimer>
 #include <QMessageBox>
 #include <QInputDialog>
+#include <QFontDialog>
+#include <QFont>
 #include <QToolButton>
 #include <QCursor>
 #include <QMenu>
@@ -195,6 +197,7 @@ class QtEditorLab final:public QGraphicsView{
  std::vector<QGraphicsPathItem*> shapePreviewItems_;
  bool nativeContourPressing_=false;
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
+ std::vector<Pt> pencilPoints_;
  QGraphicsPathItem* pendingPreview_=nullptr;
  ScissorSpanPlanner scissorPlanner_;
  uint64_t scissorIndexVersion_=std::numeric_limits<uint64_t>::max();
@@ -366,7 +369,7 @@ class QtEditorLab final:public QGraphicsView{
  }
 
 public:
- enum class Tool{Select,Nodes,Scissors,Rectangle,Line,Ellipse,Polygon};
+ enum class Tool{Select,Nodes,Scissors,Rectangle,Line,Ellipse,Polygon,Pencil,Text};
  Tool tool=Tool::Select;
  Editor editor;
  std::set<int> selected;
@@ -378,6 +381,7 @@ public:
  qint64 markerCandidates=0,markerDraws=0;
  std::function<void()> stateChanged;
  std::function<void(const QString&)> toolWarning;
+ std::function<void(Pt)> requestTextAt;
  std::function<void()> requestSelectTool;
  std::function<void(const QString&,int)> diagnosticEvent;
  std::function<void(double)> zoomChanged;
@@ -697,7 +701,7 @@ public:
   if(nativePressing_&&nativeSession_){nativeSession_->cancel();nativePressing_=false;updateNativePaths(false);}
   if(shapeDragging_)clearShapePreview();
   if(draggingNode_){endChunkPreview();draggingNode_.reset();viewport()->update();}
-  if(strokeDrawing_){strokeDrawing_=false;if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();}
+  if(strokeDrawing_){strokeDrawing_=false;pencilPoints_.clear();if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();}
  }
  void history(bool redo){if(busy())return;if(redo?editor.redo():editor.undo()){
   active_.reset();selected.clear();rebuild();if(diagnosticEvent)diagnosticEvent(redo?"redo":"undo",1);
@@ -708,7 +712,10 @@ public:
   auto m=viewportTransform();double sx=std::hypot(m.m11(),m.m12()),sy=std::hypot(m.m21(),m.m22());
   // Qt fornece unidades da viewport em pixels logicos; passamos o DPR separadamente.
   const double pxPerMm=std::max(1e-8,std::min(sx,sy));
-  auto hs=picker_.query(editor,fromQt(mapToScene(viewportPoint)),6.,pxPerMm,viewport()->devicePixelRatioF());
+  // Tolerancia maior apenas para localizar linhas finas com a Tesoura.
+  const double tolerancePx=(tool==Tool::Scissors?9.:6.);
+  auto hs=picker_.query(editor,fromQt(mapToScene(viewportPoint)),
+                        tolerancePx,pxPerMm,viewport()->devicePixelRatioF());
   sample(hitTestMs,profiler.nsecsElapsed()/1e6);return hs;
  }
  int lastCreated()const{return lastCreated_;}
@@ -853,6 +860,22 @@ void mousePressEvent(QMouseEvent* e)override{
    if(draggingNode_){dragStart_=e->position();drawCurrent_=e->position();startChunkPreview(*active_,*draggingNode_);}
    e->accept();return;
   }
+  if(tool==Tool::Text){
+   if(requestTextAt)requestTextAt(fromQt(mapToScene(e->position().toPoint())));
+   e->accept();return;
+  }
+  if(tool==Tool::Pencil){
+   const auto& layer=editor.state().layers.at(targetLayer());
+   if(!layer.visible||layer.locked){e->accept();return;}
+   strokeDrawing_=true;drawStart_=e->position();drawCurrent_=drawStart_;
+   pencilPoints_.clear();pencilPoints_.push_back(fromQt(mapToScene(e->position().toPoint())));
+   if(!pendingPreview_){
+    QPen previewPen(QColor(255,159,35),1.4);previewPen.setCosmetic(true);
+    pendingPreview_=scene_.addPath(QPainterPath(),previewPen);
+    pendingPreview_->setZValue(20);
+   }
+   e->accept();return;
+  }
   if(tool==Tool::Rectangle||tool==Tool::Ellipse||tool==Tool::Line||tool==Tool::Polygon){
    const auto& layer=editor.state().layers.at(targetLayer());if(!layer.visible||layer.locked){e->accept();return;}
    strokeDrawing_=true;drawStart_=e->position();drawCurrent_=drawStart_;
@@ -922,6 +945,17 @@ void mouseMoveEvent(QMouseEvent* e)override{
    updateNodeMarkers(previousDisplay,nextDisplay);
    frameUpdates++;e->accept();return;
   }
+  if(strokeDrawing_&&tool==Tool::Pencil){
+   const Pt here=fromQt(mapToScene(e->position().toPoint()));
+   const double step=std::max(.005,1.4/std::max(currentZoom(),.001));
+   if(pencilPoints_.size()<20000&&dist(pencilPoints_.back(),here)>=step){
+    pencilPoints_.push_back(here);
+    QPainterPath stroke;stroke.moveTo(toQt(pencilPoints_.front()));
+    for(size_t i=1;i<pencilPoints_.size();++i)stroke.lineTo(toQt(pencilPoints_[i]));
+    pendingPreview_->setPath(stroke);++frameUpdates;
+   }
+   e->accept();return;
+  }
   if(strokeDrawing_){drawCurrent_=e->position();pendingPreview_->setPath(temporaryShape());frameUpdates++;e->accept();return;}
   if(tool==Tool::Scissors){updateScissorHover(e->position().toPoint());e->accept();return;}
   QGraphicsView::mouseMoveEvent(e);
@@ -971,6 +1005,19 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    updateNodeMarkers(viewportTransform().map(toQt(dragOriginal_))+(drawCurrent_-dragStart_),
                      viewportTransform().map(toQt(dragOriginal_))+ (e->position()-dragStart_));
    e->accept();return;
+  }
+  if(strokeDrawing_&&tool==Tool::Pencil){
+   const Pt final=fromQt(mapToScene(e->position().toPoint()));
+   if(pencilPoints_.size()<20000&&dist(pencilPoints_.back(),final)>1e-8)
+    pencilPoints_.push_back(final);
+   if(pencilPoints_.size()>=2){
+    lastCreated_=editor.addContour(std::move(pencilPoints_),false,targetLayer());
+    ++toolCreates;rebuild();activate({lastCreated_,0});
+    if(diagnosticEvent)diagnosticEvent("pencil_stroke_created",1);
+   }
+   pencilPoints_.clear();strokeDrawing_=false;
+   if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}
+   if(stateChanged)stateChanged();e->accept();return;
   }
   if(strokeDrawing_){
    drawCurrent_=e->position();auto first=mapToScene(drawStart_.toPoint());auto last=mapToScene(drawCurrent_.toPoint());
@@ -1035,7 +1082,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
     draggingNode_.reset();updateNodeMarkers(oldMarker,originalMarker);
     e->accept();return;
    }
-   if(strokeDrawing_){strokeDrawing_=false;if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();e->accept();return;}
+   if(strokeDrawing_){strokeDrawing_=false;pencilPoints_.clear();if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();e->accept();return;}
   }
   QGraphicsView::keyPressEvent(e);
  }
@@ -1059,6 +1106,33 @@ static IntegratedProject openNative(const QString& file){
  return readIntegratedProject(file.toStdString());
 }
 static double percentile(std::vector<double> values,double q){if(values.empty())return 0;std::sort(values.begin(),values.end());return values[size_t((values.size()-1)*q)];}
+// Vetorizador unico usado pelo botao Texto e pela regressao Qt; nao envia G-code.
+static std::vector<std::vector<Pt>> vectorTextOutlines(const QString& value,QFont font,
+                                                        double height,Pt origin){
+ if(value.isEmpty()||value.size()>100||!std::isfinite(height)||height<1||height>150)
+  throw std::runtime_error("Texto ou altura fora do limite");
+ font.setPixelSize(180);
+ QPainterPath outline;outline.addText(QPointF(0,0),font,value);
+ if(outline.isEmpty())throw std::runtime_error("A fonte nao produziu contornos");
+ const QRectF bounds=outline.boundingRect();
+ if(bounds.height()<1e-6)throw std::runtime_error("Fonte sem altura util");
+ QTransform t;t.translate(origin.x,origin.y);
+ const double scale=height/bounds.height();t.scale(scale,scale);
+ t.translate(-bounds.left(),-bounds.top());
+ const auto polygons=outline.toSubpathPolygons(t);
+ std::vector<std::vector<Pt>> shapes;
+ for(const QPolygonF& polygon:polygons){
+  std::vector<Pt> points;points.reserve(size_t(polygon.size()));
+  for(const QPointF& q:polygon){
+   const Pt p{q.x(),q.y()};
+   if(points.empty()||dist(points.back(),p)>1e-5)points.push_back(p);
+  }
+  if(points.size()>1&&dist(points.front(),points.back())<1e-5)points.pop_back();
+  if(points.size()>=3)shapes.push_back(std::move(points));
+ }
+ if(shapes.empty())throw std::runtime_error("Texto sem contornos fechados");
+ return shapes;
+}
 class LabWindow final:public QWidget{
 public:
  QtEditorLab view;
@@ -1451,7 +1525,25 @@ public:
   auto* header=new QFrame;header->setObjectName("topHeader");
   auto* headerRow=new QHBoxLayout(header);headerRow->setContentsMargins(11,4,11,4);
   auto* identity=new QVBoxLayout;identity->setSpacing(1);
-  auto* brand=new QLabel("ALENCAR LASER");brand->setObjectName("brandName");identity->addWidget(brand);
+  auto* brand=new QLabel("ALENCAR LASER");brand->setObjectName("brandName");
+  // Identidade oficial: usa a arte ORIGINAL fornecida pelo proprietario,
+  // nunca redesenha nem cria um substituto. Fallback textual sem arquivo.
+  const QStringList logoCandidates={
+   QDir::current().absoluteFilePath("DADOS/LOGO/logo_alencar_laser.png"),
+   QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("logo_alencar_laser.png"),
+   QStringLiteral("C:/ProjetoAlencarLaser/DADOS/LOGO/logo_alencar_laser.png")
+  };
+  for(const QString& logoPath:logoCandidates){
+   QPixmap original(logoPath);
+   if(original.isNull())continue;
+   brand->setPixmap(original.scaled(248,68,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+   brand->setToolTip("Logo oficial Alencar Laser: "+logoPath);
+   brand->setFixedHeight(70);
+   break;
+  }
+  if(brand->pixmap().isNull())
+   brand->setToolTip("Logo oficial ainda nao encontrada. Instale em DADOS/LOGO/logo_alencar_laser.png.");
+  identity->addWidget(brand);
   auto* subtitle=new QLabel("Estúdio Qt 6  •  TESTE_19.8  •  Persistência + recuperação + ícones");subtitle->setObjectName("brandSub");identity->addWidget(subtitle);
   headerRow->addLayout(identity);headerRow->addStretch();
   auto* safety=new QLabel("● MÁQUINA DESCONECTADA   |   EMISSÃO BLOQUEADA");
@@ -1565,6 +1657,10 @@ public:
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Ellipse);});
   compact(shapeGrid,3,0,"polygon","⬡ Políg.","Desenhar polígono",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Polygon);});
+  compact(shapeGrid,4,0,"pencil","✏ Lápis","Traço livre (P), arraste o mouse; uma acao de desfazer",
+    [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Pencil);});
+  compact(shapeGrid,5,0,"text","T Texto","Texto vetorial (T), clique na mesa, escolha fonte e altura",
+    [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Text);});
   buttons.at("select")->setChecked(true);
   auto future=[&](const QString& name,const QString& tip){
     auto* b=new QPushButton(name.left(1));b->setProperty("compact",true);
@@ -1575,7 +1671,7 @@ public:
   tools->addSpacing(6); // Ferramentas futuras desativadas
   auto* vectorGrid=newGrid();
   for(const auto& data:std::vector<std::tuple<QString,QString>>{
-   {"T  Texto","Texto vetorial"},{"◎ Offset","Contorno interno/externo"},
+   {"◎ Offset","Contorno interno/externo"},
    {"⊕ União","Soldar vetores"},{"⊖ Subtr.","Subtrair formas"},
    {"⊞ Alinhar","Alinhamento e distribuição"},{"⌗ Medir","Ferramenta de medição"}}){
     const int index=vectorGrid->count();vectorGrid->addWidget(future(std::get<0>(data),std::get<1>(data)),index,0);
@@ -2069,6 +2165,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   view.stateChanged=[this]{if(uiPersistenceEnabled_)recoveryPolicy_.edited();refresh();};
   view.diagnosticEvent=[this](const QString& code,int count){captureEvent(code,count);};
   view.drawingLayer=[this]{return layers->currentData().toInt();};
+  view.requestTextAt=[this](Pt at){run([this,at]{insertVectorText(at);});};
   auto shortcut=[this](const QString& sequence,std::function<void()> fn){auto* sc=new QShortcut(QKeySequence(sequence),this);connect(sc,&QShortcut::activated,this,[this,fn]{run(fn);});};
   shortcut("Ctrl+Z",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(false);}else view.history(false);});
   shortcut("Ctrl+Y",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(true);}else view.history(true);});
@@ -2087,6 +2184,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   shortcut("K",[this]{buttons.at("scissors")->click();});
   shortcut("Ctrl+K",[this]{buttons.at("scissors")->click();});
   shortcut("Ctrl+R",[this]{buttons.at("rectangle")->click();});
+  shortcut("P",[this]{buttons.at("pencil")->click();});
+  shortcut("T",[this]{buttons.at("text")->click();});
   shortcut("Ctrl+E",[this]{buttons.at("ellipse")->click();});
   shortcut("Ctrl+L",[this]{buttons.at("move_layer")->click();});
   shortcut("Ctrl+D",[this]{buttons.at("duplicate_obj")->click();});
@@ -2177,6 +2276,26 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const QString previous=projectPath;projectPath=chosen;
   try{save();}catch(...){projectPath=previous;throw;}
  }
+ void insertVectorText(Pt at){
+  bool ok=false;
+  const QString message=QInputDialog::getText(this,"Texto vetorial","Digite o texto:",
+       QLineEdit::Normal,QString(),&ok);
+  if(!ok||message.trimmed().isEmpty())return;
+  if(message.size()>100)throw std::runtime_error("Texto limitado a 100 caracteres nesta candidata");
+  const double height=QInputDialog::getDouble(this,"Altura do texto",
+      "Altura dos contornos (mm):",12.,1.,150.,1,&ok);
+  if(!ok)return;
+  const QFont selected=QFontDialog::getFont(&ok,QFont("Arial",12),this,"Fonte do texto");
+  if(!ok)return;
+  auto shapes=vectorTextOutlines(message,selected,height,at);
+  const auto ids=view.editor.addContours(std::move(shapes),true,layers->currentData().toInt());
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  view.activate({ids.front(),0});
+  recoveryPolicy_.edited();
+  captureEvent("vector_text_created");
+  status->setText(QString("Texto convertido em %1 contornos; Ctrl+Z desfaz em uma acao.")
+     .arg(ids.size()));
+ }
  void openOther(){
   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
    projectPath,"Projetos de desenho (*.alaser *.lbrn2);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2)");
@@ -2200,9 +2319,21 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    return;
   }
   if(suffix!="lbrn2")throw std::runtime_error("Use .alaser ou .lbrn2");
-  // Parse COMPLETO antes de qualquer mutacao: qualquer Shape desconhecida
-  // cancela importacao inteira e preserva arquivo e desenho existentes.
-  const auto imported=lightburn::readGeometry(path);
+  // Mensagem visivel quando um arquivo LBRN2 real contem formas ausentes
+  // do importador. Nunca trocar o desenho atual numa importacao incompleta.
+  lightburn::ImportResult imported=lightburn::ImportResult(fromDocument(Document{}),0);
+  try{imported=lightburn::readGeometry(path);}
+  catch(const std::exception& error){
+   QMessageBox::warning(this,"LightBurn: importacao ainda nao compativel",
+      QString("Nao foi possivel abrir este arquivo .lbrn2 por inteiro.\n\n"
+       "Motivo tecnico: %1\n\n"
+       "O projeto aberto no Alencar Laser NAO foi alterado. "
+       "Nao sera feita uma importacao parcial sem sua autorizacao.\n\n"
+       "Para ampliar a compatibilidade, envie uma copia deste .lbrn2 para analise.")
+        .arg(QString::fromUtf8(error.what())));
+   status->setText("Importacao LBRN2 nao realizada: formato ainda incompatível");
+   return;
+  }
   const auto response=QMessageBox::question(this,"Importar LightBurn (somente desenhos)",
     QString("Foram reconhecidas %1 formas vetoriais.\n\n"
             "Substituir o desenho atual por uma COPIA editavel?\n"
@@ -2710,20 +2841,26 @@ static QJsonObject editTools197Test(const QString& directory){
  const int rectId=sv.editor.rectangle({145,90},18,18);
  sv.rebuild();sv.centerOn(QPointF(135,100));QApplication::processEvents();
  clickButton(shapes,"scissors");
+ // Evita aceitar eventos Qt atrasados do hover anterior.
+ // Confirma a coordenada solicitada e usa a viewport para entregar o evento
+ // quando QTest::mouseMove nao a atualizou. Nao chama o planner diretamente.
  auto pointHover=[&](QPointF p){
   const QPoint at=sv.mapFromScene(p);
   const uint64_t count=sv.scissorHoverEventCount();
   QTest::mouseMove(sv.viewport(),at);QApplication::processEvents();
-  if(sv.scissorHoverEventCount()==count){
+  if(!sv.scissorHoverReceivedAt(at)||sv.scissorHoverEventCount()==count){
    const QPointF local(at),global(sv.viewport()->mapToGlobal(at));
-   QMouseEvent move(QEvent::MouseMove,local,global,Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+   QMouseEvent move(QEvent::MouseMove,local,global,
+                    Qt::NoButton,Qt::NoButton,Qt::NoModifier);
    QApplication::sendEvent(sv.viewport(),&move);QApplication::processEvents();
   }
-  check(sv.scissorHoverEventCount()>count,"hover isolado nao recebido");
+  if(sv.scissorHoverEventCount()==count||!sv.scissorHoverReceivedAt(at))
+   throw std::runtime_error("MouseMove nao chegou ao contorno isolado: "+
+                            sv.scissorHoverDiagnostics(at));
  };
  pointHover({130,100});
  auto circleSpan=sv.scissorPreview();
- check(bool(circleSpan)&&circleSpan->preview.size()>=64,
+ check(bool(circleSpan)&&circleSpan->key.object==circleId&&circleSpan->preview.size()>=64,
        "Tesoura nao destacou circulo novo completo");
  const int beforeIsolated=int(sv.editor.state().doc.contours.size());
  clickScene(shapes,{130,100});
@@ -2731,8 +2868,11 @@ static QJsonObject editTools197Test(const QString& directory){
        sv.editor.state().objects.count(circleId)==0,"Circulo isolado nao excluido");
  pointHover({154,90});
  auto rectSpan=sv.scissorPreview();
- check(bool(rectSpan)&&rectSpan->preview.size()==5,
-       "Tesoura nao destacou retangulo novo completo");
+ if(!rectSpan||rectSpan->key.object!=rectId||rectSpan->preview.size()!=5){
+  shapes.grab().save(directory+"/FALHA_RETANGULO_TESOURA.png");
+  throw std::runtime_error("Tesoura nao destacou retangulo novo completo: "+
+                           sv.scissorHoverDiagnostics(sv.mapFromScene(QPointF(154,90))));
+ }
  clickScene(shapes,{154,90});
  check(sv.editor.state().doc.contours.empty()&&sv.editor.state().objects.count(rectId)==0,
        "Retangulo isolado nao excluido");
@@ -2780,6 +2920,60 @@ static QJsonObject recovery198Test(const QString& directory){
 }
 // TESTE_19.8 importacao: XMLs sinteticos representam formas garantidas.
 // Testes sem abrir dialogos, sem salvar ou conectar a maquina.
+static QJsonObject newDrawingTools198Test(const QString& directory){
+ // O mesmo vetorizador do botão Texto e exercitado sem dialogos.
+ const auto letters=vectorTextOutlines("LASER",QFont("Sans Serif",12),12.,{10,20});
+ check(!letters.empty(),"Fonte instalada nao gerou letra vetorial");
+ size_t letterNodes=0;for(const auto& contour:letters)letterNodes+=contour.size();
+ check(letterNodes>=12&&letterNodes<50000,"Texto vetorial inesperado");
+ Editor glyphs(Document{});
+ const auto allGlyphs=glyphs.addContours(letters,true,0);
+ check(allGlyphs.size()==letters.size()&&glyphs.undoCount()==1,
+       "Texto real nao entrou numa unica transacao");
+ check(glyphs.undo()&&glyphs.state().doc.contours.empty(),"Undo de fonte real falhou");
+ Editor editor(Document{});
+ const auto start=editor.undoCount();
+ const std::vector<std::vector<Pt>> outlines={
+  {{1,1},{4,1},{4,5},{1,5}},
+  {{8,1},{12,1},{12,5},{8,5}}
+ };
+ const auto ids=editor.addContours(outlines,true,0);
+ check(ids.size()==2&&editor.undoCount()==start+1,"texto nao gerou contornos atomicos");
+ const Document textDoc=editor.state().doc;
+ check(editor.undo()&&editor.state().doc.contours.empty(),"desfazer texto nao retirou todos os glifos");
+ check(editor.redo()&&sameDoc(textDoc,editor.state().doc),"refazer texto corrompeu contornos");
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ clickButton(w,"pencil");
+ check(w.view.tool==QtEditorLab::Tool::Pencil,"botao Lapis nao foi ativado");
+ auto& v=w.view;
+ const QPoint a=v.mapFromScene(QPointF(20,20));
+ const QPoint b=v.mapFromScene(QPointF(30,25));
+ const QPoint c=v.mapFromScene(QPointF(40,30));
+ QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,a);
+ QApplication::processEvents();
+ auto moved=[&](const QPoint& pt){
+  const QPointF local(pt),global(v.viewport()->mapToGlobal(pt));
+  QMouseEvent ev(QEvent::MouseMove,local,global,Qt::NoButton,Qt::LeftButton,Qt::NoModifier);
+  QApplication::sendEvent(v.viewport(),&ev);
+  QApplication::processEvents();
+ };
+ moved(b);moved(c);
+ QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,c);
+ QApplication::processEvents();
+ check(v.editor.state().doc.contours.size()==1,"Lapis nao gerou forma editavel");
+ check(v.editor.state().doc.contours.front().nodes.size()>=2,
+       "Lapis perdeu pontos do tracado");
+ check(!v.editor.state().doc.contours.front().closed,"Lapis gerou forma fechada por engano");
+ check(v.editor.undoCount()==1,"Lapis gerou multiplos passos de undo");
+ check(v.editor.undo()&&v.editor.state().doc.contours.empty(),
+       "Undo do Lapis nao voltou ao documento vazio");
+ clickButton(w,"text");
+ check(v.tool==QtEditorLab::Tool::Text,"botao Texto nao foi ativado");
+ w.grab().save(directory+"/TESTE_19_8_TEXTO_LAPIS.png");
+ return {{"status","PASS"},{"pencil_drawn",true},{"pencil_undo",true},
+         {"vector_text_atomic",true},{"vector_text_undo_redo",true},
+         {"text_tool_enabled",true},{"hardware_commands_sent",false}};
+}
 static QJsonObject lightburnImport198Test(const QString& directory){
  QTemporaryDir temp(QDir(directory).filePath("lbrn2_XXXXXX"));
  check(temp.isValid(),"nao criou pasta temporaria de importacao");
@@ -2862,6 +3056,12 @@ int main(int argc,char** argv){
   try{report=editTools197Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TESTE_19_7_GUI.json");if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }if(mode=="--drawing-tools-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=newDrawingTools198Test(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_TEXTO_LAPIS_19_8.json");if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
  }if(mode=="--lbrn2-import-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=lightburnImport198Test(out);}

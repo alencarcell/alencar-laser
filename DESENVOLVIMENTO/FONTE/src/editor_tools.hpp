@@ -93,6 +93,36 @@ public:
    s.doc.contours.push_back(std::move(c));s.objects[obj]={layerId,0};
   });return obj;
  }
+ // Insercao vetorial atomica: todas as letras/contornos contam como UMA acao
+ // de desfazer, sem criar historico para cada glifo separadamente.
+ std::vector<int> addContours(std::vector<std::vector<Pt>> contours,bool closed,int layerId=0){
+  if(contours.empty()||contours.size()>1000)throw std::runtime_error("contornos em lote fora do limite");
+  size_t nodes=0;
+  for(const auto& c:contours){
+   if(c.size()<(closed?3U:2U))throw std::runtime_error("contorno vazio no lote");
+   nodes+=c.size();if(nodes>50000)throw std::runtime_error("contornos em lote excedem 50 mil nos");
+  }
+  const int start=nextObjectId(current.doc);
+  if(start>INT32_MAX-int(contours.size()))throw std::runtime_error("IDs de objetos esgotados");
+  std::vector<int> ids;ids.reserve(contours.size());
+  change([&](EditorState& state){
+   auto li=state.layers.find(layerId);
+   if(li==state.layers.end()||!li->second.visible||li->second.locked)
+    throw std::runtime_error("camada de texto bloqueada ou invisivel");
+   int next=start;
+   for(const auto& polygon:contours){
+    Contour contour;contour.key={next,0};contour.closed=closed;
+    for(Pt point:polygon){
+     if(!std::isfinite(point.x)||!std::isfinite(point.y))
+      throw std::runtime_error("coordenada invalida");
+     contour.nodes.push_back({state.doc.nextId++,point});
+    }
+    state.doc.contours.push_back(std::move(contour));
+    state.objects[next]={layerId,0};
+    ids.push_back(next++);
+   }
+  });return ids;
+ }
  int line(Pt a,Pt b,int layer=0){if(dist(a,b)<1e-12)throw std::runtime_error("zero-length line");return addContour({a,b},false,layer);}
  int rectangle(Pt a,double w,double h,int layer=0){if(!std::isfinite(w)||!std::isfinite(h)||w<=0||h<=0)throw std::runtime_error("invalid rectangle");return addContour({a,{a.x+w,a.y},{a.x+w,a.y+h},{a.x,a.y+h}},true,layer);}
  int ellipse(Pt center,double rx,double ry,int steps=64,int layer=0){

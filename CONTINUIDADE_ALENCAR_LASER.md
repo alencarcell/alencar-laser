@@ -186,3 +186,36 @@ Registrar mudanças, testes e pendências.
 - A mudança anterior (commit `4604ea6`) passou o teste automatizado de cursor e remoção da prévia após sair do trecho. Ainda **não equivale à homologação com mouse físico**.
 - Warnings de `-Wmisleading-indentation` em `lightburn_reference_inspector.hpp` e `qt6_test6.cpp` e aviso de construtor `QDragEnterEvent` obsoleto não impediram a compilação; limpeza deve ser feita separadamente.
 - Próximo teste: `git pull --ff-only` e `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`. Este roda a suíte completa, incluindo importação geométrica `.lbrn2` em fixtures, e abre a candidata apenas se passar. Testar mouse físico em retângulo/círculo isolados, contornos cruzados e arraste de arquivos reais. Máquina desconectada; nenhuma homologação até então.
+
+## 27/10/2026 — nova branch Texto/Lapis/Logo/LBRN2
+- Nova branch isolada `feat/texto-lapis-importacao-logo-19-8`, derivada da candidata Tesoura `fix/scissors-continuous-span-19-8`. `main` intacta, sem merge e sem novo ZIP.
+- Usuário relatou no vídeo e mensagem: Tesoura melhorou mas falha em certas linhas; retângulos e círculos novos já cortam; arquivos .lbrn2 reconhecidos pela caixa de abertura mas não importados em alguns casos; logo pedida ausente; solicitou liberação das ferramentas Texto e Lápis.
+- Implementado Editor::addContours (transação única), Tool::Pencil com desenho livre/polilinha aberta, atalho P, Tool::Text com fonte, altura em mm e contornos vetoriais da fonte, atalho T. Interface possui dois novos ícones e testes Qt em `--drawing-tools-19-8-test`.
+- Tesoura com raio de hit-test de 9 px (antes 6 px) somente no modo recorte; lacunas topológicas permanecem, não prometer equivalência completa ao LightBurn.
+- Logo fornecida pelo usuário está disponível localmente como `logotipo_neon_alencar_laser.png`; código exibe a imagem oficial do caminho `C:\\ProjetoAlencarLaser\\DADOS\\LOGO\\logo_alencar_laser.png`, fallback textual se não instalada. Script `SCRIPTS/INSTALAR_LOGO_OFICIAL.ps1` copia de Downloads com backup e validação SHA-256. A imagem binária NÃO foi incluída no GitHub nesta atualização; necessita download e execução do script.
+- LBRN2 sem arquivo real anexado: quando parser rejeitar, agora exibe janela clara do motivo, sem alterar o documento; `SCRIPTS/ANALISAR_LBRN2.ps1` produz inventário de tipos de Shape sem dados de desenho; importador continua parcial.
+- Regressões novas em `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteFerramentas` e na suíte `-Abrir`. **Ainda não compiladas nem testadas no Windows desde essas mudanças**.
+- Especificação em `DESENVOLVIMENTO/ESPECIFICACOES/TOOLS_TEXTO_LAPIS_LOGO_LBRN2_19_8.md`. Antes de homologar, conferir visualmente texto vazado, desenho livre, recuperação e importação de .lbrn2 real. Máquina desconectada; emissão bloqueada.
+
+## 27/10/2026 — PASS Windows focado Texto/Lápis e logo instalada
+- Captura do VS Code enviada pelo usuário: CMake/Ninja compilou e vinculou `alencar_test7_qt6.exe` (2/2); teste `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteFerramentas` exibiu **"Texto/Lapis passaram nos testes sinteticos. Teste manual ainda necessario."**, retornando ao prompt sem erro.
+- Após falha inicial por ausência da imagem em Downloads, o usuário executou `SCRIPTS/INSTALAR_LOGO_OFICIAL.ps1` com a imagem disponível. Terminal confirmou **"Logo oficial instalada com SHA-256 conferido: C:\\ProjetoAlencarLaser\\DADOS\\LOGO\\logo_alencar_laser.png"** e pediu reabertura do aplicativo para atualizar cabeçalho.
+- Warnings de indentação enganosa e API depreciada `QDragEnterEvent` aparecem, sem bloquear compilação. Não considerar tais avisos erros fatais, mas programar limpeza.
+- Estado: **testes sintéticos Texto/Lápis PASS; logo instalada/com hash verificado. Ainda NÃO homologados com mouse físico/edição real, nem validado layout da logo, nem importador LBRN2 real.**
+- Próxima etapa no VS Code: `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`. Se os gates passarem, testar texto T (fonte e tamanho, vazados de letras), lápis P (arraste/undo), logo no cabeçalho, arraste/importação LBRN2 em cópia, mantendo laser desconectado.
+
+## 27/10/2026 — confirmação do teste focado Texto/Lápis e da instalação da logo
+- O usuário enviou captura do terminal VS Code, na branch `feat/texto-lapis-importacao-logo-19-8`.
+- A compilação Qt concluiu: `[2/2] Linking CXX executable alencar_test7_qt6.exe`, e o script `-SomenteFerramentas` terminou com `Texto/Lápis passaram nos testes sintéticos. Teste manual ainda necessário.` Voltou ao prompt sem erro.
+- O script `SCRIPTS/INSTALAR_LOGO_OFICIAL.ps1` confirmou `Logo oficial instalada com SHA-256 conferido: C:\\ProjetoAlencarLaser\\DADOS\\LOGO\\logo_alencar_laser.png`, seguido de orientação para reabrir o aplicativo. A imagem original já está no caminho definitivo: não pedir novamente download.
+- Permanecem avisos não fatais `-Wmisleading-indentation` e `QDragEnterEvent` obsoleto. Limpeza técnica separada, sem bloquear a rodada.
+- **Ainda pendente:** teste completo `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -Abrir`; depois validar manualmente no aplicativo a logo, Lápis, Texto, Tesoura em contornos finos, e a leitura/arraste de `.lbrn2` real. Suporte LBRN2 continua parcial e não homologado; textos convertidos para contornos não são editáveis como palavras.
+- `main` preservada; sem confirmação de funcionamento real do mouse, emissão laser bloqueada, não fazer merge antes de homologar.
+
+## 27/10/2026 — regressão GUI: falha de destaque em retângulo isolado
+- Captura Windows: execução completa `TESTAR_19_8_WINDOWS.ps1 -Abrir` compilou e passou todos os testes de núcleo (Bézier 54/0, GRBL, regras, Tesoura 19.7, Tesoura 19.8, recuperação e codec v5).
+- Parou no teste Qt `Regressao GUI das ferramentas`, com JSON `{"error":"Tesoura nao destacou retangulo novo completo","status":"FAIL"}`. Assim **não abriu a candidata**, e os testes subsequentes de importação LBRN2 e Texto/Lápis completos ainda estão pendentes.
+- Leitura do cenário em `qt/qt6_test6.cpp`: o próprio teste cria círculo e retângulo isolados e utiliza helper `pointHover`; este aceitava QUALQUER incremento de `scissorHoverEventCount()`, mesmo que fosse evento assíncrono da coordenada anterior. Este padrão já causara outras falhas de simulação na Qt Windows. Não há evidência de falha no cálculo de contornos isolados: os testes do núcleo passaram.
+- Commit `79da9cb`: helper passa a exigir `scissorHoverReceivedAt(at)` e despachar evento pela viewport quando QTest não entrega a coordenada pretendida; asserções exigem `ScissorSpan::key.object` do círculo e do retângulo, não apenas quantidade de pontos; falha grava `FALHA_RETANGULO_TESOURA.png` e informa `scissorHoverDiagnostics(at)` (hits/candidato/posição/preview).
+- **Ainda não compilado nem executado no Windows depois desse commit.** Executar primeiro `git pull --ff-only` e `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteTesoura`. Se passar, executar novamente com `-Abrir`. Se falhar, conferir o erro detalhado sem alterar geometria indiscriminadamente.
+- Branch `feat/texto-lapis-importacao-logo-19-8` preservada, `main` intacta e laser desconectado.
