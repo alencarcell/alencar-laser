@@ -39,6 +39,26 @@ int main(){
  assert(two.undo()&&two.state().doc.contours.size()==2);
  assert(two.state().objects.count(second)>0);
  assert(two.redo()&&two.state().doc.contours.size()==1);
+ // Explicit Alt+J joins coincident endpoints, including the common
+ // imported case in which both shapes use exactly the same endpoint.
+ Editor selected(Document{});
+ const int s1=selected.line({0,0},{10,0});
+ const int s2=selected.line({10,0},{20,0});
+ const auto previousUndo=selected.undoCount();
+ const int kept=selected.joinTwoOpenContours(s1,s2,0.5);
+ assert(kept==s1&&selected.state().doc.contours.size()==1);
+ assert(selected.state().doc.contours.front().nodes.size()==3);
+ assert(selected.undoCount()==previousUndo+1);
+ assert(selected.undo()&&selected.state().doc.contours.size()==2);
+ // Guard against joining shapes that are too far apart or on other layers.
+ Editor far(Document{});
+ const int f1=far.line({0,0},{10,0});
+ const int f2=far.line({20,0},{30,0});
+ const auto farHistory=far.undoCount();
+ bool farRejected=false;
+ try{(void)far.joinTwoOpenContours(f1,f2,0.5);}
+ catch(const std::runtime_error&){farRejected=true;}
+ assert(farRejected&&far.undoCount()==farHistory);
  // Single endpoint extends existing polyline. Multiple points survive.
  Editor extend(Document{});
  int line=extend.line({0,0},{10,0});
