@@ -3423,11 +3423,15 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    b->setChecked(int(i)==layers->currentData().toInt());
   }
   const int curveCount=curves?int(curves->committed().contours.size()):0;
+  const bool nativeSelected=view.nativeModeActive()&&view.nativeSelected().has_value();
   status->setText(QString("%1 contornos | %2 nós | %3 selecionados | curvas v5: %4 | %5 | %6")
-    .arg(view.editor.state().doc.contours.size()).arg(countNodes(view.editor.state().doc)).arg(view.selected.size())
+    .arg(view.editor.state().doc.contours.size()).arg(countNodes(view.editor.state().doc))
+    .arg(view.selected.size()+(nativeSelected?1u:0u))
     .arg(curveCount)
-    .arg(bezierToolActive_?"modo Bézier":"modo polilinha")
-    .arg(bezierToolActive_?"Ctrl+arraste move curva | Delete nó | Ctrl+Delete curva":"Arraste move formas | Esc selecionar | K tesoura | Ctrl+L camada")
+    .arg(view.nativeEditingMode()?"editar nos Bézier":(nativeSelected?"curva Bézier selecionada":(bezierToolActive_?"desenhar Bézier":"modo polilinha")))
+    .arg(view.nativeEditingMode()?"Arraste ancoras/alcas | Delete no | Ctrl+Delete curva":
+      (nativeSelected?"Arraste para mover | Delete curva | K tesoura | Ctrl+Z desfaz":
+      "Arraste move formas | Esc selecionar | K tesoura | Ctrl+L camada"))
     +QString(" | Desenho %1×%2 mm / mesa %3×%4 mm")
       .arg(workspaceCfg_.drawingWidth,0,'f',0).arg(workspaceCfg_.drawingHeight,0,'f',0)
       .arg(workspaceCfg_.machineWidth,0,'f',0).arg(workspaceCfg_.machineHeight,0,'f',0));
