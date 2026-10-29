@@ -201,6 +201,12 @@ try {
     }
     if ($SomenteInteracao) {
         Write-Host 'FOCO: texto direto na mesa, escala e rotacao por alcas.' -ForegroundColor Cyan
+        $textSource = Join-Path $fontes 'tests\text_alignment_19_8_standalone.cpp'
+        $textExecutable = Join-Path $build 'text_alignment_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $textSource -lboost_json -o $textExecutable
+        Checar-Saida 'Compilacao C++ do texto editavel e alinhamento'
+        & $textExecutable
+        Checar-Saida 'Teste C++ de texto e alinhamento'
         & $cmake --build $build --parallel 2 --target alencar_test7_qt6
         Checar-Saida 'Compilacao Qt de interacao'
         $app = Join-Path $build 'alencar_test7_qt6.exe'
