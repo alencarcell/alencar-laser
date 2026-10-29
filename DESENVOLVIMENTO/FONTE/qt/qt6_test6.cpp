@@ -2991,6 +2991,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    }
    status->setText("Selecione um texto editavel criado nesta versao.");
   });
+  auto* convertTextPaths=new QPushButton("Converter texto em caminhos (Ctrl+Shift+C)");
+  convertTextPaths->setObjectName("convert_text_paths_19_8");
+  convertTextPaths->setToolTip("Transforma texto editavel em contornos individuais. A fonte e a frase deixam de ser reeditaveis; Ctrl+Z desfaz.");
+  textLayout->addWidget(convertTextPaths);
+  connect(convertTextPaths,&QPushButton::clicked,this,[this]{run([this]{
+   if(inlineTextEntry_)finishInlineText(true);
+   for(int id:selection())if(view.editor.convertEditableTextToPaths(id)){
+    view.rebuild();recoveryPolicy_.edited();
+    status->setText("Texto convertido em caminhos individuais. Ctrl+Z restaura a edicao do texto.");
+    return;
+   }
+   status->setText("Selecione um texto editavel. As demais formas ja sao caminhos.");
+  });});
   auto* fontFamily=new QFontComboBox;
   fontFamily->setObjectName("text_font_windows");
   fontFamily->setToolTip("Fontes instaladas no Windows; fontes SHX ainda nao suportadas.");
@@ -3499,6 +3512,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     connect(sc,&QShortcut::activated,this,[this,fn]{run(fn);});
    };
   shortcut("Alt+J",[joinEndsAction]{joinEndsAction->trigger();});
+  shortcut("Ctrl+Shift+C",[convertTextPaths]{convertTextPaths->click();});
   shortcut("Ctrl+Z",[this]{if(view.shouldUseNativeHistory(false)){if(curves&&!curves->dragging())view.nativeHistory(false);}else view.history(false);});
   shortcut("Ctrl+Y",[this]{if(view.shouldUseNativeHistory(true)){if(curves&&!curves->dragging())view.nativeHistory(true);}else view.history(true);});
   shortcut("Ctrl+Shift+Z",[this]{if(view.shouldUseNativeHistory(true)){if(curves&&!curves->dragging())view.nativeHistory(true);}else view.history(true);});
