@@ -4616,11 +4616,16 @@ static QJsonObject editTools197Test(const QString& directory){
  }
  check(v.viewport()->cursor().shape()!=Qt::ArrowCursor,"cursor nao mudou sobre trecho valido");
  moveHover(clearPoint);
- if(v.scissorPreview()||v.viewport()->cursor().shape()!=Qt::ArrowCursor){
+ // A ferramenta continua SELECIONADA fora do desenho; isso nao significa
+ // que exista trecho cortavel. O destaque laranja precisa desaparecer.
+ // Preservar o cursor da Tesoura responde ao problema reportado no Windows.
+ if(v.scissorPreview()||v.viewport()->cursor().shape()==Qt::ArrowCursor){
   w.grab().save(directory+"/FALHA_SAIDA_TESOURA.png");
-  throw std::runtime_error("Tesoura permaneceu ativa fora do trecho: "+
+  throw std::runtime_error("Tesoura: destaque nao foi removido ou cursor da ferramenta sumiu: "+
                            v.scissorHoverDiagnostics(clearPoint));
  }
+ check(v.viewport()->toolTip().contains("sem intervalo seguro"),
+       "Tesoura fora de contorno nao informa que o corte esta indisponivel");
  const size_t old=v.editor.undoCount();
  clickScene(w,{110,100});
  check(v.editor.undoCount()==old+1,"scissor mouse click did not create history");
