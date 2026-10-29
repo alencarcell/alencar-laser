@@ -5441,6 +5441,20 @@ static QJsonObject editorMultitool198Test(const QString& directory){
  clickScene(w,{20,20});clickScene(w,{40,20});clickScene(w,{40,40});
  check(v.isPolylineActive()&&v.polylineVertexCount()==3,
        "Linha continua nao manteve os tres nos no mesmo gesto");
+ // Regressao do relato real: a roda deve funcionar com a linha ainda aberta.
+ const auto originalZoom=v.currentZoom();
+ const auto originalState=stateText(v.editor.state());
+ const QPoint wheelAt=v.mapFromScene(QPointF(38,37));
+ QWheelEvent duringLine(QPointF(wheelAt),QPointF(wheelAt),
+                        QPoint(0,0),QPoint(0,120),
+                        Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+ QApplication::sendEvent(v.viewport(),&duringLine);
+ QApplication::processEvents();
+ check(v.currentZoom()>originalZoom,
+       "Zoom por scroll foi bloqueado enquanto desenhava linha continua");
+ check(v.isPolylineActive()&&v.polylineVertexCount()==3&&
+       stateText(v.editor.state())==originalState,
+       "Zoom durante linha alterou nos canonicos ou concluiu o gesto");
  clickScene(w,{20,20});
  check(!v.isPolylineActive(),"Fechamento na origem nao finalizou a linha");
  const auto* closed=get(v.editor.state().doc,{v.lastCreated(),0});
@@ -5878,9 +5892,21 @@ static QJsonObject textFillAlign198Test(){
        "Criacao real de texto nao salvou registro editavel");
  const int liveRoot=ui.view.editor.state().editableTexts.begin()->first;
  const auto prior=ui.view.editor.undoCount();
- ui.editVectorTextObject(liveRoot);
- check(ui.inlineTextEntry_&&ui.inlineTextEntry_->text()=="PRIMEIRO",
-       "Reedicao nao recuperou frase original");
+ // No modo Texto, um clique no interior da palavra deve abrir o editor,
+ // sem criar outro objeto/texto fantasma na mesma posicao.
+ const auto members=ui.view.editor.state().editableTexts.at(liveRoot).members;
+ const auto textBox=boundsOf(ui.view.editor.state().doc,members);
+ const QPoint textClick=ui.view.mapFromScene(QPointF(
+   (textBox.first.x+textBox.second.x)*.5,
+   (textBox.first.y+textBox.second.y)*.5));
+ clickButton(ui,"text");
+ QTest::mouseClick(ui.view.viewport(),Qt::LeftButton,Qt::NoModifier,textClick);
+ QApplication::processEvents();
+ check(ui.inlineTextEntry_&&ui.inlineTextEntry_->text()=="PRIMEIRO"&&
+       ui.view.editor.state().editableTexts.size()==1,
+       "Clique direto no texto nao recuperou edicao original");
+ check(ui.view.editor.undoCount()==prior,
+       "Clique para reeditar criou objeto/Undo indevido");
  ui.inlineTextEntry_->setText("SEGUNDO");
  ui.finishInlineText(true);
  check(ui.view.editor.state().editableTexts.at(liveRoot).text=="SEGUNDO"&&
