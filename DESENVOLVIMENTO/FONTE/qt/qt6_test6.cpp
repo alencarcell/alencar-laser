@@ -225,6 +225,11 @@ class QtEditorLab final:public QGraphicsView{
  bool nativeContourPressing_=false;
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
  std::vector<Pt> pencilPoints_;
+ bool bezierDrawing_=false,bezierPressed_=false;
+ QPointF bezierDown_{};
+ std::vector<CurveNode> bezierNodes_;
+ QPointF bezierCursor_{};
+ QGraphicsPathItem* bezierPreview_=nullptr;
  bool polylineDrawing_=false;
  bool polylineStartedOnPress_=false;
  QPointF polylineDown_{};
@@ -320,6 +325,59 @@ class QtEditorLab final:public QGraphicsView{
                           4.0/std::max(0.001,currentZoom()));
   }
   polylinePreview_->setPath(path);
+ }
+ void redrawBezierDraft(){
+  if(!bezierPreview_||bezierNodes_.empty())return;
+  QPainterPath p;p.moveTo(toQt(bezierNodes_.front().anchor));
+  for(std::size_t i=1;i<bezierNodes_.size();++i){
+   const auto& prev=bezierNodes_[i-1];const auto& next=bezierNodes_[i];
+   if(dist(prev.handleOut,prev.anchor)>1e-8||
+      dist(next.handleIn,next.anchor)>1e-8)
+    p.cubicTo(toQt(prev.handleOut),toQt(next.handleIn),toQt(next.anchor));
+   else p.lineTo(toQt(next.anchor));
+  }
+  if(!bezierPressed_&&bezierNodes_.size()>0){
+   const auto& tail=bezierNodes_.back();
+   if(dist(tail.handleOut,tail.anchor)>1e-8)
+    p.cubicTo(toQt(tail.handleOut),bezierCursor_,bezierCursor_);
+   else p.lineTo(bezierCursor_);
+  }
+  if(bezierPressed_){
+   const auto& node=bezierNodes_.back();
+   if(dist(node.anchor,node.handleOut)>1e-8){
+    QPainterPath guides;
+    guides.moveTo(toQt(node.handleIn));
+    guides.lineTo(toQt(node.handleOut));
+    p.addPath(guides);
+   }
+  }
+  bezierPreview_->setPath(p);
+ }
+ void clearBezierDraft(){
+  bezierDrawing_=false;bezierPressed_=false;bezierNodes_.clear();
+  if(bezierPreview_){
+   scene_.removeItem(bezierPreview_);delete bezierPreview_;bezierPreview_=nullptr;
+  }
+ }
+ void finishBezierDraft(bool closed){
+  if(!bezierDrawing_)return;
+  auto points=std::move(bezierNodes_);
+  clearBezierDraft();
+  if(points.size()<(closed?3u:2u)||!nativeSession_)return;
+  try{
+   int obj=1;
+   for(const auto& [id,_]:editor.state().objects)obj=std::max(obj,id+1);
+   for(const auto& c:nativeSession_->committed().contours)
+    obj=std::max(obj,c.key.object+1);
+   const Key key=nativeSession_->addEditablePath(std::move(points),closed,obj);
+   createNativeItems();
+   ++toolCreates;
+   if(diagnosticEvent)diagnosticEvent("native_draw_lines_created",1);
+   if(stateChanged)stateChanged();
+   (void)key;
+  }catch(const std::exception& ex){
+   if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));
+  }
  }
  void clearMarquee(){
   marqueeActive_=false;
@@ -761,7 +819,7 @@ private:
  }
 
 public:
- enum class Tool{Select,Nodes,Scissors,Rectangle,Line,Ellipse,Polygon,Pencil,Text};
+ enum class Tool{Select,Nodes,Scissors,Rectangle,Line,Ellipse,Polygon,Pencil,Text,DrawBezier};
  Tool tool=Tool::Select;
  Editor editor;
  std::set<int> selected;
@@ -789,7 +847,7 @@ public:
  }
  std::function<int()> drawingLayer;
  int targetLayer()const{return drawingLayer?drawingLayer():0;}
- bool busy()const{return draggingNode_.has_value()||shapeDragging_||transformDragging_||strokeDrawing_||polylineDrawing_||marqueeActive_||nativePressing_||nativeContourPressing_;}
+ bool busy()const{return draggingNode_.has_value()||shapeDragging_||transformDragging_||strokeDrawing_||polylineDrawing_||bezierDrawing_||marqueeActive_||nativePressing_||nativeContourPressing_;}
  bool nativeMode()const{return nativeMode_;}
  bool hasNativeDocument()const{return nativeSession_&&!nativeSession_->committed().contours.empty();}
  std::optional<Key> nativeSelected()const{return nativeSession_?nativeSession_->selected():std::nullopt;}
@@ -973,7 +1031,7 @@ public:
  void invalidateSelectionCache(){picker_.invalidate();}
  void rebuild(){
   clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
-  clearPolyline();clearMarquee();scene_.clear();rasterOverlay_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
+  clearPolyline();clearBezierDraft();clearMarquee();scene_.clear();rasterOverlay_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   for(auto& c:editor.state().doc.contours){
     const auto meta=editor.state().objects.at(c.key.object);
     const auto layer=editor.state().layers.at(meta.layer);
@@ -1099,6 +1157,7 @@ public:
  }
  void setTool(Tool t){
   if(polylineDrawing_&&t!=Tool::Line)finishPolyline(false);
+  if(bezierDrawing_&&t!=Tool::DrawBezier)finishBezierDraft(false);
   if(!busy()){
    clearScissorHover();nativeMode_=false;tool=t;
    viewport()->setCursor(Qt::ArrowCursor);viewport()->update();
@@ -1118,6 +1177,7 @@ public:
   if(draggingNode_){endChunkPreview();draggingNode_.reset();viewport()->update();}
   if(strokeDrawing_){strokeDrawing_=false;pencilPoints_.clear();if(pendingPreview_){scene_.removeItem(pendingPreview_);delete pendingPreview_;pendingPreview_=nullptr;}viewport()->update();}
   if(polylineDrawing_)clearPolyline();
+  if(bezierDrawing_)clearBezierDraft();
   if(marqueeActive_)clearMarquee();
  }
  void history(bool redo){if(busy())return;if(redo?editor.redo():editor.undo()){
@@ -1257,6 +1317,10 @@ void mousePressEvent(QMouseEvent* e)override{
   if(polylineDrawing_)finishPolyline(false);
   e->accept();return;
  }
+ if(e->button()==Qt::RightButton&&tool==Tool::DrawBezier){
+  if(bezierDrawing_)finishBezierDraft(false);
+  e->accept();return;
+ }
  if(e->button()!=Qt::LeftButton){QGraphicsView::mousePressEvent(e);return;}
   if(nativeMode_){nativeMousePress(e);return;}
    if(tool==Tool::Select){
@@ -1333,6 +1397,30 @@ void mousePressEvent(QMouseEvent* e)override{
   }
   if(tool==Tool::Text){
    if(requestTextAt)requestTextAt(fromQt(mapToScene(e->position().toPoint())));
+   e->accept();return;
+  }
+  if(tool==Tool::DrawBezier){
+   if(!nativeSession_){if(toolWarning)toolWarning("Sessao de desenho Bézier indisponivel");e->accept();return;}
+   const QPointF at=mapToScene(e->position().toPoint());
+   const Pt anchor=fromQt(at);
+   if(bezierDrawing_&&bezierNodes_.size()>=3){
+    const auto firstPx=viewportTransform().map(toQt(bezierNodes_.front().anchor));
+    if(QLineF(firstPx,e->position()).length()<=10.){
+     finishBezierDraft(true);e->accept();return;
+    }
+   }
+   if(!bezierDrawing_){
+    bezierDrawing_=true;
+    QPen pen(QColor(54,192,237),1.5,Qt::DashLine);pen.setCosmetic(true);
+    bezierPreview_=scene_.addPath(QPainterPath(),pen);
+    bezierPreview_->setZValue(33);
+    bezierPreview_->setAcceptedMouseButtons(Qt::NoButton);
+   }
+   if(bezierNodes_.size()<20000){
+    bezierNodes_.push_back({0,anchor,anchor,anchor});
+    bezierPressed_=true;bezierDown_=e->position();
+    bezierCursor_=at;redrawBezierDraft();
+   }
    e->accept();return;
   }
   if(tool==Tool::Line){
@@ -1450,6 +1538,21 @@ void mouseMoveEvent(QMouseEvent* e)override{
    updateNodeMarkers(previousDisplay,nextDisplay);
    frameUpdates++;e->accept();return;
   }
+  if(bezierDrawing_&&tool==Tool::DrawBezier){
+   const QPointF point=mapToScene(e->position().toPoint());
+   bezierCursor_=point;
+   if(bezierPressed_&&!bezierNodes_.empty()){
+    // Mouse delta relative to anchor defines the outgoing tangent. The
+    // incoming tangent is its reflection. Click without drag => corner.
+    auto& node=bezierNodes_.back();
+    if(QLineF(bezierDown_,e->position()).length()>3.0){
+     const Pt offset=fromQt(point)-node.anchor;
+     node.handleOut=node.anchor+offset;
+     node.handleIn=node.anchor-offset;
+    }
+   }
+   redrawBezierDraft();++frameUpdates;e->accept();return;
+  }
   if(polylineDrawing_&&tool==Tool::Line){
    Pt at=snapPolyline(fromQt(mapToScene(e->position().toPoint())),
                       e->modifiers().testFlag(Qt::ShiftModifier));
@@ -1496,6 +1599,18 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   }
    if(transformDragging_){updateSelectionTransform(e->position(),e->modifiers());finishSelectionTransform();e->accept();return;}
    if(marqueeActive_){finishMarquee(e->position(),e->modifiers());e->accept();return;}
+  if(tool==Tool::DrawBezier&&bezierDrawing_){
+   if(bezierPressed_&&!bezierNodes_.empty()){
+    auto& node=bezierNodes_.back();
+    if(QLineF(bezierDown_,e->position()).length()>3.0){
+     const Pt delta=fromQt(mapToScene(e->position().toPoint()))-node.anchor;
+     node.handleOut=node.anchor+delta;
+     node.handleIn=node.anchor-delta;
+    }
+   }
+   bezierPressed_=false;
+   redrawBezierDraft();e->accept();return;
+  }
   if(tool==Tool::Line&&polylineDrawing_){
    // Mantem gesto legada: arrastar logo no primeiro segmento cria uma linha.
    if(polylineStartedOnPress_&&QLineF(polylineDown_,e->position()).length()>4.){
@@ -1674,6 +1789,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   }
    if(e->key()==Qt::Key_Escape){
     if(transformDragging_){cancelSelectionTransform();e->accept();return;}
+    if(bezierDrawing_){clearBezierDraft();e->accept();return;}
     if(polylineDrawing_){clearPolyline();e->accept();return;}
    if(marqueeActive_){clearMarquee();e->accept();return;}
    if(!busy()){if(requestSelectTool)requestSelectTool();e->accept();return;}
@@ -2332,11 +2448,21 @@ public:
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
      captureEvent("tool_scissors_activated");
      status->setText("Tesoura: passe o mouse sobre um trecho; destaque laranja = corte completo. Ctrl+Z desfaz.");});
-  compact(editorGrid,4,0,"new_bezier","⌁ Nova curva","Cria Bézier cúbica editável; não converte nem altera polilinhas existentes",
-     [this]{createNativeBezier();});
+  compact(editorGrid,4,0,"new_bezier","⌁ Desenhar curva",
+    "Clique cria reta; clique e arraste cria alcas Bézier. Direito termina; origem fecha; Esc cancela.",
+     [this]{
+       if(!curves){
+        curves=std::make_unique<CurveDragSession>(CurveDocument{});
+        view.attachNative(curves.get());
+       }
+       view.enableNative(false);view.setTool(QtEditorLab::Tool::DrawBezier);
+       bezierToolActive_=true;
+       status->setText("Desenhar Bézier: clique = canto/reta; clique+arraste = curva; direito conclui; Esc cancela.");
+       captureEvent("tool_draw_bezier_activated");
+     });
   tools->addSpacing(5); // Ferramentas de desenho
   auto* shapeGrid=newGrid();
-  compact(shapeGrid,0,0,"line","╱ Linha contínua","Clique cria nós, clique na origem fecha, botão direito termina, Esc cancela, Shift restringe a 45 graus",
+  compact(shapeGrid,0,0,"line","╱ Desenhar linhas","Clique cria retas; atração magnética a pontas abertas (10 px); unir caminhos; Ctrl sem snap; direito termina; Esc cancela.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Line);});
   compact(shapeGrid,1,0,"rectangle","▭ Retâng.","Desenhar retângulo",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Rectangle);});
