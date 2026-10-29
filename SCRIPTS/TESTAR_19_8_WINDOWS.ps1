@@ -118,6 +118,8 @@ try {
         New-Item -ItemType Directory -Path $destino -Force | Out-Null
         & $app --draw-join-19-8-test $fixture $destino
         Checar-ResultadoQt 'Desenhar Bezier e unir extremidades' (Join-Path $destino 'RESULTADO_DESENHO_UNIAO_19_8.json')
+        & $app --text-format-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Painel de fontes e formatacao de texto' (Join-Path $destino 'RESULTADO_FORMATACAO_TEXTO_19_8.json')
         Write-Host 'DESENHO C++ + Qt PASS sintetico; teste manual do mouse ainda necessario.' -ForegroundColor Green
         return
     }
@@ -205,6 +207,8 @@ try {
         New-Item -ItemType Directory -Path $destino -Force | Out-Null
         & $app --inline-transforms-19-8-test $fixture $destino
         Checar-ResultadoQt 'Texto e transformacoes' (Join-Path $destino 'RESULTADO_TEXTO_TRANSFORMACOES_19_8.json')
+        & $app --text-format-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Painel de formatacao de texto' (Join-Path $destino 'RESULTADO_FORMATACAO_TEXTO_19_8.json')
         Write-Host 'Texto/alcas PASS automatico; mouse fisico ainda obrigatorio.' -ForegroundColor Green
         return
     }
@@ -330,6 +334,8 @@ try {
     New-Item -ItemType Directory -Path $dirDrawing -Force | Out-Null
     & $app --draw-join-19-8-test $fixture $dirDrawing
     Checar-ResultadoQt 'Desenho por arraste e Auto-Join 19.8' (Join-Path $dirDrawing 'RESULTADO_DESENHO_UNIAO_19_8.json')
+    & $app --text-format-19-8-test $fixture $dirDrawing
+    Checar-ResultadoQt 'Formatacao de texto Windows 19.8' (Join-Path $dirDrawing 'RESULTADO_FORMATACAO_TEXTO_19_8.json')
     & $app --simulation-motion-19-8-test $fixture $dirSim
     Checar-ResultadoQt 'Simulacao cinemática 19.8' (Join-Path $dirSim 'RESULTADO_PREVIA_MOVIMENTO_19_8.json')
     & $app --simulation-raster-19-8-test $fixture $dirSim
