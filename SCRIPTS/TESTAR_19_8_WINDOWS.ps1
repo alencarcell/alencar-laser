@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas)
+param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -60,6 +60,19 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteEdicao) {
+        Write-Host 'TESTE FOCADO: linha continua, selecao por area e atalhos de edicao.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt de edicao'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\editor_multiferramentas'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --editor-multitool-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Editor multiferramentas' (Join-Path $destino 'RESULTADO_EDITOR_MULTIFERRAMENTAS_19_8.json')
+        Write-Host 'Editor: teste focado PASS. Validacao integral e mouse real ainda obrigatorios.' -ForegroundColor Green
+        return
+    }
     if ($SomenteFerramentas) {
         Write-Host 'TESTE FOCADO: Texto vetorial e Lapis experimental.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test7_qt6
@@ -144,6 +157,10 @@ try {
     New-Item -ItemType Directory -Path $dirDesenho -Force | Out-Null
     & $app --drawing-tools-19-8-test $fixture $dirDesenho
     Checar-ResultadoQt 'Texto e Lapis Qt' (Join-Path $dirDesenho 'RESULTADO_TEXTO_LAPIS_19_8.json')
+    $dirEditor = Join-Path $destino 'editor_multiferramentas'
+    New-Item -ItemType Directory -Path $dirEditor -Force | Out-Null
+    & $app --editor-multitool-19-8-test $fixture $dirEditor
+    Checar-ResultadoQt 'Editor: linha continua e selecao por area' (Join-Path $dirEditor 'RESULTADO_EDITOR_MULTIFERRAMENTAS_19_8.json')
 
     Write-Host 'BUILD E REGRESSOES AUTOMATIZADAS PASSARAM. AVALIACAO VISUAL AINDA NECESSARIA.' -ForegroundColor Green
     if ($Abrir) {
