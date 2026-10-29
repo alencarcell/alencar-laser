@@ -5949,6 +5949,32 @@ static QJsonObject textFillAlign198Test(){
        "Clique direto no texto nao recuperou edicao original");
  check(ui.view.editor.undoCount()==prior,
        "Clique para reeditar criou objeto/Undo indevido");
+ check(ui.view.textEditingMemberHidden(liveRoot)&&
+       !ui.view.pathItem({liveRoot,0})->isVisible(),
+       "Contorno antigo permaneceu visivel durante reedicao");
+ const auto anchoredOverlay=[&](){
+  const QPoint anchor=ui.view.mapFromScene(toQt(ui.inlineTextAnchor_));
+  const auto* field=ui.inlineTextEntry_;
+  const int offset=ui.inlineTextAlign_==Qt::AlignHCenter?field->width()/2:
+                   (ui.inlineTextAlign_==Qt::AlignRight?field->width():0);
+  return QPoint(anchor.x()-offset,anchor.y());
+ };
+ check(ui.inlineTextEntry_->pos()==anchoredOverlay(),
+       "Campo de texto nao inicia na ancora da cena");
+ // Zoom e barra de rolagem devem mover a sobreposicao com a mesa,
+ // sem alterar a ancora ou duplicar o texto original.
+ const auto originalTextAnchor=ui.inlineTextAnchor_;
+ ui.view.scale(1.5,1.5);ui.view.reportZoom();
+ QApplication::processEvents();
+ check(ui.inlineTextEntry_->pos()==anchoredOverlay()&&
+       ui.inlineTextAnchor_.x==originalTextAnchor.x&&
+       ui.inlineTextAnchor_.y==originalTextAnchor.y&&
+       ui.view.textEditingMemberHidden(liveRoot),
+       "Zoom deslocou campo de texto de sua ancora ou mostrou contorno antigo");
+ ui.view.horizontalScrollBar()->setValue(ui.view.horizontalScrollBar()->value()+12);
+ QApplication::processEvents();
+ check(ui.inlineTextEntry_->pos()==anchoredOverlay(),
+       "Rolagem separou o campo de texto do objeto editado");
  ui.inlineTextEntry_->setText("SEGUNDO");
  ui.finishInlineText(true);
  check(ui.view.editor.state().editableTexts.at(liveRoot).text=="SEGUNDO"&&
