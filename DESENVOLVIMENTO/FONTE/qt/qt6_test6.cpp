@@ -4100,8 +4100,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     opts.minPixels=minPixels->value();opts.optimizePx=optimize->value();
     opts.smooth=smooth->isChecked();opts.widthMm=width->value();
     prepared=trace198::trace(view.rasterImage(),opts);
+    // Nao perder o zoom escolhido quando o usuario muda limiar/otimizacao.
     preview->showResult(prepared->binary,opts.widthMm,prepared->contours);
-    preview->resetView();
     size_t nodes=0;
     for(const auto& path:prepared->contours)nodes+=path.size();
     information->setText(QString("%1 contornos, %2 nós; %3 pequenos componentes removidos. Revisar texto pequeno.")
@@ -4116,6 +4116,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   connect(actions,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
   // Prévia Otsu em preto/branco ao abrir. Nenhuma conversao gravada.
   previewButton->click();
+  QTimer::singleShot(0,preview,&TracePreviewCanvas198::resetView);
   if(dlg.exec()!=QDialog::Accepted||!prepared){captureEvent("image_trace_cancelled");return;}
   const QRectF anchor=view.rasterBounds();
   auto contours=std::move(prepared->contours);
