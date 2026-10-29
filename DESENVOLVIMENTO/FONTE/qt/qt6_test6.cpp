@@ -5475,6 +5475,18 @@ static QJsonObject drawAndJoin198Test(){
  clickButton(ui,"undo");
  check(ui.view.nativeItemCount()==1,
        "Desfazer Tesoura nao restaurou um unico contorno Bézier");
+ clickButton(ui,"select");
+ const QPoint hitAgain=ui.view.mapFromScene(
+     ui.view.nativeItemPath(nativeKey).pointAtPercent(.25));
+ QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,hitAgain);
+ check(ui.view.nativeSelectionMode()&&ui.view.nativeSelected(),
+       "Selecao apos Tesoura/Undo nao reencontrou a curva");
+ clickButton(ui,"delete_shapes");
+ check(ui.view.nativeItemCount()==0,
+       "Botao Excluir formas nao removeu curva Bézier selecionada");
+ clickButton(ui,"undo");
+ check(ui.view.nativeItemCount()==1,
+       "Desfazer exclusao nao restaurou QGraphicsPathItem Bézier");
  ui.close();
  LabWindow lineUi(Document{});
  lineUi.show();QApplication::processEvents();
@@ -5500,7 +5512,8 @@ static QJsonObject drawAndJoin198Test(){
   {"snap_endpoint",true},{"bezier_native_handles",true},
   {"bezier_viewport_drag",true},{"bezier_select_after_finish",true},
   {"bezier_undo_redo_no_ghosts",true},{"bezier_scissor_split",true},
-  {"bezier_edit_handles_accessible",true},{"line_viewport_auto_join",true},
+  {"bezier_edit_handles_accessible",true},{"bezier_delete_and_restore",true},
+  {"line_viewport_auto_join",true},
   {"undo_redo",true},{"hardware_commands_sent",false}};
 }
 
