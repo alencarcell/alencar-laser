@@ -14,6 +14,8 @@ A barra Text Options usa fontes instaladas no sistema operacional, altura, HSpac
 
 ## Implementação dessa rodada
 
+**Alinhamento:** Esquerda / Centro / Direita, calculado na geometria vetorial em relação ao ponto de inserção na mesa.
+
 - `qt/qt6_test6.cpp`: nova aba **Texto** no inspetor direito, acessada automaticamente quando a ferramenta `T Texto` é ativada.
 - `QFontComboBox` lista as fontes instaladas no sistema (via Qt/Windows, **sem baixar fontes**).
 - Altura em milímetros entre 1 e 150; caixas de **Negrito** e **Itálico**; alinhamento horizontal **Esquerda/Centro/Direita**; espaçamento relativo de caracteres entre 60% e 200% (100% = padrão).
