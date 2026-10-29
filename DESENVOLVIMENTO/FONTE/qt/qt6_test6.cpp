@@ -5827,7 +5827,7 @@ static QJsonObject textFillAlign198Test(){
  }
  check(found,"Compositor Fill por camada nao foi criado");
  ui.close();
- PreviewCanvas198 camera;
+ sim198::PreviewCanvas198 camera;
  camera.resize(320,220);camera.show();
  QImage picture(740,440,QImage::Format_ARGB32);picture.fill(Qt::black);
  camera.showImage(picture);camera.resetView();
