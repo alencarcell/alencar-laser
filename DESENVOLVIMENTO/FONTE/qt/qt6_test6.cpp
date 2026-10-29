@@ -3888,6 +3888,27 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   inlineTextEntry_->selectAll();
   status->setText("Editando texto original. Enter confirma; Esc cancela.");
  }
+ // O campo e um QWidget no viewport, mas sua origem e em mm da cena.
+ // Sempre recalcular sua posicao a partir da transformacao atual (zoom,
+ // scroll, resize), sem clamp artificial que o deslocaria do desenho.
+ void updateInlineTextOverlay(){
+  QLineEdit* field=inlineTextEntry_;
+  if(!field)return;
+  const double zoom=std::max(.001,view.currentZoom());
+  QFont font=inlineTextFont_;
+  font.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
+  font.setPixelSize(int(std::clamp(inlineTextHeightMm_*zoom,12.,360.)));
+  field->setFont(font);
+  field->setAlignment(inlineTextAlign_);
+  const QString sample=field->text().isEmpty()?QStringLiteral("Digite texto..."):field->text();
+  const int estimated=QFontMetrics(font).horizontalAdvance(sample);
+  const int maxWidth=std::max(160,view.viewport()->width()*3);
+  const int width=std::clamp(estimated+40,80,maxWidth);
+  const QPoint anchor=view.mapFromScene(toQt(inlineTextAnchor_));
+  const int offset=inlineTextAlign_==Qt::AlignHCenter?width/2:
+                   (inlineTextAlign_==Qt::AlignRight?width:0);
+  field->setGeometry(anchor.x()-offset,anchor.y(),width,font.pixelSize()+12);
+ }
  void insertVectorText(Pt at,bool editingExisting=false){
   if(inlineTextEntry_)finishInlineText(true);
   if(view.busy()||layers->currentIndex()<0)return;
@@ -3900,29 +3921,18 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* field=new QLineEdit(view.viewport());
   inlineTextEntry_=field;field->setObjectName("inlineTextEdit");
   field->setMaxLength(100);field->setPlaceholderText("Digite texto...");
-  const int px=int(std::clamp(inlineTextHeightMm_*view.currentZoom(),12.,82.));
-  QFont font=inlineTextFont_;
-  font.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
-  font.setPixelSize(px);field->setFont(font);
-  field->setAlignment(inlineTextAlign_);
   field->setFrame(false);
   field->setStyleSheet("QLineEdit#inlineTextEdit { background:transparent; border:none;"
      " color:#FFAA54; padding:0; selection-background-color:#996031; }");
-  QPoint point=view.mapFromScene(QPointF(at.x,at.y));
-  point.setX(std::clamp(point.x(),0,std::max(0,view.viewport()->width()-80)));
-  point.setY(std::clamp(point.y(),0,std::max(0,view.viewport()->height()-px-12)));
-   field->move(point);field->resize(100,px+12);
-   connect(field,&QLineEdit::textChanged,this,[this,field](const QString& text){
-    if(field!=inlineTextEntry_)return;
-    const int textPixels=QFontMetrics(field->font()).horizontalAdvance(text);
-    const int available=std::max(80,view.viewport()->width()-field->x()-8);
-    field->setFixedWidth(std::clamp(textPixels+44,80,available));
-   });
-   for(QShortcut* shortcut:editingShortcuts_)shortcut->setEnabled(false);
-   field->installEventFilter(this);
+  connect(field,&QLineEdit::textChanged,this,[this,field](const QString&){
+   if(field==inlineTextEntry_)updateInlineTextOverlay();
+  });
+  updateInlineTextOverlay();
+  for(QShortcut* shortcut:editingShortcuts_)shortcut->setEnabled(false);
+  field->installEventFilter(this);
   connect(field,&QLineEdit::returnPressed,this,[this]{finishInlineText(true);});
   field->show();field->raise();field->setFocus(Qt::MouseFocusReason);
-   status->setText("Texto direto: digite no desenho; Enter/Esc conclui; trocar ferramenta cancela campo vazio.");
+  status->setText("Texto: Enter confirma; Esc cancela sem alterar o desenho.");
  }
 
  void createNativeBezier(){
