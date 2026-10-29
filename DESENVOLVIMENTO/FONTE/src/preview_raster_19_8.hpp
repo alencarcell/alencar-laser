@@ -120,12 +120,18 @@ inline void appendMask(Plan& out,const Mask& mask,const Bounds& box,
     !std::isfinite(box.height)||box.width<=0||box.height<=0||
     box.width>10000||box.height>10000)
   throw std::runtime_error("Dimensoes da imagem virtual invalidas");
- const int rows=std::max(1,int(std::ceil(box.height/settings.intervalMm)));
+ // Keep the user-requested physical line interval. The previous version
+ // redistributed a ceil() number of rows over the image height, changing
+ // the selected pitch and therefore its nominal time and raster density.
+ // For an image thinner than half the spacing, show a single centered row.
+ const double pitch=settings.intervalMm;
+ const int rows=std::max(1,int(std::ceil(box.height/pitch-0.5)));
  if(rows>1500)throw std::runtime_error("Imagem ultrapassa 1500 linhas virtuais");
  const double px=box.width/double(mask.width);
  for(int row=0;row<rows;++row){
-  const double y=box.y+box.height*(row+0.5)/rows;
-  const int sy=std::min(mask.height-1,int(mask.height*(row+0.5)/rows));
+  const double localY=box.height<pitch*0.5?box.height*0.5:(row+0.5)*pitch;
+  const double y=box.y+localY;
+  const int sy=std::clamp(int(mask.height*(localY/box.height)),0,mask.height-1);
   std::vector<std::pair<double,double>> spans;
   for(int col=0;col<mask.width;){
    if(!mask.black[std::size_t(sy)*mask.width+col]){++col;continue;}
