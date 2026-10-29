@@ -61,6 +61,7 @@ public:
   setResizeAnchor(QGraphicsView::AnchorViewCenter);
   setFrameShape(QFrame::NoFrame);
  }
+ ~PreviewCanvas198()override{setScene(nullptr);}
  void showImage(const QImage& image){
   picture_->setPixmap(QPixmap::fromImage(image));
   scene_.setSceneRect(picture_->boundingRect());
