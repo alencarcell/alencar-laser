@@ -2442,11 +2442,11 @@ public:
   add(quickRow,"save_as","Salvar como...",[this]{saveAs();});
   quickRow->addSpacing(12);
   add(quickRow,"undo","↶ Desfazer",[this]{
-   if(bezierToolActive_&&curves){if(curves->dragging())return;view.nativeHistory(false);status->setText("Bézier: desfeito");}
+   if(view.shouldUseNativeHistory(false)){if(curves&&curves->dragging())return;view.nativeHistory(false);status->setText("Bézier: desfeito");}
    else view.history(false);
   });
   add(quickRow,"redo","↷ Refazer",[this]{
-   if(bezierToolActive_&&curves){if(curves->dragging())return;view.nativeHistory(true);status->setText("Bézier: refeito");}
+   if(view.shouldUseNativeHistory(true)){if(curves&&curves->dragging())return;view.nativeHistory(true);status->setText("Bézier: refeito");}
    else view.history(true);
   });
   add(quickRow,"preview_virtual","Prévia virtual",[this]{
@@ -3213,16 +3213,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     connect(sc,&QShortcut::activated,this,[this,fn]{run(fn);});
    };
   shortcut("Alt+J",[joinEndsAction]{joinEndsAction->trigger();});
-  shortcut("Ctrl+Z",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(false);}else view.history(false);});
-  shortcut("Ctrl+Y",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(true);}else view.history(true);});
-  shortcut("Ctrl+Shift+Z",[this]{if(bezierToolActive_&&curves){if(!curves->dragging())view.nativeHistory(true);}else view.history(true);});
+  shortcut("Ctrl+Z",[this]{if(view.shouldUseNativeHistory(false)){if(curves&&!curves->dragging())view.nativeHistory(false);}else view.history(false);});
+  shortcut("Ctrl+Y",[this]{if(view.shouldUseNativeHistory(true)){if(curves&&!curves->dragging())view.nativeHistory(true);}else view.history(true);});
+  shortcut("Ctrl+Shift+Z",[this]{if(view.shouldUseNativeHistory(true)){if(curves&&!curves->dragging())view.nativeHistory(true);}else view.history(true);});
   shortcut("Ctrl+S",[this]{save();});shortcut("Ctrl+O",[this]{open();});
   shortcut("Ctrl+Shift+S",[this]{saveAs();});shortcut("Ctrl+Shift+O",[this]{openOther();});
   shortcut("Delete",[this]{
-   if(bezierToolActive_)view.nativeDeleteSelected();
+   if(view.nativeEditingMode())view.nativeDeleteSelected();
+   else if(view.nativeSelectionMode())view.nativeDeleteContour();
    else if(view.tool==QtEditorLab::Tool::Select)view.deleteSelectedShapes();
   });
-  shortcut("Ctrl+Delete",[this]{if(bezierToolActive_)view.nativeDeleteContour();});
+  shortcut("Ctrl+Delete",[this]{
+   if(view.nativeModeActive())view.nativeDeleteContour();
+  });
   view.requestSelectTool=[this]{if(buttons.count("select"))buttons.at("select")->click();};
   view.requestToolChange=[this](QtEditorLab::Tool t){
    QString id;
