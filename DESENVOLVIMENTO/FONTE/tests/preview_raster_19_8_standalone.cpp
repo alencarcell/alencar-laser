@@ -49,6 +49,25 @@ int main(){
  sim198::Plan oneWay;
  sim198::raster::appendMask(oneWay,mask,{0,0,40,20},cfg);
  assert(std::abs(oneWay.cutMm-30.)<1e-8);
+ // Image height that is not a multiple of the interval must NOT compress
+ // the requested pitch (old implementation used 21/3=7 mm for 10 mm).
+ cfg.bidirectional=true;
+ sim198::raster::Mask allBlack{4,2,{1,1,1,1,1,1,1,1}};
+ sim198::Plan fixedPitch;
+ sim198::raster::appendMask(fixedPitch,allBlack,{0,0,40,21},cfg);
+ std::vector<double> imageRows;
+ for(const auto& move:fixedPitch.moves)
+  if(move.laser)imageRows.push_back(move.from.y);
+ assert(imageRows.size()==2);
+ assert(std::abs(imageRows[0]-5.)<1e-8&&
+        std::abs(imageRows[1]-15.)<1e-8);
+ sim198::Plan tiny;
+ sim198::raster::appendMask(tiny,allBlack,{0,0,40,4},cfg);
+ int tinyOn=0;
+ for(const auto& move:tiny.moves)if(move.laser){
+  ++tinyOn;assert(std::abs(move.from.y-2.)<1e-8);
+ }
+ assert(tinyOn==1);
  bool rejected=false;
  try{
   sim198::raster::Mask invalid{4,2,{1,0}};
