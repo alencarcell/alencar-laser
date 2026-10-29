@@ -439,3 +439,9 @@ Registrar mudanças, testes e pendências.
 - Documento: `DESENVOLVIMENTO/ESPECIFICACOES/HOTFIX_TESTE_RASTER_INTERVALO_19_8_20261029.md`.
 - **Status:** hotfix enviado ao GitHub; **ainda sem execução nem PASS no Windows após esses commits**. O PASS cinemático anterior continua comprovado; raster/Qt novos devem ser testados. `main`, `APLICATIVO` e comandos físicos preservados.
 - Comando quando usuário estiver no computador: `git status --short`; `git pull --ff-only origin feat/refino-curvas-rastreio-diagnosticos-19-8` se seguro; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteSimulacao`. Preservar `.vscode/` e código local. Se houver outra falha, investigar primeira mensagem de erro e `RELATORIOS/COMPILACAO/BUILD_GITHUB_19_8.txt`, sem tratar todos os futuros erros como raster.
+
+### Complemento — gate rápido para a falha do raster observada no Windows
+
+- Novo `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteRaster`: compila o teste C++ do raster com G++ diretamente, antes do CMake/Qt; permite verificar o hotfix sem repetir o build inteiro. Não envia comandos ao laser.
+- Revisão estática posterior ao hotfix confirmou **5 mm** nas fixtures que devem passar, **10 mm apenas no teste explícito de rejeição**, e mesmo ajuste no teste Qt; `src/preview_raster_19_8.hpp` mantém intervalo admissível `0,05–5 mm`.
+- **Ainda falta executar os testes no Windows após o hotfix.** Primeiro `-SomenteRaster`; se PASS, `-SomenteSimulacao`. Preservar a base local e a pasta `.vscode/`.
