@@ -64,3 +64,32 @@ Referência oficial:
 - https://docs.lightburnsoftware.com/latest/Reference/ConvertToPath/ — converter em caminho cria vetores editáveis, perdendo propriedade de texto.
 
 Implementar em fase posterior: (1) texto permanece tipo de objeto editável com frase, fonte, espaçamento, ancoragem e curvatura no metadata; (2) alça azul visível apenas na seleção de texto, drag gera preview em arco com centro/raio e limites seguros; (3) opção **Deformar letras** separada de **Manter letras sem deformação**; (4) double-click na alça desfaz curvatura, Ctrl+Z/Y reverte em uma transação; (5) salvar/reabrir .alaser v5 sem perder texto ou raio; (6) opção Aplicar texto a caminho com contorno vetorial escolhido; (7) **Converter em caminhos** congela a geometria atualmente curva e remove origem textual, com um Undo reversível. Testar pontuação, espaço, caracteres acentuados, várias fontes e colisões/hole Fill. Interface totalmente PT-BR. Não criar alça interativa sem pipeline completo de geometria e persistência.
+
+
+## Rodada 29/10 — Tesoura recursiva, prévia 10x e traçado ampliável
+
+**Arquivos apresentados:** seis capturas Windows, Alencar_Laser_Previa_19_8(1).json, Alencar_Laser_Diagnostico_TESTE_19_7(6).json, e formas trabalhadas pra ser examinadas(1).alaser. O arquivo real e os screenshots não são incorporados no GitHub.
+
+### Evidência direta
+- Diagnóstico da versão TESTE_19.8: 51 eventos; scissor_continuous_span_removed=3, scissor_no_safe_span=3; 575 eventos de hover; 3 tentativas com `result=ambiguous` no objeto 575. `paint_p95=54,631 ms`, `paint_max=351,6113 ms`, `input_to_paint_p95=49,8736 ms`, RSS 112.791.552 bytes. Houve image_trace_created com 28 objetos.
+- Simulação JSON: 8.345 grupos de movimento; 3.062,098 mm de percurso laser, 2.990,869 mm de deslocamento; 86,878 s nominal e 365,462 s no modelo simplificado de aceleração, sem correspondência com fabricação real, `machine_commands_sent=false`.
+- Arquivo salvo v5: 576 polilinhas, 13.419 nós, zero Bézier no estado final, sem bitmap persistente. O objeto 575 é caminho aberto com quatro nós, formando triângulo com ponta excedente: (36.42090666666665,171.17826133333327), (36.42090666666666,234.15374697766455), (85.90379017754454,234.15374697766455), (36.42090666666665,184.67086346678667).
+
+### Causa geométrica do objeto 575
+- Seu último vértice toca o INTERIOR da primeira aresta: interseção T formada pela extremidade ABERTA da própria polilinha. O planner tratava indiscriminadamente interseção em extremidade como tangência insegura; por isso não destacava corretamente o primeiro excesso e o resto em determinados estados.
+- Regra experimental: quando SOMENTE primeira/última ponta de caminho aberto toca interior de aresta não adjacente do mesmo contorno, classificar como fronteira real da Tesoura (sem permitir transição em vértices INTERIORES ambíguos).
+- Após remover a ponta, o restante fecha geometricamente pelo nó repetido; o planner já suporta fechamento lógico conservador sem alterar metadata salvo até o clique. Teste exato de dois recortes, Undo/Undo e caso de interseção interior insegura adicionado. Ainda não há PASS Windows desta nova regra.
+- Outra regressão: extremo de caminho aberto que coincide com a antiga linha de corte não deve bloquear exclusão total do restante quando os demais encontros são apenas terminais. Recusas interiores/colineares continuam bloqueadas.
+- Cursor da Tesoura fica ativo visualmente mesmo sem intervalo seguro, com tooltip; marcação laranja apenas para intervalo realmente seguro.
+
+### Prévia virtual
+- A classe PreviewCanvas198 ganhou itens vetoriais QGraphicsPathItem independentes para corte e deslocamentos, usando cache incremental dos movimentos completados; não amplia mais um QImage fixo de 740x440 no fluxo normal. Toggle de viagens inicia desmarcado para visual mais limpo; usuário pode reativar. A estimativa, trajetória simulada e controle físico não foram alterados. Ainda é prévia SIMPLIFICADA e não equivalente a GRBL/LightBurn.
+- A cena Qt deve mostrar linhas antialias a qualquer zoom, mas a fluidez e fidelidade requerem testes Windows com plano 8.345 movimentos. Existe teste Qt mínimo da modalidade vetorial.
+
+### Traçado de imagem
+- TracePreviewCanvas198 mostra imagem original reduzida como referência com sobreposição de curvas vetoriais Qt, zoom na roda e arraste para deslocar (QGraphicsView).
+- Pré-visualização automática após 220 ms sem alterações, perfis Automático/Otsu, Logotipo/símbolo e Texto/traços finos; usuário pode recalcular manualmente e enquadrar. Ajustar os parâmetros mantém o zoom previamente escolhido. Teste mínimo do zoom incluído em regressão Qt.
+- Isso não é IA de reconhecimento. Otimização avançada, eliminação inteligente de ruído, foto-gravação raster e persistência de imagens precisam de etapas posteriores; sem prometer resultados equivalentes ao LightBurn.
+
+### Gate antes da homologação
+Manter máquina desconectada, versão aprovada e pasta APLICATIVO intactas. Executar no Windows, na branch fix/validacao-real-19-8-20261029, após pull: `-SomenteInteracao` (câmeras Qt), depois `-Abrir` (regressão C++ da Tesoura e suíte integral). Usar cópia do projeto real, tentar primeiro e segundo recorte do objeto 575, gravar vídeo dos dois, testar prévia a 1x/5x/10x e zoom do traçado. Se falhar, enviar log e JSON. Código publicado remotamente NÃO é build homologado.
