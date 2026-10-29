@@ -5934,6 +5934,21 @@ static QJsonObject textFillAlign198Test(){
        ui.view.editor.state().editableTexts.at(liveRoot).text=="PRIMEIRO",
        "Undo apos reeditacao nao devolveu texto original");
  ui.view.editor.redo();ui.view.rebuild();
+ // Acao visivel em portugues para remover a semantica de fonte e liberar nos.
+ auto* convert=ui.findChild<QPushButton*>("convert_text_paths_19_8");
+ check(convert!=nullptr,"Acao Converter texto em caminhos nao aparece");
+ ui.view.clearSelection();ui.view.activate({liveRoot,0});
+ const auto geometryBeforePath=serialize(encode(ui.view.editor.state().doc));
+ const auto historyBeforePath=ui.view.editor.undoCount();
+ convert->click();QApplication::processEvents();
+ check(ui.view.editor.state().editableTexts.empty()&&
+       ui.view.editor.undoCount()==historyBeforePath+1&&
+       serialize(encode(ui.view.editor.state().doc))==geometryBeforePath,
+       "Converter texto em caminhos mudou geometria ou nao removeu metadados");
+ check(ui.view.editor.undo()&&
+       ui.view.editor.state().editableTexts.at(liveRoot).text=="SEGUNDO",
+       "Ctrl+Z nao restaurou texto editavel apos converter caminho");
+ ui.view.rebuild();
  ui.view.editor.setLayerMode(0,"Fill");
  const int outer=ui.view.editor.ellipse({100,100},45,45,128);
  const int hole=ui.view.editor.ellipse({100,100},20,20,128);
