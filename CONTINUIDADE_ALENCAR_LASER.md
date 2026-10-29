@@ -454,3 +454,15 @@ Registrar mudanças, testes e pendências.
 - **Limpeza do aviso:** `lightburn_reference_inspector.hpp` separa `if(s.firstTime.isEmpty()) { s.firstTime=time; }` de `s.lastTime=time`, mantendo a semântica e removendo a ambiguidade; commit `78e21d809ee653914ce5dc3850bf32c19c0335b2`.
 - **Status:** código conferido no GitHub e atualizado só na branch experimental, compilação Windows **ainda não repetida após o hotfix**. Não declarar PASS antes do log. `main`, `APLICATIVO`, controle físico, M3/M4 e G-code permanecem preservados/bloqueados.
 - **Roteiro Windows:** `cd C:\ProjetoAlencarLaser`; `git status --short`; `git pull --ff-only origin feat/refino-curvas-rastreio-diagnosticos-19-8` com árvore sem alterações conflitantes; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteSimulacao`. Se erro, enviar **primeiro erro** de `RELATORIOS/COMPILACAO/BUILD_QT_19_8_STDOUT.txt`/`STDERR.txt`, não só a exceção final do PowerShell. Não apagar `.vscode/`.
+
+## 29/10/2026 — PASS real Windows do gate `-SomenteSimulacao` após os hotfixes
+
+- **Evidência:** captura do terminal VS Code enviada pelo usuário em 29/10/2026, com prompt final `PS C:\ProjetoAlencarLaser>`.
+- Git fast-forward da branch experimental realizado. CMake configure/generate/build files concluídos no diretório isolado `DESENVOLVIMENTO/FONTE/build_WINDOWS_GIT_19_8`.
+- **PASS:** `profiles, axis caps/accel, continuity, 1000 random trajectories` (C++20 cinemática).
+- **PASS:** `even-odd Fill/hole, image mask, overscan, tool layers, flags, bounds, read-only` (C++20 raster).
+- **PASS:** `nesting, open line, cross-layer order, opt-out, guide, passes (offline)` (C++20 rotas).
+- **PASS:** `Compilacao Qt concluida. Iniciando testes de refino.`.
+- **PASS:** `SIMULACAO (MOVIMENTO + RASTER + CAMADAS/ROTA) PASS sintetico; controle fisico bloqueado.` Isso indica conclusão do roteiro Qt sintético para movimento, raster, parâmetros de camadas/rota e contornos internos conforme o script `SCRIPTS/TESTAR_19_8_WINDOWS.ps1`.
+- **Interpretação:** hotfix do teste raster (intervalo válido), correção da variável `header` duplicada e demais componentes necessários para esse gate foram compilados/executados no Windows do usuário. **Não significa** teste visual interativo, suíte integral `-Abrir`, simulação fiel do LightBurn, CAM, G-code ou controle físico homologados.
+- **Próximo gate seguro (sem máquina conectada):** `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteInteracao`. Se PASS, executar `-Abrir` para suíte mais ampla e inspeção visual, preservando `.vscode/`, projeto e base homologada. Conferir listagem compacta S/V/A, abertura por duplo clique, potência/velocidade apenas como metadados, ferramentas e prévia offline.
