@@ -99,5 +99,43 @@ int main(){
  const Key straight=native.addEditablePath(
   {{0,{30,0},{30,0},{30,0}},{0,{40,0},{40,0},{40,0}}},false,202);
  assert(straight.object==202&&native.committed().contours.back().edgeKind[0]==0);
+ // Regression: an already finished native cubic must be selectable,
+ // editable, cut without flattening, deletable and fully undoable.
+ CurveDragSession lifecycle(CurveDocument{});
+ const Key original=lifecycle.addEditablePath(
+  {{0,{0,0},{0,0},{3,8}},
+   {0,{10,0},{7,8},{10,0}}},false,301);
+ const Cubic baseline=edgeAt(lifecycle.committed().contours.front(),0);
+ assert(lifecycle.selected()&&*lifecycle.selected()==original);
+ lifecycle.clearSelection();
+ assert(!lifecycle.selected());
+ lifecycle.select(original);
+ CurveHit cut{original,0,0,CurvePart::Edge,0,0.5,{5,6}};
+ assert(lifecycle.cutContourAtEdge(cut,302));
+ assert(lifecycle.committed().contours.size()==2);
+ const auto& left=lifecycle.committed().contours[0];
+ const auto& right=lifecycle.committed().contours[1];
+ assert(left.nodes.size()==2&&right.nodes.size()==2);
+ assert(left.edgeKind[0]==1&&right.edgeKind[0]==1);
+ assert(eq(cubicPoint(edgeAt(left,0),0.5),cubicPoint(baseline,0.25)));
+ assert(eq(cubicPoint(edgeAt(right,0),0.5),cubicPoint(baseline,0.75)));
+ assert(lifecycle.undo()&&lifecycle.committed().contours.size()==1);
+ assert(lifecycle.redo()&&lifecycle.committed().contours.size()==2);
+ assert(lifecycle.deleteSelectedContour()&&lifecycle.committed().contours.size()==1);
+ assert(lifecycle.undo()&&lifecycle.committed().contours.size()==2);
+ assert(lifecycle.undo()&&lifecycle.committed().contours.size()==1);
+ assert(lifecycle.undo()&&lifecycle.committed().contours.empty());
+ assert(!lifecycle.selected()); // no dangling selected key after undo of creation
+ assert(lifecycle.redo()&&lifecycle.committed().contours.size()==1);
+ CurveDragSession closedNative(CurveDocument{});
+ const Key ring=closedNative.addEditablePath(
+  {{0,{0,0},{0,0},{0,0}},{0,{10,0},{10,0},{10,0}},
+   {0,{10,10},{10,10},{10,10}}},true,305);
+ assert(closedNative.cutContourAtEdge(
+  {ring,1,0,CurvePart::Edge,0,0.5,{10,5}},306));
+ assert(closedNative.committed().contours.size()==1);
+ assert(!closedNative.committed().contours.front().closed);
+ assert(closedNative.committed().contours.front().nodes.size()==5);
+ assert(closedNative.undo()&&closedNative.committed().contours.front().closed);
  std::cout<<"PASS: atomic join, closed rectangle, cross-contour merge, snap constraints, mixed native Bézier, undo/redo\n";
 }
