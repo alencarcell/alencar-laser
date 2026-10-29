@@ -263,7 +263,7 @@ public:
    state.doc.contours.erase(std::remove_if(state.doc.contours.begin(),state.doc.contours.end(),
       [&](const Contour& c){return remove.count(c.key.object)>0;}),state.doc.contours.end());
    for(int id:remove)state.objects.erase(id);
-   int next=nextObjectId(state.doc);
+   int next=std::max(root+1,nextObjectId(state.doc));
    updated.members.clear();
    for(std::size_t i=0;i<polygons.size();++i){
     const int id=i==0?root:next++;
