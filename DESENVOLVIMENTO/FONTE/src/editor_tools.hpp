@@ -258,7 +258,8 @@ public:
    auto previous=old->second;
    for(int id:previous.members)if(!editable(state,id))
     throw std::runtime_error("text member locked");
-   const Meta meta=state.objects.at(root);
+   Meta meta=state.objects.at(root);
+   if(meta.group==0&&polygons.size()>1)meta.group=state.nextGroup++;
    std::set<int> remove(previous.members.begin(),previous.members.end());
    state.doc.contours.erase(std::remove_if(state.doc.contours.begin(),state.doc.contours.end(),
       [&](const Contour& c){return remove.count(c.key.object)>0;}),state.doc.contours.end());
