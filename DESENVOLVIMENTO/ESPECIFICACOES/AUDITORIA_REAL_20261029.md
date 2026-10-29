@@ -42,3 +42,25 @@ Branch de trabalho isolada fix/validacao-real-19-8-20261029 derivada de feat/ref
 - Regressoes portateis e GUI de zoom, reedicao e conversao.
 
 STATUS: alteracoes de fonte publicadas, mas NAO compiladas/testadas no Windows apos este lote. Main, APLICATIVO e base 19.7.1 preservados. Laser fisico desconectado, proibido enviar movimento/emissao. Validar -SomenteEdicao, -SomenteInteracao, -SomenteDesenho e -SomenteSimulacao antes do gate completo -Abrir. Usar copia do .alaser real e relatorios JSON para revisao posterior.
+
+
+## Correção focal de texto e pesquisa LightBurn — 29/10/2026
+
+### Relato observado no Windows
+- Ao pedir reedição, os contornos anteriores permanecem visíveis atrás do campo de texto.
+- Alterar o zoom ou rolar a mesa causa aparente salto do texto em edição, porque o QLineEdit pertence ao viewport (coordenadas em pixels), mas o objeto é armazenado no documento em mm. O campo antigo era posicionado apenas uma vez e ainda recebia clamp aos limites da janela.
+- O usuário quer o **ponto azul de curvar texto** do LightBurn: arrastar cria arco circular, duplo clique redefine curvatura; texto continua editável. Não confundir com Converter para caminho, que perde origem textual.
+
+### Correções no código da branch de trabalho
+- Durante reedição, os IDs dos componentes do texto original ficam invisíveis apenas na cena, inclusive no Fill composto. Nenhum contorno, grupo, metadado ou Undo é excluído. Concluir/cancelar restaura estado visual; Escape cancela o rascunho.
+- A origem do QLineEdit continua fixada nas coordenadas de documento e se reposiciona a cada alteração de zoom, barras de rolagem ou tamanho do viewport. Retirada a lógica antiga de clamp, que deslocava indevidamente a posição relativa; a formatação realimenta o mesmo cálculo.
+- Testes GUI ampliados para verificar: texto anterior oculto durante edição, Zoom/Scroll sem mudar âncora ou Undo, Escape restaura contornos e mantém o projeto.
+- **Status:** ajustes de código conferidos estaticamente no GitHub, sem compilação/execução Windows depois desta rodada. Continuar em PR #12 rascunho; não mesclar nem instalar no APLICATIVO.
+
+### Curvar texto: desenho do recurso, ainda não implementado
+Referência oficial:
+- https://docs.lightburnsoftware.com/2.2/Reference/Text/ — Text Bend/Bending Text: ponto azul quando texto selecionado; arraste vertical curva ao redor de círculo; duplo clique restaura; opção Distort altera se glifos são deformados ou apenas orientados.
+- https://docs.lightburnsoftware.com/2.0/Reference/ApplyPathToText/ — texto aplicado a caminho Bézier/vetor é uma função distinta.
+- https://docs.lightburnsoftware.com/latest/Reference/ConvertToPath/ — converter em caminho cria vetores editáveis, perdendo propriedade de texto.
+
+Implementar em fase posterior: (1) texto permanece tipo de objeto editável com frase, fonte, espaçamento, ancoragem e curvatura no metadata; (2) alça azul visível apenas na seleção de texto, drag gera preview em arco com centro/raio e limites seguros; (3) opção **Deformar letras** separada de **Manter letras sem deformação**; (4) double-click na alça desfaz curvatura, Ctrl+Z/Y reverte em uma transação; (5) salvar/reabrir .alaser v5 sem perder texto ou raio; (6) opção Aplicar texto a caminho com contorno vetorial escolhido; (7) **Converter em caminhos** congela a geometria atualmente curva e remove origem textual, com um Undo reversível. Testar pontuação, espaço, caracteres acentuados, várias fontes e colisões/hole Fill. Interface totalmente PT-BR. Não criar alça interativa sem pipeline completo de geometria e persistência.
