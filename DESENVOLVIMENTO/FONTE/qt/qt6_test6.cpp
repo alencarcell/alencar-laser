@@ -4751,8 +4751,30 @@ static QJsonObject layersUngroup198Test(const QString& directory){
  check(v.pathItem({a,0})->brush().style()==Qt::NoBrush,
   "Editor deve mostrar contornos no padrao LightBurn");
  v.setFillPreview(true);
- check(v.pathItem({a,0})->brush().style()!=Qt::NoBrush,"Previa opcional nao preencheu forma fechada");
- check(v.pathItem({c,0})->brush().style()==Qt::NoBrush,"Modo Linha indevidamente preenchido");
+ // A previa Fill atual e um backdrop composto por camada, nao um brush
+ // individual do contorno: os caminhos continuam editaveis em modo linha.
+ check(v.pathItem({a,0})->brush().style()==Qt::NoBrush,
+       "Previa Fill alterou brush do contorno editavel");
+ check(v.pathItem({c,0})->brush().style()==Qt::NoBrush,
+       "Modo Linha indevidamente preenchido");
+ int fillBackdrops=0;
+ for(QGraphicsItem* item:v.scene()->items()){
+  if(item->data(0).toString()!=QStringLiteral("layer_fill_even_odd"))continue;
+  ++fillBackdrops;
+  auto* fill=qgraphicsitem_cast<QGraphicsPathItem*>(item);
+  check(fill&&fill->brush().style()!=Qt::NoBrush,
+        "Previa opcional nao criou preenchimento composto");
+  const auto& region=fill->path();
+  check(region.fillRule()==Qt::OddEvenFill&&
+        region.contains(QPointF(27.5,27.5))&&
+        region.contains(QPointF(47.5,27.5))&&
+        !region.contains(QPointF(77.5,27.5)),
+        "Fill composto nao respeitou as formas da camada e excluiu modo Linha");
+  check(item->acceptedMouseButtons()==Qt::NoButton&&
+        !item->flags().testFlag(QGraphicsItem::ItemIsSelectable),
+        "Previa Fill interceptou a edicao de contornos");
+ }
+ check(fillBackdrops==1,"Esperado um unico Fill composto para a camada ativa");
  const int ga=v.editor.group({a,b});
  const int gb=v.editor.group({c,d});
  check(ga!=gb,"Os dois grupos receberam mesmo ID");
