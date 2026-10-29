@@ -1289,12 +1289,18 @@ public:
    next=scissorPlanner_.candidate(state.doc,hit);
    if(next)break;
   }
-  if(!next){if(scissorHover_)clearScissorHover();return;}
+  if(!next){
+   if(scissorHover_)clearScissorHover();
+   viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+   viewport()->setToolTip("Tesoura ativa: sem intervalo seguro neste ponto; verifique cruzamentos.");
+   return;
+  }
   if(scissorHover_&&scissorHover_->key==next->key&&
      std::abs(scissorHover_->from-next->from)<1e-8&&
      std::abs(scissorHover_->to-next->to)<1e-8)return;
   clearScissorHover();
   scissorHover_=std::move(next);
+  viewport()->setToolTip("Tesoura: todo o trecho laranja sera removido. Ctrl+Z desfaz.");
   QPainterPath colored;
   colored.moveTo(toQt(scissorHover_->preview.front()));
   for(size_t i=1;i<scissorHover_->preview.size();i++)
@@ -6095,7 +6101,24 @@ static QJsonObject textFillAlign198Test(){
  check(camera.zoomLevel()>1.0,"Roda do mouse nao ampliou a previa");
  camera.resetView();
  check(std::abs(camera.zoomLevel()-1.)<1e-7,"Ajustar imagem nao restaurou camera");
+ QPainterPath vectorLines;vectorLines.moveTo(0,0);vectorLines.lineTo(100,100);
+ camera.showPaths(vectorLines,QPainterPath(),QPainterPath(),false,400,400);
+ check(camera.vectorMode(),"Previa vetorial nao substituiu o bitmap");
+ QApplication::sendEvent(camera.viewport(),&wheel);
+ check(camera.vectorMode()&&camera.zoomLevel()>1.0,
+       "Zoom vetorial voltou a rasterizar a simulacao");
  camera.close();
+ TracePreviewCanvas198 tracer;
+ tracer.resize(340,240);tracer.show();QApplication::processEvents();
+ QImage sourceImage(100,80,QImage::Format_ARGB32);sourceImage.fill(Qt::white);
+ tracer.showResult(sourceImage,100.,{{{10,10},{50,10},{50,35}}});
+ tracer.resetView();
+ QWheelEvent traceWheel(QPointF(160,100),QPointF(160,100),QPoint(0,0),
+                   QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+ QApplication::sendEvent(tracer.viewport(),&traceWheel);
+ check(tracer.zoomLevel()>1.0,
+       "Rastreamento de imagem nao suporta zoom pela roda");
+ tracer.close();
  return {{"status","PASS"},{"editable_text_metadata",true},
    {"text_replace_undo",true},{"align_x_y_right",true},
    {"fill_even_odd_visual",true},{"preview_wheel_zoom",true},
