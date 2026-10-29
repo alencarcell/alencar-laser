@@ -82,6 +82,17 @@ int main(){
  assert(rejected);
  rejected=false;
  try{
+  Editor expensive(Document{});
+  expensive.ellipse({0,50},10,50,4096);
+  expensive.ellipse({30,50},10,50,4096);
+  expensive.setLayerMode(0,"Fill");
+  sim198::raster::Settings dense{0.1,0.0,true};
+  sim198::Plan x;
+  sim198::raster::appendFill(x,expensive.state(),dense);
+ }catch(const std::runtime_error&){rejected=true;}
+ assert(rejected); // 8192 vertices x 1000 scanlines > 6M budget
+ rejected=false;
+ try{
   cfg.intervalMm=10.;cfg.overscanMm=21.;sim198::Plan x;
   sim198::raster::appendMask(x,mask,{0,0,40,20},cfg);
  }catch(const std::runtime_error&){rejected=true;}
