@@ -191,6 +191,8 @@ class QtEditorLab final:public QGraphicsView{
  CurveDragSession* nativeSession_=nullptr;
  bool nativeMode_=false;
  bool nativeEditHandles_=false; // Select mode moves native contours; Bézier mode edits anchors/handles.
+ bool lastNativeAction_=false;
+ uint64_t lastEditorGenerationSeen_=0;
  bool fillPreview_=false; // Editor LightBurn mostra linhas por padrao.
  QImage rasterSource_; // preview temporario fora do arquivo .alaser
  QRectF rasterRect_;
@@ -371,6 +373,7 @@ class QtEditorLab final:public QGraphicsView{
    for(const auto& c:nativeSession_->committed().contours)
     obj=std::max(obj,c.key.object+1);
    const Key key=nativeSession_->addEditablePath(std::move(points),closed,obj);
+   lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
    createNativeItems();
    ++toolCreates;
    if(diagnosticEvent)diagnosticEvent("native_draw_lines_created",1);
@@ -866,6 +869,7 @@ public:
   nativePressing_=false;nativeContourPressing_=false;nativeMode_=false;
   nativeEditHandles_=false;
   clearNativeItems();nativeSession_=session;
+  lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
   createNativeItems();
  }
  void enableNative(bool enabled){
@@ -880,6 +884,13 @@ public:
  bool nativeModeActive()const{return nativeMode_;}
  bool nativeHistoryAvailable(bool redo)const{
   return nativeSession_&&(redo?nativeSession_->redoCount():nativeSession_->undoCount())>0;
+ }
+ bool shouldUseNativeHistory(bool redo){
+  if(editor.generation!=lastEditorGenerationSeen_){
+   lastEditorGenerationSeen_=editor.generation;
+   lastNativeAction_=false;
+  }
+  return lastNativeAction_&&nativeHistoryAvailable(redo);
  }
  bool selectNativeAt(Pt click,bool startMove){
   if(!nativeSession_||!hasNativeDocument())return false;
@@ -903,8 +914,10 @@ public:
   for(const auto& [id,_]:editor.state().objects)next=std::max(next,id+1);
   for(const auto& c:nativeSession_->committed().contours)next=std::max(next,c.key.object+1);
   if(!nativeSession_->cutContourAtEdge(hits.front(),next))return false;
-  nativeMode_=true;nativeEditHandles_=false;tool=Tool::Select;
+  // Remain in Scissors tool, do not silently switch into selection.
+  nativeMode_=false;nativeEditHandles_=false;
   createNativeItems();updateNativePaths(true);
+  lastNativeAction_=true;
   if(diagnosticEvent)diagnosticEvent("bezier_contour_scissor_cut",1);
   if(stateChanged)stateChanged();
   return true;
@@ -913,6 +926,7 @@ public:
   if(!nativeSession_||nativePressing_||nativeContourPressing_)return;
   bool changed=redo?nativeSession_->redo():nativeSession_->undo();
   if(changed){
+   lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
    nativeSelectedPart_.reset();
    // Undo/Redo can CREATE or REMOVE entire native paths. Updating only
    // existing QGraphicsPathItem paths leaves orphaned ghost curves.
@@ -930,6 +944,7 @@ public:
    // Operacao invalida (por exemplo, topologia minima): sem excecao atraves do Qt event loop.
    qWarning().noquote()<<"Bézier: exclusão recusada:"<<e.what();return false;
   }
+  lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
   nativeSelectedPart_.reset();updateNativePaths(true);if(stateChanged)stateChanged();
   if(diagnosticEvent)diagnosticEvent("bezier_node_deleted",1);
   return true;
@@ -937,6 +952,7 @@ public:
  bool nativeDeleteContour(){
   if(!nativeSession_||nativePressing_||nativeContourPressing_||!nativeSession_->selected())return false;
   if(!nativeSession_->deleteSelectedContour())return false;
+  lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
   nativeSelectedPart_.reset();createNativeItems();
   if(diagnosticEvent)diagnosticEvent("bezier_contour_deleted",1);
   if(stateChanged)stateChanged();return true;
@@ -1365,9 +1381,22 @@ void mousePressEvent(QMouseEvent* e)override{
   e->accept();return;
  }
  if(e->button()!=Qt::LeftButton){QGraphicsView::mousePressEvent(e);return;}
-  if(nativeMode_){nativeMousePress(e);return;}
+  if(nativeMode_){
+   if(tool==Tool::Select&&!nativeEditHandles_){
+    // Normal Select must pick both native Bézier and regular polylines.
+    if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),true)){
+     e->accept();return;
+    }
+    nativeMode_=false;
+    nativeSession_->clearSelection();
+    updateNativePaths(true);
+   }else{nativeMousePress(e);return;}
+  }
    if(tool==Tool::Select){
     if(beginSelectionTransform(e->position())){e->accept();return;}
+    if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),true)){
+     e->accept();return;
+    }
     auto hits=clickHits(e->position().toPoint());
    if(hits.empty()){
     marqueeActive_=true;marqueeStart_=e->position();
@@ -1386,6 +1415,14 @@ void mousePressEvent(QMouseEvent* e)override{
    e->accept();return;
   }
   if(tool==Tool::Scissors){
+   try{
+    if(cutNativeAt(fromQt(mapToScene(e->position().toPoint())))){
+     e->accept();return;
+    }
+   }catch(const std::exception& ex){
+    if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));
+    e->accept();return;
+   }
    updateScissorHover(e->position().toPoint());
    if(!scissorHover_){
     // Diagnostico localizado: nao remove fragmentos quando nao existe intervalo seguro.
@@ -1634,13 +1671,16 @@ void mouseReleaseEvent(QMouseEvent* e)override{
     // O ponto inicial está preservado no CurveDragSession.
     const bool moved=nativeSession_->commitContourMove(fromQt(mapToScene(e->position().toPoint())));
     nativeContourPressing_=false;updateNativePaths(true);
+    if(moved){lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;}
     if(moved&&diagnosticEvent)diagnosticEvent("bezier_contour_moved",1);
     if(stateChanged)stateChanged();
    }
    if(nativePressing_&&nativeSession_){
     const auto pt=mapToScene(e->position().toPoint());
     nativeSession_->update(fromQt(pt));const bool changed=nativeSession_->commit();nativePressing_=false;
-    updateNativePaths(false);if(changed&&diagnosticEvent)diagnosticEvent("bezier_node_moved",1);
+    updateNativePaths(false);
+    if(changed){lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;}
+    if(changed&&diagnosticEvent)diagnosticEvent("bezier_node_moved",1);
     if(stateChanged)stateChanged();
    }
    e->accept();return;
