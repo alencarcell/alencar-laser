@@ -15,6 +15,12 @@ struct Report {
  std::size_t outsideLaserSegments=0,clippedLaserSegments=0;
  double omittedLaserMm=0.;
 };
+// A completely external object can be kept as an offline spare in the
+// editor. Only a laser-ON segment crossing the physical bed is a warning.
+// The full outside count is retained in diagnostic JSON, not a danger banner.
+inline bool partiallyOutsideActiveGeometry(const Report& report){
+ return report.clippedLaserSegments>0;
+}
 inline bool inside(Pt p,double width,double height,double epsilon=1e-7){
  return p.x>=-epsilon&&p.y>=-epsilon&&p.x<=width+epsilon&&p.y<=height+epsilon;
 }
