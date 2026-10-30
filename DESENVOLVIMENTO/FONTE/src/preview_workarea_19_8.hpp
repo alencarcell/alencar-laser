@@ -10,6 +10,9 @@
 namespace alaser::sim198::bed198 {
 struct Report {
  std::size_t outsideSegments=0, clippedSegments=0, inputSegments=0;
+ // Laser-ON statistics exclude positioning travels, avoiding false alarms
+ // about non-cutting motion that happens to run outside the visual rectangle.
+ std::size_t outsideLaserSegments=0,clippedLaserSegments=0;
  double omittedLaserMm=0.;
 };
 inline bool inside(Pt p,double width,double height,double epsilon=1e-7){
@@ -54,12 +57,16 @@ inline Plan restrictToBed(const Plan& original,double width,double height,Report
   const double total=std::hypot(move.to.x-move.from.x,move.to.y-move.from.y);
   const bool wasInside=inside(move.from,width,height)&&inside(move.to,width,height);
   if(!clip(move.from,move.to,width,height,start,end)){
-   ++r.outsideSegments;if(move.laser)r.omittedLaserMm+=total;
+   ++r.outsideSegments;
+   if(move.laser){++r.outsideLaserSegments;r.omittedLaserMm+=total;}
    continue;
   }
   if(!wasInside){
    ++r.clippedSegments;
-   if(move.laser)r.omittedLaserMm+=std::max(0.,total-std::hypot(end.x-start.x,end.y-start.y));
+   if(move.laser){
+    ++r.clippedLaserSegments;
+    r.omittedLaserMm+=std::max(0.,total-std::hypot(end.x-start.x,end.y-start.y));
+   }
   }
   // Rejoin retained fragments as OFF travel, never as an ON jump.
   if(std::hypot(start.x-last.x,start.y-last.y)>1e-7)append(last,start,false,move.layer);
