@@ -6727,6 +6727,7 @@ static QJsonObject layoutIcons198Test(){
  const int spare=w.view.editor.addContour({{510,10},{530,10},{520,25}},true);
  const auto spareBefore=boundsOf(w.view.editor.state().doc,{spare});
  w.view.rebuild();
+ w.view.activate({one,0});w.view.selected.insert(two);
  w.findChild<QToolButton*>("quick_center_bed_19_8")->click();
  const auto [unionLo,unionHi]=boundsOf(w.view.editor.state().doc,{one,two});
  check(std::abs((unionLo.x+unionHi.x)/2.-200.)<1e-7&&
