@@ -186,6 +186,8 @@ class TracePreviewCanvas198 final:public QGraphicsView{
  QGraphicsPixmapItem* imageItem_=nullptr;
  QGraphicsPathItem* traceItem_=nullptr;
  QGraphicsPathItem* nodesItem_=nullptr;
+ QPixmap originalPreview_,binaryPreview_;
+ bool showOriginal_=true;
  std::vector<std::vector<Pt>> cachedPaths_;
  double lastScale_=1.0;
  bool showNodes_=false;
@@ -215,10 +217,16 @@ public:
   setToolTip("Roda: aproximar/afastar | arrastar: mover | ajustar imagem: enquadrar");
  }
  ~TracePreviewCanvas198()override{setScene(nullptr);}
- void showResult(const QImage& binary,double widthMm,
+ void showResult(const QImage& original,const QImage& binary,double widthMm,
                  const std::vector<std::vector<Pt>>& paths){
   if(binary.isNull()||widthMm<=0)return;
-  imageItem_->setPixmap(QPixmap::fromImage(binary));
+  // Duas referencias so de PREVIA: preservar o arquivo original como imagem,
+  // equalizar pixels para coordenadas de contorno calculadas no bitmap P&B.
+  const QImage reference=original.isNull()?binary:
+      original.scaled(binary.size(),Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
+  originalPreview_=QPixmap::fromImage(reference);
+  binaryPreview_=QPixmap::fromImage(binary);
+  imageItem_->setPixmap(showOriginal_?originalPreview_:binaryPreview_);
   const double scale=double(binary.width())/widthMm;
   lastScale_=scale;cachedPaths_=paths;
   QPainterPath lines;
@@ -233,6 +241,12 @@ public:
   scene_.setSceneRect(QRectF(0,0,binary.width(),binary.height()));
   refreshNodeMarkers();
  }
+ // Os vetores sao os mesmos, mesmo alternando referencia original/P&B.
+ void setShowOriginal(bool yes){
+  showOriginal_=yes;
+  imageItem_->setPixmap(showOriginal_?originalPreview_:binaryPreview_);
+ }
+ bool isShowingOriginal()const{return showOriginal_;}
  // Visibilidade alterada sem recalcular vetorizacao nem modificar projeto.
  void setImageFaded(bool faded){
   imageFaded_=faded;imageItem_->setOpacity(faded?.20:1.0);
@@ -4097,16 +4111,21 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   preview->setMinimumHeight(280);
   layout->addWidget(preview,1);
   auto* traceViewOptions=new QHBoxLayout;
-  auto* fadeReference=new QCheckBox("Esmaecer imagem original");
+  auto* showOriginal=new QCheckBox("Imagem original");
+  showOriginal->setObjectName("trace_show_original");
+  showOriginal->setChecked(true);
+  auto* fadeReference=new QCheckBox("Esmaecer referência");
   fadeReference->setObjectName("trace_fade_reference");
   fadeReference->setChecked(true);
   auto* showTraceNodes=new QCheckBox("Mostrar nós do traçado");
   showTraceNodes->setObjectName("trace_show_nodes");
+  traceViewOptions->addWidget(showOriginal);
   traceViewOptions->addWidget(fadeReference);
   traceViewOptions->addWidget(showTraceNodes);
   traceViewOptions->addStretch();
   layout->addLayout(traceViewOptions);
   preview->setImageFaded(true);
+  connect(showOriginal,&QCheckBox::toggled,preview,&TracePreviewCanvas198::setShowOriginal);
   connect(fadeReference,&QCheckBox::toggled,preview,&TracePreviewCanvas198::setImageFaded);
   connect(showTraceNodes,&QCheckBox::toggled,preview,&TracePreviewCanvas198::setNodesVisible);
   auto* fitTrace=new QPushButton("Ajustar imagem na janela");
@@ -4154,7 +4173,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     opts.smooth=smooth->isChecked();opts.widthMm=width->value();
     prepared=trace198::trace(view.rasterImage(),opts);
     // Nao perder o zoom escolhido quando o usuario muda limiar/otimizacao.
-    preview->showResult(prepared->binary,opts.widthMm,prepared->contours);
+    preview->showResult(view.rasterImage(),prepared->binary,opts.widthMm,prepared->contours);
     size_t nodes=0;
     for(const auto& path:prepared->contours)nodes+=path.size();
     information->setText(QString("%1 contornos, %2 nós; %3 pequenos componentes removidos. Revisar texto pequeno.")
@@ -6198,7 +6217,11 @@ static QJsonObject textFillAlign198Test(){
  TracePreviewCanvas198 tracer;
  tracer.resize(340,240);tracer.show();QApplication::processEvents();
  QImage sourceImage(100,80,QImage::Format_ARGB32);sourceImage.fill(Qt::white);
- tracer.showResult(sourceImage,100.,{{{10,10},{50,10},{50,35}}});
+ tracer.showResult(sourceImage,sourceImage,100.,{{{10,10},{50,10},{50,35}}});
+ check(tracer.isShowingOriginal(),"Traçado não exibiu imagem original de referência");
+ tracer.setShowOriginal(false);
+ check(!tracer.isShowingOriginal(),"Traçado não alternou original/P&B");
+ tracer.setShowOriginal(true);
  tracer.setImageFaded(true);
  tracer.setNodesVisible(true);
  check(tracer.imageFaded()&&tracer.nodesVisible()&&tracer.shownNodeCount()==3,
