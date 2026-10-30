@@ -23,10 +23,13 @@ inline QIcon toolGlyph(const QString& id){
   QPainterPath path;path.moveTo(5,24);path.cubicTo(5,4,27,28,27,7);p.drawPath(path);
   p.setBrush(QColor("#DE914C"));p.drawEllipse(QPointF(5,24),2.5,2.5);p.drawEllipse(QPointF(27,7),2.5,2.5);
  }else if(id=="new_bezier"){
-  QPainterPath path;path.moveTo(5,24);path.cubicTo(11,3,24,27,27,7);
-  p.drawPath(path);p.drawLine(5,24,11,5);p.drawLine(27,7,24,27);
-  p.setBrush(QColor("#DE914C"));p.drawEllipse(QPointF(5,24),2.2,2.2);
-  p.drawEllipse(QPointF(27,7),2.2,2.2);
+  // Unified Draw Paths icon: one straight edge, then one true cubic.
+  // Anchor markers show that corners and smooth nodes share one tool.
+  QPainterPath path;path.moveTo(4,25);path.lineTo(12,18);
+  path.cubicTo(15,3,25,28,28,7);p.drawPath(path);
+  p.setBrush(QColor("#DE914C"));
+  for(const QPointF at:{QPointF(4,25),QPointF(12,18),QPointF(28,7)})
+   p.drawEllipse(at,2.5,2.5);
  }else if(id=="image"){
   p.drawRect(QRectF(4,6,24,21));
   p.drawEllipse(QPointF(11,12),2.2,2.2);
