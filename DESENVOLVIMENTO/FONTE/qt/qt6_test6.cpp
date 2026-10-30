@@ -4253,7 +4253,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const QImage image=reader.read();
   if(image.isNull())throw std::runtime_error("Imagem nao suportada (PNG/JPG/BMP/WebP)");
   view.setRasterImage(image);
-  status->setText("Imagem importada. Clique direito na mesa > Tracar imagem (Alt+T).");
+  status->setText("Imagem selecionada: arraste para mover, puxe a alça laranja para redimensionar. Salve em .alaser para preservar.");
  }
  void traceImageDialog(){
   if(!view.hasRasterImage()){status->setText("Importe uma imagem primeiro.");return;}
@@ -6543,8 +6543,49 @@ static QJsonObject drawAndJoin198Test(){
   {"undo_redo",true},{"hardware_commands_sent",false}};
 }
 
+static QJsonObject rasterObject198Test(){
+ QTemporaryDir temporary;
+ check(temporary.isValid(),"Nao criou diretorio temporario");
+ const QString filename=temporary.filePath("imagem_v5.alaser");
+ QImage original(48,32,QImage::Format_ARGB32);
+ original.fill(QColor("#EFEFEF"));
+ original.setPixelColor(5,7,QColor(12,64,230,150));
+ original.setPixelColor(32,12,QColor(120,20,5));
+ QRectF bounds(38.25,61.5,100.5,67.);
+ Editor state(Document{});
+ const IntegratedProject saved=saveNative(filename,state.state(),CurveDocument{},nullptr,&original,bounds);
+ check(saved.legacy.layers.as_object().contains("raster_object_19_8"),
+       "PNG nao foi armazenado no .alaser");
+ const IntegratedProject reopened=openNative(filename);
+ auto bitmap=alaser::rasterproject198::decode(reopened);
+ check(bitmap&&bitmap->image.size()==original.size(),
+       "Reabertura perdeu dimensoes da imagem");
+ check(bitmap->bounds==bounds&&bitmap->image.pixelColor(5,7)==original.pixelColor(5,7),
+       "Reabertura mudou posicao, escala ou pixels");
+ IntegratedProject tampered=reopened;
+ auto& raster=tampered.legacy.layers.as_object().at("raster_object_19_8").as_object();
+ raster["sha256"]="0000000000000000000000000000000000000000000000000000000000000000";
+ bool rejected=false;
+ try{(void)alaser::rasterproject198::decode(tampered);}catch(...){rejected=true;}
+ check(rejected,"PNG alterado nao foi recusado pelo SHA");
+ const QString legacy=temporary.filePath("sem_imagem.alaser");
+ (void)saveNative(legacy,state.state());
+ check(!alaser::rasterproject198::decode(openNative(legacy)),
+       "Projeto legado sem PNG criou imagem fantasma");
+ return {{"status","PASS"},{"image_embedded_png",true},
+         {"image_position_scale_preserved",true},{"sha256_guard",true},
+         {"legacy_without_bitmap",true},{"hardware_commands_sent",false}};
+}
 int main(int argc,char** argv){
  QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";
+ if(mode=="--raster-object-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=rasterObject198Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_IMAGEM_OBJETO_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
  if(mode=="--branding-19-8-test"){
   QDir().mkpath(out);
   QJsonObject report;bool passed=false;
