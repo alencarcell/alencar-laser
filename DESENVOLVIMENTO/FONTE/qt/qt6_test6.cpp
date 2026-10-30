@@ -2651,16 +2651,19 @@ public:
   resize(1390,870);setMinimumSize(950,620);
   auto* layout=new QVBoxLayout(this);layout->setContentsMargins(0,0,0,0);layout->setSpacing(0);
   auto* header=new QFrame;header->setObjectName("topHeader");
-  auto* headerRow=new QHBoxLayout(header);headerRow->setContentsMargins(11,4,11,4);
-  auto* identity=new QVBoxLayout;identity->setSpacing(1);
+  auto* headerRow=new QHBoxLayout(header);headerRow->setContentsMargins(9,1,9,1);
+  headerRow->setSpacing(6);
+  auto* identity=new QHBoxLayout;identity->setSpacing(5);
   auto* brand=new QLabel("ALENCAR LASER");brand->setObjectName("brandName");
   // PEGASO_V1: identidade aprovada e opcional. A imagem antiga permanece
   // intacta e ativa quando o kit ainda nao esta instalado no computador.
-  const QPixmap pegasus=alaser::branding198::approvedHeader();
-  if(!pegasus.isNull()){
-   brand->setPixmap(pegasus.scaled(270,54,Qt::KeepAspectRatio,Qt::SmoothTransformation));
-   brand->setFixedHeight(54);
-   brand->setToolTip("Identidade Pégaso V1 aprovada — editor experimental offline");
+  const QIcon pegasoIcon=alaser::branding198::approvedIcon();
+  if(!pegasoIcon.isNull()){
+   // Cabecalho estreito: simbolo aprovado isolado + nome em tipografia Qt,
+   // evita ampliar os residuos visuais do PNG horizontal anterior.
+   brand->setPixmap(pegasoIcon.pixmap(QSize(38,38)));
+   brand->setFixedSize(38,38);
+   brand->setToolTip("Pégaso — identidade visual Alencar Laser");
   }else{
    const QStringList logoCandidates={
     QDir::current().absoluteFilePath("DADOS/LOGO/logo_alencar_laser.png"),
@@ -2679,12 +2682,21 @@ public:
   if(brand->pixmap().isNull())
    brand->setToolTip("Sem recursos de marca; instale o kit Pégaso ou a logo anterior.");
   identity->addWidget(brand);
+  auto* wordmark=new QLabel;
+  wordmark->setObjectName("pegaso_wordmark_19_8");
+  wordmark->setText("<span style='color:#E3E7EA'>ALENCAR</span> <span style='color:#F28A28'>LASER</span>");
+  wordmark->setTextFormat(Qt::RichText);
+  QFont wordFont=wordmark->font();wordFont.setBold(true);wordFont.setPixelSize(18);
+  wordmark->setFont(wordFont);
+  wordmark->setVisible(!pegasoIcon.isNull());
+  identity->addWidget(wordmark);
   auto* subtitle=new QLabel("TESTE_19.8 • Candidata");subtitle->setObjectName("brandSub");subtitle->hide();identity->addWidget(subtitle);
   headerRow->addLayout(identity);headerRow->addStretch();
   auto* safety=new QLabel("● MÁQUINA DESCONECTADA   |   EMISSÃO BLOQUEADA");
   safety->setObjectName("machineState");safety->setToolTip("Leitura GRBL opcional; sem comandos de movimento ou laser.");
   machineHeaderStatus_=safety;
   headerRow->addWidget(safety);
+  header->setMaximumHeight(48);
   layout->addWidget(header);
   auto add=[&](QHBoxLayout* row,const QString& id,const QString& title,std::function<void()> action){
    auto* b=new QPushButton(title);b->setObjectName(id);buttons[id]=b;
@@ -2716,6 +2728,57 @@ public:
        workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight,
        view.rasterImage(),view.rasterBounds());
   })->setToolTip("Simular caminhos Line e tempo nominal. Nenhum envio físico.");
+  // Substituir textos repetitivos por glifos com dica e nomes acessiveis.
+  const std::vector<std::tuple<QString,QString,QString>> quickIcons={
+   {"open","open","Abrir projeto"},
+   {"open_other","open","Abrir outro projeto"},
+   {"save","save","Salvar"},
+   {"save_as","save","Salvar como"},
+   {"undo","undo","Desfazer (Ctrl+Z)"},
+   {"redo","redo","Refazer (Ctrl+Y)"},
+   {"preview_virtual","preview","Prévia virtual — simulação offline"}
+  };
+  for(const auto& [id,glyph,tip]:quickIcons){
+   auto* button=buttons.at(id);
+   button->setText("");button->setIcon(alaser::toolGlyph(glyph));
+   button->setIconSize(QSize(20,20));button->setFixedSize(35,32);
+   button->setToolTip(tip);button->setAccessibleName(tip);
+  }
+  auto* editIcons=new QFrame;
+  editIcons->setObjectName("quickEditIcons_19_8");
+  auto* iconRow=new QHBoxLayout(editIcons);
+  iconRow->setContentsMargins(0,0,0,0);iconRow->setSpacing(2);
+  const auto iconButton=[this,iconRow](const QString& object,
+                                     const QString& glyph,const QString& help,
+                                     std::function<void()> click){
+    auto* item=new QToolButton(this);
+    item->setObjectName(object);item->setIcon(alaser::toolGlyph(glyph));
+    item->setIconSize(QSize(20,20));item->setFixedSize(31,31);
+    item->setToolTip(help);item->setAccessibleName(help);
+    item->setFocusPolicy(Qt::NoFocus);
+    connect(item,&QToolButton::clicked,this,[this,click]{run(click);});
+    iconRow->addWidget(item);
+    return item;
+  };
+  for(const auto& [name,id,mode]:std::vector<std::tuple<QString,QString,int>>{
+       {"Esquerda","align_left",0},{"Centro X","align_center_x",4},
+       {"Direita","align_right",1},{"Topo","align_top",2},
+       {"Centro Y","align_center_y",5},{"Base","align_bottom",3}}){
+   iconButton(QString("quick_align_%1").arg(mode),id,
+      "Alinhar "+name+" (2 ou mais formas); referência: objeto ativo",
+      [this,mode]{
+       QAction* action=findChild<QAction*>(QString("align_action_%1_19_8").arg(mode));
+       check(action!=nullptr,"Comando de alinhamento indisponível.");
+       action->trigger();
+      });
+  }
+  iconButton("quick_flip_horizontal","flip_h","Espelhar horizontalmente — seleção",
+             [this]{buttons.at("mirror_horiz")->click();});
+  iconButton("quick_flip_vertical","flip_v","Espelhar verticalmente — seleção",
+             [this]{buttons.at("mirror_vertical")->click();});
+  iconButton("quick_rotate_90","rotate_90","Girar seleção 90°",
+             [this]{buttons.at("rotate_90")->click();});
+  quickRow->addWidget(editIcons);
   quickRow->addStretch();
   // Referências em SOMENTE LEITURA: sem mutação no Editor, sem movimento e sem G-code.
   auto* referenceMenuButton=new QToolButton;
@@ -3043,6 +3106,12 @@ addVertical(inspector,"mirror_horiz","Espelhar horizontal ↔",[this]{
  const auto ids=selection();check(!ids.empty(),"Espelhar: selecione um objeto.");
  const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
  view.editor.mirrorX(ids,(lo.x+hi.x)/2.0);view.rebuild();
+});
+addVertical(inspector,"mirror_vertical","Espelhar vertical ↕",[this]{
+ if(bezierToolActive_)throw std::runtime_error("Espelhar: selecione polilinhas nesta beta.");
+ const auto ids=selection();check(!ids.empty(),"Espelhar: selecione um objeto.");
+ const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
+ view.editor.mirrorY(ids,(lo.y+hi.y)/2.0);view.rebuild();
 });
 addVertical(inspector,"rotate_90","Girar 90°",[this]{
  if(bezierToolActive_)throw std::runtime_error("Girar: somente polilinhas nesta beta.");
@@ -3523,6 +3592,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   command(arrangeMenu,"Agrupar","group");command(arrangeMenu,"Desagrupar","ungroup");
   command(arrangeMenu,"Enviar selecao para camada ativa (Ctrl+L)","move_layer");
   command(arrangeMenu,"Girar 90°","rotate_90");
+  command(arrangeMenu,"Espelhar horizontalmente","mirror_horiz");
+  command(arrangeMenu,"Espelhar verticalmente","mirror_vertical");
   auto* alignMenu=arrangeMenu->addMenu("Alinhar formas");
   for(const auto& [label,mode]:std::vector<std::pair<QString,int>>{
        {"Esquerda",0},{"Direita",1},{"Topo",2},{"Base",3},
