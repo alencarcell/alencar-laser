@@ -3774,6 +3774,38 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* statusRow=new QHBoxLayout(statusFrame);statusRow->setContentsMargins(12,4,12,4);
   status=new QLabel;status->setObjectName("status");status->setMinimumHeight(24);
   statusRow->addWidget(status,1);layout->addWidget(statusFrame);
+  // Faixa operacional reservada e INTENCIONALMENTE INATIVA nesta candidata.
+  // O unico controle Pausar/Continuar ativo agora e o da PREVIA OFFLINE.
+  auto* operationStrip=new QFrame(this);operationStrip->setObjectName("operation_strip_19_8");
+  auto* operationRow=new QHBoxLayout(operationStrip);
+  operationRow->setContentsMargins(9,1,9,1);operationRow->setSpacing(4);
+  auto* operationTitle=new QLabel("OPERAÇÃO • BLOQUEADA");
+  operationTitle->setObjectName("operation_title_19_8");
+  operationTitle->setToolTip("Os comandos físicos terão homologação separada da edição offline.");
+  operationRow->addWidget(operationTitle);
+  auto addOperation=[&](const QString& key,const QString& glyph,const QString& name){
+   auto* b=new QToolButton(operationStrip);
+   b->setObjectName(key);b->setIcon(alaser::toolGlyph(glyph));b->setIconSize(QSize(19,19));
+   b->setFixedSize(30,28);b->setFocusPolicy(Qt::NoFocus);
+   b->setAccessibleName(name);b->setToolTip(name+" — INDISPONÍVEL: controle físico não homologado");
+   b->setEnabled(false);operationRow->addWidget(b);return b;
+  };
+  addOperation("operation_start_disabled","play","Iniciar trabalho");
+  addOperation("operation_pause_continue_disabled","pause","Pausar / Continuar trabalho");
+  addOperation("operation_stop_disabled","stop","Parar trabalho");
+  addOperation("operation_frame_disabled","fit","Enquadrar material (máquina)");
+  operationRow->addSpacing(8);
+  auto* estimated=new QLabel("Estimado: —");
+  estimated->setObjectName("operation_estimated_19_8");
+  estimated->setToolTip("Tempo físico ainda não calculado; consulte a prévia offline para estimativa virtual.");
+  operationRow->addWidget(estimated);
+  operationRow->addSpacing(5);
+  auto* elapsed=new QLabel("Decorrido: —");
+  elapsed->setObjectName("operation_elapsed_19_8");
+  elapsed->setToolTip("Relógio físico indisponível sem operação homologada.");
+  operationRow->addWidget(elapsed);
+  operationRow->addStretch();
+  layout->insertWidget(layout->count()-1,operationStrip);
   connect(layers,&QComboBox::currentIndexChanged,this,[this]{if(!refreshing)refreshFlags();});
   auto flags=[this]{if(!refreshing)run([this]{view.editor.setLayerFlags(layers->currentData().toInt(),visible->isChecked(),locked->isChecked());view.rebuild();});};
    connect(visible,&QCheckBox::clicked,this,flags);connect(locked,&QCheckBox::clicked,this,flags);
