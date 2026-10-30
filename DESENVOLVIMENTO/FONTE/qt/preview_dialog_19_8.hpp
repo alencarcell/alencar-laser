@@ -5,6 +5,7 @@
 #include "preview_motion_19_8.hpp"
 #include "preview_raster_19_8.hpp"
 #include "preview_route_19_8.hpp"
+#include "preview_workarea_19_8.hpp"
 #include <QDialog>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -238,6 +239,16 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  innerFirst->setEnabled(false);
  innerFirst->setToolTip("Somente formas estritamente contidas por contornos fechados da mesma camada; pode aumentar deslocamentos.");
  QObject::connect(optimizeTravel,&QCheckBox::toggled,innerFirst,&QWidget::setEnabled);
+ auto* restrictBed=new QCheckBox("Simular somente dentro da mesa (recomendado)");
+ restrictBed->setObjectName("preview_restrict_bed_19_8");
+ restrictBed->setChecked(true);
+ restrictBed->setToolTip("Nao altera desenhos; corta trajetos somente na simulacao e mostra quantos ficaram fora da mesa.");
+ auto* boundsWarning=new QLabel;
+ boundsWarning->setObjectName("preview_bed_warning");
+ boundsWarning->setWordWrap(true);
+ boundsWarning->setStyleSheet("color:#FFA64B;");
+ settingsColumn->addWidget(restrictBed);
+ settingsColumn->addWidget(boundsWarning);
  auto* useLayerFeeds=new QCheckBox("Utilizar velocidades virtuais salvas por camada");
  useLayerFeeds->setChecked(true);
  useLayerFeeds->setToolTip("Velocidade e passes de cada camada influenciam a simulacao. Potencia/M3/M4 continuam apenas registrados.");
@@ -285,6 +296,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  std::size_t nestedPairs=0;
  double optimizedLineTravelMm=sourcePlan.travelMm;
  double nominalSeconds=0.0;
+ bed198::Report bedReport;
  auto stop=[&](){
   clock.stop();play->setText("▶ Reproduzir");
  };
@@ -371,7 +383,17 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
     raster::appendMask(combined,mask,{imageBounds.x(),imageBounds.y(),
                        imageBounds.width(),imageBounds.height()},scan);
    }
-   shown=repeatedByLayer(combined,source,passes->value());
+   const Plan repeated=repeatedByLayer(combined,source,passes->value());
+   if(restrictBed->isChecked()){
+    shown=bed198::restrictToBed(repeated,drawingWidthMm,drawingHeightMm,&bedReport);
+   }else{
+    shown=repeated;bedReport={};
+   }
+   const std::size_t omitted=bedReport.outsideSegments+bedReport.clippedSegments;
+   boundsWarning->setText(omitted?
+     QString("Atenção: %1 trechos fora ou parcialmente fora da mesa; %2 mm de gravação virtual fora da área ignorados.")
+       .arg(qulonglong(omitted)).arg(bedReport.omittedLaserMm,0,'f',1):
+     QString("Prévia: percursos dentro da mesa; emissão física permanece bloqueada."));
    const auto layerSpeed=[&](int id){
     const auto it=source.layers.find(id);
     return useLayerFeeds->isChecked()&&it!=source.layers.end()?
@@ -394,7 +416,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    play->setEnabled(!shown.moves.empty()&&timeline.totalSeconds>0);
    render();
   }catch(const std::exception& e){
-   shown={};timeline={};nominalSeconds=0.0;
+   shown={};timeline={};nominalSeconds=0.0;bedReport={};boundsWarning->setText("Prévia indisponível até corrigir dados.");
    stats->setText(QString("Previa limitada: %1").arg(QString::fromUtf8(e.what())));
    play->setEnabled(false);render();
   }
@@ -409,6 +431,10 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"schema","alencar-laser-simulation-report-19.8"},
    {"experimental",true},{"machine_commands_sent",false},
    {"model","kinematic-start-stop-angular-runs-12deg"},
+   {"limited_to_bed",restrictBed->isChecked()},
+   {"outside_segments_omitted",int(bedReport.outsideSegments)},
+   {"outside_segments_clipped",int(bedReport.clippedSegments)},
+   {"outside_laser_mm_omitted",bedReport.omittedLaserMm},
    {"notes","Experimental Line, vector Fill, binary image. Simplified scan, no GRBL/LightBurn equivalence"},
    {"global_passes",passes->value()},
    {"layer_passes_applied",true},
@@ -450,6 +476,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
       "Nao foi possivel salvar o relatorio. Nenhum dado foi enviado.");
   }
  });
+ QObject::connect(restrictBed,&QCheckBox::toggled,&dialog,[&](bool){recalculate();});
  QObject::connect(progress,&QSlider::valueChanged,&dialog,[&](int){render();});
  for(auto* box:{cut,rapid,maxX,maxY,accelX,accelY,rapidAx,rapidAy})
   QObject::connect(box,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
