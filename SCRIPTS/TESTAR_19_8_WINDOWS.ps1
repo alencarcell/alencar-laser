@@ -297,7 +297,7 @@ try {
         Write-Host 'TESOURA: compilando nucleo 19.7/19.8 e regressao GUI Qt, offline.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test7_qt6 alencar_test19_7_scissors_layers alencar_test19_8_scissors_span alencar_test19_8_native_scissors_realcut
         Checar-Saida 'Compilacao Qt e nucleos Tesoura'
-        foreach ($nome in @('alencar_test19_7_scissors_layers', 'alencar_test19_8_scissors_span, 'alencar_test19_8_native_scissors_realcut')) {
+        foreach ($nome in @('alencar_test19_7_scissors_layers', 'alencar_test19_8_scissors_span', 'alencar_test19_8_native_scissors_realcut')) {
             $executavel = Join-Path $build ($nome + '.exe')
             if (-not (Test-Path -LiteralPath $executavel -PathType Leaf)) { throw "Teste da Tesoura ausente: $executavel" }
             Write-Host "TESTANDO: $nome" -ForegroundColor Cyan
