@@ -204,7 +204,7 @@ public:
   traceItem_->setAcceptedMouseButtons(Qt::NoButton);
   nodesItem_=scene_.addPath(QPainterPath());
   nodesItem_->setBrush(QColor("#15A4EF"));
-  nodesItem_->setPen(Qt::NoPen);
+  nodesItem_->setPen(QPen(Qt::NoPen));
   nodesItem_->setAcceptedMouseButtons(Qt::NoButton);
   nodesItem_->setVisible(false);
   setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
@@ -4096,6 +4096,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* preview=new TracePreviewCanvas198(&dlg);
   preview->setMinimumHeight(280);
   layout->addWidget(preview,1);
+  auto* traceViewOptions=new QHBoxLayout;
+  auto* fadeReference=new QCheckBox("Esmaecer imagem original");
+  fadeReference->setObjectName("trace_fade_reference");
+  fadeReference->setChecked(true);
+  auto* showTraceNodes=new QCheckBox("Mostrar nós do traçado");
+  showTraceNodes->setObjectName("trace_show_nodes");
+  traceViewOptions->addWidget(fadeReference);
+  traceViewOptions->addWidget(showTraceNodes);
+  traceViewOptions->addStretch();
+  layout->addLayout(traceViewOptions);
+  preview->setImageFaded(true);
+  connect(fadeReference,&QCheckBox::toggled,preview,&TracePreviewCanvas198::setImageFaded);
+  connect(showTraceNodes,&QCheckBox::toggled,preview,&TracePreviewCanvas198::setNodesVisible);
   auto* fitTrace=new QPushButton("Ajustar imagem na janela");
   layout->addWidget(fitTrace);
   connect(fitTrace,&QPushButton::clicked,preview,&TracePreviewCanvas198::resetView);
@@ -6186,6 +6199,13 @@ static QJsonObject textFillAlign198Test(){
  tracer.resize(340,240);tracer.show();QApplication::processEvents();
  QImage sourceImage(100,80,QImage::Format_ARGB32);sourceImage.fill(Qt::white);
  tracer.showResult(sourceImage,100.,{{{10,10},{50,10},{50,35}}});
+ tracer.setImageFaded(true);
+ tracer.setNodesVisible(true);
+ check(tracer.imageFaded()&&tracer.nodesVisible()&&tracer.shownNodeCount()==3,
+       "Traçado: a imagem não esmaeceu ou os nós não foram exibidos");
+ tracer.setNodesVisible(false);
+ check(!tracer.nodesVisible()&&tracer.shownNodeCount()==0,
+       "Traçado: nós continuaram visíveis após desativação");
  tracer.resetView();
  QWheelEvent traceWheel(QPointF(160,100),QPointF(160,100),QPoint(0,0),
                    QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
