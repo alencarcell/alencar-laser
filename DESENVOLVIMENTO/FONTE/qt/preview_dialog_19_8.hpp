@@ -210,8 +210,11 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
     "Imagem original intacta; simula limiar/dither sem aplicar vetorizacao":
     "Nenhuma imagem importada na mesa");
  auto* interval=new QDoubleSpinBox;interval->setRange(.05,5.0);
- interval->setDecimals(2);interval->setSingleStep(.05);
+ interval->setObjectName("preview_global_line_interval_19_8");
+ interval->setDecimals(3);interval->setSingleStep(.05);
  interval->setValue(.20);interval->setSuffix(" mm");
+ interval->setToolTip("Intervalo global: aplica-se às imagens; "
+    "ao Fill aplica-se apenas quando desmarcado o uso dos intervalos por camada.");
  auto* overscan=new QDoubleSpinBox;overscan->setRange(0,20.0);
  overscan->setDecimals(1);overscan->setSingleStep(.5);
  overscan->setValue(1.0);overscan->setSuffix(" mm");
@@ -223,7 +226,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  bitmapThreshold->setValue(128);
  rasterControls->addWidget(enableFill,0,0,1,2);
  rasterControls->addWidget(enableImage,0,2,1,2);
- rasterControls->addWidget(new QLabel("Intervalo:"),1,0);
+ rasterControls->addWidget(new QLabel("Intervalo global:"),1,0);
  rasterControls->addWidget(interval,1,1);
  rasterControls->addWidget(new QLabel("Overscan virtual:"),1,2);
  rasterControls->addWidget(overscan,1,3);
@@ -231,6 +234,13 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  rasterControls->addWidget(bitmapMode,2,2);
  rasterControls->addWidget(bitmapThreshold,2,3);
  settingsColumn->addLayout(rasterControls);
+ auto* useLayerIntervals=new QCheckBox("Fill: usar intervalo entre linhas salvo por camada");
+ useLayerIntervals->setObjectName("preview_use_layer_intervals_19_8");
+ useLayerIntervals->setToolTip("Ativado: cada camada Fill usa seu intervalo em mm. "
+    "Desativado: Fill usa o global. Imagens sempre usam o intervalo global. "
+    "Somente simulação OFFLINE; independente de M3/M4.");
+ useLayerIntervals->setChecked(true);
+ settingsColumn->addWidget(useLayerIntervals);
  auto* optimizeTravel=new QCheckBox("Reduzir deslocamentos (heuristica local por camada)");
  optimizeTravel->setToolTip("Vizinho mais proximo; reordena apenas Line, nao garante a rota global mais curta. Sem modificar o projeto.");
  auto* innerFirst=new QCheckBox("Contornos internos primeiro (corte virtual)");
@@ -366,7 +376,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
       sourcePlan;
    optimizedLineTravelMm=combined.travelMm;
    if(enableFill->isChecked()){
-    raster::appendFill(combined,source,scan);
+    raster::appendFill(combined,source,scan,250000,useLayerIntervals->isChecked());
     combined.ignoredFill=0; // Fill vetorial incluido; contornos abertos nao geram hatch.
    }
    if(enableImage->isChecked()&&imagePresent){
@@ -471,6 +481,8 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"fill_simulation_enabled",enableFill->isChecked()},
    {"image_simulation_enabled",enableImage->isChecked()&&imagePresent},
    {"scan_line_interval_mm",interval->value()},
+   {"fill_layer_intervals_enabled",useLayerIntervals->isChecked()},
+   {"fill_layer_intervals_are_machine_commands",false},
    {"virtual_overscan_mm",overscan->value()},
    {"bidirectional_scan",bidirectional->isChecked()},
    {"image_mode",bitmapMode->currentIndex()==1?"ordered_dither":"threshold"},
@@ -499,6 +511,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
   }
  });
  QObject::connect(restrictBed,&QCheckBox::toggled,&dialog,[&](bool){recalculate();});
+ QObject::connect(useLayerIntervals,&QCheckBox::toggled,&dialog,[&](bool){recalculate();});
  QObject::connect(progress,&QSlider::valueChanged,&dialog,[&](int){render();});
  for(auto* box:{cut,rapid,maxX,maxY,accelX,accelY,rapidAx,rapidAy})
   QObject::connect(box,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
