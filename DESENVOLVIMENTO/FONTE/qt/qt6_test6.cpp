@@ -6594,13 +6594,12 @@ static QJsonObject drawAndJoin198Test(){
      ui.view.nativeItemPath(nativeKey).pointAtPercent(.35));
  QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,scissorPt);
  QApplication::processEvents();
- check(ui.view.nativeItemCount()==1&&
-       ui.view.nativeItemPath(nativeKey).boundingRect().left()>
-       initialCurve.boundingRect().left()+3.0,
-       "Tesoura nativa manteve toda a geometria em vez de remover aresta");
+ check(ui.view.nativeItemCount()==0&&!ui.view.hasNativeDocument(),
+       "Tesoura deve remover realmente a unica aresta Bezier da forma");
  clickButton(ui,"undo");
- check(ui.view.nativeItemCount()==1,
-       "Desfazer Tesoura nao restaurou um unico contorno Bézier");
+ check(ui.view.nativeItemCount()==1&&
+       ui.view.nativeItemPath(nativeKey)==initialCurve,
+       "Desfazer Tesoura nao restaurou geometria Bezier original exata");
  clickButton(ui,"select");
  const QPoint hitAgain=ui.view.mapFromScene(
      ui.view.nativeItemPath(nativeKey).pointAtPercent(.25));
