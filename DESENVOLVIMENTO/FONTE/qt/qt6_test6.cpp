@@ -923,6 +923,7 @@ public:
   rasterSource_=image;
   rasterRect_=QRectF(20,20,120.,120.*image.height()/image.width());
   rasterSelected_=true;rebuild();viewport()->update();
+  if(diagnosticEvent)diagnosticEvent("image_imported",1);
  }
  const QImage& rasterImage()const{return rasterSource_;}
  QRectF rasterBounds()const{return rasterRect_;}
@@ -931,7 +932,10 @@ public:
   rasterSelected_=rasterDragging_=rasterResizing_=false;
   rasterSource_=QImage();rasterRect_=QRectF();
   if(rasterOverlay_){scene_.removeItem(rasterOverlay_);delete rasterOverlay_;rasterOverlay_=nullptr;}
+  if(rasterFrame_){scene_.removeItem(rasterFrame_);delete rasterFrame_;rasterFrame_=nullptr;}
+  if(rasterHandle_){scene_.removeItem(rasterHandle_);delete rasterHandle_;rasterHandle_=nullptr;}
   viewport()->update();
+  if(stateChanged)stateChanged();
  }
 private:
  // Rotinas internas de atualização dos objetos nativos permanecem encapsuladas.
