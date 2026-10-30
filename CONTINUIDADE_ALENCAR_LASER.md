@@ -668,3 +668,10 @@ Registrar mudanças, testes e pendências.
 - **Verificação automática:** modo `--branding-19-8-test` cria fixture temporária e valida a descoberta, a prevenção de nomes fora da pasta e carregamento do ícone. Script `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteMarca` foi adicionado para compilar e executar o teste, gerando JSON. Workflow GitHub atualizado para incluir arquivos Qt, CMake e o script nos gatilhos; CI Windows está pendente de confirmação desta rodada.
 - **Documentação operacional:** `DESENVOLVIMENTO/ESPECIFICACOES/IDENTIDADE_PEGASO_V1_20261029.md`, orientando simulação, cópia somente para o kit versionado, fallback e QA visual. Testar 16/32/48 px, escala 100/125/150%, barra de título, cabeçalho, splash e tema claro. Ainda falta incorporar o ícone ao recurso PE do EXE/instalador, se desejado; o `.ico` já existe no kit.
 - **Não homologado:** nenhuma compilação real Windows nem inspeção visual da mudança nesta rodada; `main`, `APLICATIVO`, base aprovada e laser físico preservados.
+
+
+## 29/10/2026 — CI Qt6 Windows verificada para marca Pégaso
+
+- **GitHub Actions verificado na mesma rodada:** run `40983905046`, commit `83b3f66de`, com jobs `Qt6 UCRT64 - compile (sem laser)` e `C++20 offline: tesoura, texto, simulador` finalizados **SUCCESS** (passos de compilacao/tese passaram). Isto cobre compilação dos novos headers, interface e modo `--branding-19-8-test` no fonte presente nesse commit, mas não executa efetivamente a GUI com o kit de imagem.
+- **PR run mais recente verificado:** `40983999178`, commit `ea70e68d5`, `SUCCESS`, somente teste portatil (Qt real no Windows ainda depende do gate local). A verificação de ícone no Windows com assets instalados, qualidade visual do cabeçalho/splash e reversão continua pendente.
+- Fonte e documentação atualizados; **não declarar homologação** da versão 19.8 ou da aplicação da identidade em `APLICATIVO`.
