@@ -395,19 +395,20 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    // Otherwise the operator loses the warning when inspecting full geometry.
    const Plan bounded=bed198::restrictToBed(repeated,drawingWidthMm,drawingHeightMm,&bedReport);
    shown=restrictBed->isChecked()?bounded:repeated;
-   const std::size_t omitted=bedReport.outsideLaserSegments+bedReport.clippedLaserSegments;
-   boundsWarning->setVisible(omitted>0);
-   if(omitted){
+   // Completely external paths can remain in the editor as spare art.
+   // Highlight ONLY active laser lines that cross the bed boundary.
+   const bool crossesBed=bed198::partiallyOutsideActiveGeometry(bedReport);
+   boundsWarning->setVisible(crossesBed);
+   if(crossesBed){
     boundsWarning->setText(QString(
-      "ATENÇÃO — Fora da mesa física: %1 segmentos totalmente fora; "
-      "%2 cruzando o limite; %3 mm de trajeto laser virtual fora. "
-      "%4. Ajuste a posição/escala antes de iniciar qualquer trabalho real.")
-      .arg(qulonglong(bedReport.outsideLaserSegments))
+      "ATENÇÃO — %1 trecho(s) de gravação cruzam o limite da mesa. "
+      "%2 mm de percurso foram cortados nesses cruzamentos. "
+      "%3. Objetos totalmente externos não precisam ser executados.")
       .arg(qulonglong(bedReport.clippedLaserSegments))
-      .arg(bedReport.omittedLaserMm,0,'f',2)
+      .arg(bedReport.clippedLaserMm,0,'f',2)
       .arg(restrictBed->isChecked()?
-        "Prévia recortada: arte NÃO está completa":
-        "Limite desligado SOMENTE para inspeção; operação física bloqueada"));
+        "Prévia parcial: ajuste a arte que cruza a borda":
+        "Recorte desligado apenas para inspeção; laser físico bloqueado"));
    }
    const auto layerSpeed=[&](int id){
     const auto it=source.layers.find(id);
@@ -454,6 +455,8 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"outside_laser_segments_omitted",int(bedReport.outsideLaserSegments)},
    {"outside_laser_segments_clipped",int(bedReport.clippedLaserSegments)},
    {"outside_laser_mm_omitted",bedReport.omittedLaserMm},
+   {"outside_laser_mm_from_clipped",bedReport.clippedLaserMm},
+   {"partial_workarea_warning",bed198::partiallyOutsideActiveGeometry(bedReport)},
    {"notes","Experimental Line, vector Fill, binary image. Simplified scan, no GRBL/LightBurn equivalence"},
    {"global_passes",passes->value()},
    {"layer_passes_applied",true},
