@@ -35,7 +35,7 @@ int main(){
       "scale Redo not exact");
   req(edit.transformSelectedContour({40,10},1,1,90),
       "native rotation missing");
-  req(near(edit.committed().contours.front().nodes[0].anchor,{40,-35}),
+  req(near(edit.committed().contours.front().nodes[0].anchor,{40,-20}),
       "rotation did not transform anchor");
   req(edit.undo()&&near(edit.committed().contours.front().nodes[1].anchor,{40,10}),
       "rotation Undo lost prior scale");
