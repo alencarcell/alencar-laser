@@ -6683,6 +6683,8 @@ static QJsonObject layoutIcons198Test(){
  auto* header=w.findChild<QFrame*>("topHeader");
  check(header&&header->maximumHeight()<=48,"Cabecalho ultrapassou altura compacta");
  for(const QString& name:{"quick_align_0","quick_align_4","quick_align_1",
+                          "quick_align_2","quick_align_5","quick_align_3",
+                          "quick_align_6","quick_center_bed_19_8",
                           "quick_flip_horizontal","quick_flip_vertical","quick_rotate_90"}){
   auto* b=w.findChild<QToolButton*>(name);
   check(b&&b->isEnabled()&&!b->icon().isNull()&&!b->toolTip().isEmpty(),
@@ -6701,6 +6703,26 @@ static QJsonObject layoutIcons198Test(){
  const auto boundsTwo=boundsOf(w.view.editor.state().doc,{two});
  check(std::abs(boundsOne.first.x-boundsTwo.first.x)<1e-7,
        "Alinhar pelo icone nao moveu as formas");
+ // Align both centers is NOT the same as centering on the machine bed.
+ w.findChild<QToolButton*>("quick_align_6")->click();
+ const auto equalA=boundsOf(w.view.editor.state().doc,{one});
+ const auto equalB=boundsOf(w.view.editor.state().doc,{two});
+ check(std::abs(equalA.first.x+equalA.second.x-equalB.first.x-equalB.second.x)<1e-7&&
+       std::abs(equalA.first.y+equalA.second.y-equalB.first.y-equalB.second.y)<1e-7,
+       "Alinhar centros X/Y nao centralizou as duas formas entre si");
+ // The external spare contour must never be moved by center-on-bed.
+ const int spare=w.view.editor.addContour({{510,10},{530,10},{520,25}},true);
+ const auto spareBefore=boundsOf(w.view.editor.state().doc,{spare});
+ w.view.rebuild();
+ w.findChild<QToolButton*>("quick_center_bed_19_8")->click();
+ const auto [unionLo,unionHi]=boundsOf(w.view.editor.state().doc,{one,two});
+ check(std::abs((unionLo.x+unionHi.x)/2.-200.)<1e-7&&
+       std::abs((unionLo.y+unionHi.y)/2.-200.)<1e-7,
+       "Centralizar selecao na mesa fisica nao posicionou o grupo em 200,200");
+ const auto spareAfter=boundsOf(w.view.editor.state().doc,{spare});
+ check(std::abs(spareBefore.first.x-spareAfter.first.x)<1e-7&&
+       std::abs(spareBefore.second.y-spareAfter.second.y)<1e-7,
+       "Centralizar selecao moveu objeto de reserva que nao foi selecionado");
  w.view.activate({one,0});
  const auto* before=get(w.view.editor.state().doc,{one,0});
  const double startY=before->nodes.front().p.y;
@@ -6710,6 +6732,8 @@ static QJsonObject layoutIcons198Test(){
        "Espelhamento vertical nao refletiu os nos do objeto");
  w.close();
  return {{"status","PASS"},{"icon_actions_working",true},
+         {"align_both_centers",true},{"center_selection_on_bed",true},
+         {"spare_art_untouched",true},
          {"vertical_mirror",true},{"header_compact",true},
          {"physical_operation_disabled",true}};
 }
