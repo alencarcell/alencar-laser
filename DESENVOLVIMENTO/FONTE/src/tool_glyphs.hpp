@@ -52,6 +52,19 @@ inline QIcon toolGlyph(const QString& id){
    else if(id=="align_bottom"){p.drawRect(7,16,8,10);p.drawRect(19,8,8,18);}
    else {p.drawRect(7,11,8,10);p.drawRect(19,7,8,18);}
   }
+ }else if(id=="align_both"){
+  // Two shapes share the SAME center, X and Y (relative alignment).
+  p.setPen(QPen(QColor("#F1B575"),1.1,Qt::DashLine));
+  p.drawLine(16,3,16,29);p.drawLine(3,16,29,16);p.setPen(pen);
+  p.drawRect(QRectF(7,10,11,10));p.drawRect(QRectF(11,7,11,16));
+  p.setBrush(QColor("#DE914C"));p.drawEllipse(QPointF(16,16),2.,2.);
+ }else if(id=="center_bed"){
+  // The OUTER frame represents the physical bed, NOT another object.
+  p.setPen(QPen(QColor("#F1B575"),1.3));p.drawRect(QRectF(3,3,26,26));
+  p.setPen(QPen(QColor("#F1B575"),1.,Qt::DashLine));
+  p.drawLine(16,4,16,28);p.drawLine(4,16,28,16);p.setPen(pen);
+  p.drawRect(QRectF(11,11,10,10));
+  p.setBrush(QColor("#DE914C"));p.drawEllipse(QPointF(16,16),1.7,1.7);
  }else if(id=="flip_h"||id=="flip_v"){
   if(id=="flip_h"){
    p.setPen(QPen(QColor("#F1B575"),1.3,Qt::DashLine));p.drawLine(16,3,16,29);p.setPen(pen);
