@@ -32,6 +32,8 @@ jobs:
           mkdir -p build_ci_native_19_8
           g++ -std=c++20 -O2 -Wall -Wextra tests/preview_draw_join_19_8_standalone.cpp -o build_ci_native_19_8/draw_join
           ./build_ci_native_19_8/draw_join
+          g++ -std=c++20 -O2 -Wall -Wextra tests/line_interval_19_8_standalone.cpp -o build_ci_native_19_8/line_interval
+          ./build_ci_native_19_8/line_interval
           g++ -std=c++20 -O2 -Wall -Wextra tests/alignment_mirror_19_8_standalone.cpp -o build_ci_native_19_8/alignment_mirror
           ./build_ci_native_19_8/alignment_mirror
           g++ -std=c++20 -O2 -Wall -Wextra tests/native_scissors_realcut_19_8_standalone.cpp -o build_ci_native_19_8/native_scissors
