@@ -6678,7 +6678,22 @@ static QJsonObject drawAndJoin198Test(){
  QApplication::processEvents();
  check(ui.view.nativeItemCount()==1&&ui.view.hasNativeDocument(),
        "Refazer criacao nao restaurou QGraphicsPathItem Bézier");
- // Native curve is reselectable and its handles are editable after redo.
+ // Native curve is reselectable, and SELECT shows shared scale handles.
+ clickButton(ui,"select");
+ QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,hitPoint);
+ QApplication::processEvents();
+ const QRectF nativeBefore=ui.view.nativeItemPath(nativeKey).boundingRect();
+ const QPoint corner=ui.view.mapFromScene(nativeBefore.bottomRight());
+ QTest::mousePress(viewport,Qt::LeftButton,Qt::NoModifier,corner);
+ QTest::mouseMove(viewport,corner+QPoint(28,22));
+ QTest::mouseRelease(viewport,Qt::LeftButton,Qt::NoModifier,corner+QPoint(28,22));
+ QApplication::processEvents();
+ check(ui.view.nativeItemPath(nativeKey).boundingRect().width()>nativeBefore.width()+3.,
+       "Bézier selecionada não respondeu ao redimensionamento pelas alças");
+ check(!ui.view.busy(),"Redimensionamento Bézier deixou editor bloqueado por gesto pendente");
+ clickButton(ui,"undo"); // Undo restores EXACT cubic for following tests.
+ check(ui.view.nativeItemPath(nativeKey)==initialCurve,
+       "Undo da escala Bézier não restaurou a geometria original");
  clickButton(ui,"select");
  QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,hitPoint);
  QTest::mouseDClick(viewport,Qt::LeftButton,Qt::NoModifier,hitPoint);
