@@ -2934,9 +2934,22 @@ public:
              [this]{
               check(!bezierToolActive_,
                     "Centralizar na mesa: nesta beta selecione polilinhas, não curvas Bézier nativas.");
-              const auto ids=selection();
-              check(!ids.empty(),"Selecione uma ou mais formas para centralizar na mesa.");
-              const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
+              const auto requested=selection();
+              check(!requested.empty(),"Selecione uma ou mais formas para centralizar na mesa.");
+              // Move complete groups together, even when just one member
+              // of a group is explicitly selected.
+              std::set<int> expanded(requested.begin(),requested.end());
+              std::set<int> groups;
+              const auto& state=view.editor.state();
+              for(int id:requested){
+               const auto found=state.objects.find(id);
+               check(found!=state.objects.end(),"Objeto selecionado não encontrado.");
+               if(found->second.group>0)groups.insert(found->second.group);
+              }
+              for(const auto& [id,meta]:state.objects)
+               if(meta.group>0&&groups.count(meta.group))expanded.insert(id);
+              const std::vector<int> ids(expanded.begin(),expanded.end());
+              const auto [lo,hi]=boundsOf(state.doc,ids);
               const Pt currentCenter{(lo.x+hi.x)/2.,(lo.y+hi.y)/2.};
               const Pt shift{workspaceCfg_.machineWidth/2.-currentCenter.x,
                              workspaceCfg_.machineHeight/2.-currentCenter.y};
