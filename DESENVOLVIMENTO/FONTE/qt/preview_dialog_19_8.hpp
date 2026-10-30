@@ -239,7 +239,17 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  useLayerIntervals->setToolTip("Ativado: cada camada Fill usa seu intervalo em mm. "
     "Desativado: Fill usa o global. Imagens sempre usam o intervalo global. "
     "Somente simulação OFFLINE; independente de M3/M4.");
- useLayerIntervals->setChecked(true);
+ // Preserve the legacy global interval on projects without custom Fill
+ // settings. Once the operator changes a Fill layer pitch, select per-layer
+ // scanning automatically; users can still override with the checkbox.
+ bool customFillPitch=false;
+ for(const auto& [id,layer]:source.layers){
+  (void)id;
+  if(layer.mode=="Fill"&&std::abs(layer.lineIntervalMm-0.20)>1e-8){
+   customFillPitch=true;break;
+  }
+ }
+ useLayerIntervals->setChecked(customFillPitch);
  settingsColumn->addWidget(useLayerIntervals);
  auto* optimizeTravel=new QCheckBox("Reduzir deslocamentos (heuristica local por camada)");
  optimizeTravel->setToolTip("Vizinho mais proximo; reordena apenas Line, nao garante a rota global mais curta. Sem modificar o projeto.");
