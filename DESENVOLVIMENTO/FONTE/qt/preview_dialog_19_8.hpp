@@ -293,12 +293,16 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  QTimer clock(&dialog);clock.setInterval(60);
  QElapsedTimer elapsedClock;
  double playbackTime=0;
+ bool playbackPaused=false;
  std::size_t nestedPairs=0;
  double optimizedLineTravelMm=sourcePlan.travelMm;
  double nominalSeconds=0.0;
  bed198::Report bedReport;
- auto stop=[&](){
-  clock.stop();play->setText("▶ Reproduzir");
+ auto stop=[&](bool paused=false){
+  clock.stop();playbackPaused=paused;
+  play->setText(paused?"▶ Continuar":"▶ Reproduzir");
+  play->setToolTip(paused?"Retomar simulação offline do ponto atual":
+                             "Reproduzir a simulação offline, sem laser físico");
  };
  // Cache incremental: durante reproducao avanca so o trecho novo;
  // ao retroceder pelo slider, reconstrói a partir do inicio.
@@ -494,11 +498,13 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
                   &dialog,[&](int){recalculate();});
  QObject::connect(showTravel,&QCheckBox::toggled,&dialog,[&](bool){render();});
  QObject::connect(play,&QPushButton::clicked,&dialog,[&](){
-  if(clock.isActive()){stop();return;}
+  if(clock.isActive()){stop(true);return;}
   if(timeline.totalSeconds<=0)return;
-  if(progress->value()>=1000)progress->setValue(0);
+  if(progress->value()>=1000){progress->setValue(0);playbackPaused=false;}
   playbackTime=timeline.totalSeconds*double(progress->value())/1000.0;
-  elapsedClock.start();clock.start();play->setText("Ⅱ Pausar");
+  elapsedClock.start();clock.start();playbackPaused=false;
+  play->setText("Ⅱ Pausar");
+  play->setToolTip("Pausar a simulação; o mesmo botão permite continuar");
  });
  QObject::connect(&clock,&QTimer::timeout,&dialog,[&](){
   playbackTime+=elapsedClock.restart()*0.001*speed->value();
