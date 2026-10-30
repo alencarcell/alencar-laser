@@ -2911,8 +2911,14 @@ public:
        {"Esquerda","align_left",0},{"Centro X","align_center_x",4},
        {"Direita","align_right",1},{"Topo","align_top",2},
        {"Centro Y","align_center_y",5},{"Base","align_bottom",3}}){
-   iconButton(QString("quick_align_%1").arg(mode),id,
-      "Alinhar "+name+" (2 ou mais formas); referência: objeto ativo",
+   const QString help=
+     mode==0?"Alinhar bordas esquerdas (2+ objetos) — referência: objeto ativo":
+     mode==1?"Alinhar bordas direitas (2+ objetos) — referência: objeto ativo":
+     mode==2?"Alinhar bordas superiores (2+ objetos) — referência: objeto ativo":
+     mode==3?"Alinhar bordas inferiores (2+ objetos) — referência: objeto ativo":
+     mode==4?"Alinhar centros horizontais / eixo X (2+ objetos) — referência: objeto ativo":
+             "Alinhar centros verticais / eixo Y (2+ objetos) — referência: objeto ativo";
+   iconButton(QString("quick_align_%1").arg(mode),id,help,
       [this,mode]{
        QAction* action=findChild<QAction*>(QString("align_action_%1_19_8").arg(mode));
        check(action!=nullptr,"Comando de alinhamento indisponível.");
