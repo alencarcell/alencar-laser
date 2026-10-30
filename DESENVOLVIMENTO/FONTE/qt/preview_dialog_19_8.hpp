@@ -395,15 +395,15 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    // Otherwise the operator loses the warning when inspecting full geometry.
    const Plan bounded=bed198::restrictToBed(repeated,drawingWidthMm,drawingHeightMm,&bedReport);
    shown=restrictBed->isChecked()?bounded:repeated;
-   const std::size_t omitted=bedReport.outsideSegments+bedReport.clippedSegments;
+   const std::size_t omitted=bedReport.outsideLaserSegments+bedReport.clippedLaserSegments;
    boundsWarning->setVisible(omitted>0);
    if(omitted){
     boundsWarning->setText(QString(
       "ATENÇÃO — Fora da mesa física: %1 segmentos totalmente fora; "
       "%2 cruzando o limite; %3 mm de trajeto laser virtual fora. "
       "%4. Ajuste a posição/escala antes de iniciar qualquer trabalho real.")
-      .arg(qulonglong(bedReport.outsideSegments))
-      .arg(qulonglong(bedReport.clippedSegments))
+      .arg(qulonglong(bedReport.outsideLaserSegments))
+      .arg(qulonglong(bedReport.clippedLaserSegments))
       .arg(bedReport.omittedLaserMm,0,'f',2)
       .arg(restrictBed->isChecked()?
         "Prévia recortada: arte NÃO está completa":
@@ -451,6 +451,8 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"limited_to_bed",restrictBed->isChecked()},
    {"outside_segments_omitted",int(bedReport.outsideSegments)},
    {"outside_segments_clipped",int(bedReport.clippedSegments)},
+   {"outside_laser_segments_omitted",int(bedReport.outsideLaserSegments)},
+   {"outside_laser_segments_clipped",int(bedReport.clippedLaserSegments)},
    {"outside_laser_mm_omitted",bedReport.omittedLaserMm},
    {"notes","Experimental Line, vector Fill, binary image. Simplified scan, no GRBL/LightBurn equivalence"},
    {"global_passes",passes->value()},
