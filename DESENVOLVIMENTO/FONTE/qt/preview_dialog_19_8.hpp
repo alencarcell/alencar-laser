@@ -5,6 +5,7 @@
 #include "preview_motion_19_8.hpp"
 #include "preview_raster_19_8.hpp"
 #include "preview_route_19_8.hpp"
+#include "preview_workarea_19_8.hpp"
 #include <QDialog>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -23,6 +24,10 @@
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QGraphicsPixmapItem>
+#include <QGraphicsPathItem>
+#include <QGraphicsRectItem>
+#include <QPainterPath>
+#include <QPen>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QWheelEvent>
@@ -47,6 +52,10 @@ namespace alaser::sim198 {
 class PreviewCanvas198 final:public QGraphicsView {
  QGraphicsScene scene_;
  QGraphicsPixmapItem* picture_=nullptr;
+ QGraphicsRectItem* bed_=nullptr;
+ QGraphicsPathItem* linePaths_=nullptr;
+ QGraphicsPathItem* travelPaths_=nullptr;
+ QGraphicsPathItem* activePath_=nullptr;
  double zoom_=1.0;
  bool moving_=false;
  QPoint last_{};
@@ -55,7 +64,22 @@ public:
   setObjectName("preview_canvas_zoom_19_8");
   setScene(&scene_);
   picture_=scene_.addPixmap(QPixmap());
-  setRenderHint(QPainter::Antialiasing,true);
+  picture_->setTransformationMode(Qt::SmoothTransformation);
+  bed_=scene_.addRect(QRectF(35,35,660,365),QPen(QColor("#598777"),1.0));
+  linePaths_=scene_.addPath(QPainterPath());
+  travelPaths_=scene_.addPath(QPainterPath());
+  activePath_=scene_.addPath(QPainterPath());
+  QPen cutting(QColor("#E8ECEC"),1.3);
+  QPen moving(QColor("#F26969"),1.0);
+  QPen active(QColor("#F6C068"),1.6);
+  for(QPen* pen:{&cutting,&moving,&active})pen->setCosmetic(true);
+  linePaths_->setPen(cutting);travelPaths_->setPen(moving);activePath_->setPen(active);
+  for(QGraphicsPathItem* item:{linePaths_,travelPaths_,activePath_}){
+   item->setBrush(Qt::NoBrush);item->setAcceptedMouseButtons(Qt::NoButton);
+   item->setVisible(false);
+  }
+  bed_->setVisible(false);bed_->setAcceptedMouseButtons(Qt::NoButton);
+  setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
   setBackgroundBrush(QColor("#16252F"));
   setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
   setResizeAnchor(QGraphicsView::AnchorViewCenter);
@@ -64,8 +88,25 @@ public:
  ~PreviewCanvas198()override{setScene(nullptr);}
  void showImage(const QImage& image){
   picture_->setPixmap(QPixmap::fromImage(image));
+  picture_->setVisible(true);bed_->setVisible(false);
+  for(QGraphicsPathItem* item:{linePaths_,travelPaths_,activePath_})item->setVisible(false);
   scene_.setSceneRect(picture_->boundingRect());
  }
+ // Mantem a geometria vetorial na cena, sem QImage 740x440 esticada no zoom.
+ // Cores, larguras e trajetos sao apenas visuais: nenhuma emissao ou G-code.
+ void showPaths(const QPainterPath& lines,const QPainterPath& travels,
+                const QPainterPath& current,bool showTravel,
+                double drawingWidth,double drawingHeight){
+  picture_->setVisible(false);
+  const double w=std::max(1.,drawingWidth),h=std::max(1.,drawingHeight);
+  const double factor=std::min(660./w,365./h);
+  bed_->setRect(QRectF(35,35,w*factor,h*factor));bed_->setVisible(true);
+  linePaths_->setPath(lines);linePaths_->setVisible(true);
+  travelPaths_->setPath(travels);travelPaths_->setVisible(showTravel);
+  activePath_->setPath(current);activePath_->setVisible(!current.isEmpty());
+  scene_.setSceneRect(QRectF(0,0,740,440));
+ }
+ bool vectorMode()const{return !picture_->isVisible();}
  void resetView(){
   if(scene_.sceneRect().isEmpty())return;
   resetTransform();
@@ -198,6 +239,16 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  innerFirst->setEnabled(false);
  innerFirst->setToolTip("Somente formas estritamente contidas por contornos fechados da mesma camada; pode aumentar deslocamentos.");
  QObject::connect(optimizeTravel,&QCheckBox::toggled,innerFirst,&QWidget::setEnabled);
+ auto* restrictBed=new QCheckBox("Simular somente dentro da mesa (recomendado)");
+ restrictBed->setObjectName("preview_restrict_bed_19_8");
+ restrictBed->setChecked(true);
+ restrictBed->setToolTip("Nao altera desenhos; corta trajetos somente na simulacao e mostra quantos ficaram fora da mesa.");
+ auto* boundsWarning=new QLabel;
+ boundsWarning->setObjectName("preview_bed_warning");
+ boundsWarning->setWordWrap(true);
+ boundsWarning->setStyleSheet("color:#FFA64B;");
+ settingsColumn->addWidget(restrictBed);
+ settingsColumn->addWidget(boundsWarning);
  auto* useLayerFeeds=new QCheckBox("Utilizar velocidades virtuais salvas por camada");
  useLayerFeeds->setChecked(true);
  useLayerFeeds->setToolTip("Velocidade e passes de cada camada influenciam a simulacao. Potencia/M3/M4 continuam apenas registrados.");
@@ -225,7 +276,8 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  auto* speed=new QDoubleSpinBox;speed->setRange(0.1,40);speed->setValue(10);
  speed->setSingleStep(1);speed->setSuffix("×");speed->setToolTip("Velocidade apenas da animacao");
  auto* timeLabel=new QLabel("0 / 0 s");timeLabel->setObjectName("preview_time");
- auto* showTravel=new QCheckBox("Mostrar viagens em vermelho");showTravel->setChecked(true);
+ auto* showTravel=new QCheckBox("Mostrar viagens em vermelho");showTravel->setChecked(false);
+ showTravel->setToolTip("Exibir deslocamentos sem gravação; desligado para destacar os contornos de gravação.");
  controls->addWidget(play);controls->addWidget(resetZoom);
  controls->addWidget(speed);controls->addWidget(timeLabel);
  controls->addStretch();controls->addWidget(showTravel);column->addLayout(controls);
@@ -241,22 +293,27 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  QTimer clock(&dialog);clock.setInterval(60);
  QElapsedTimer elapsedClock;
  double playbackTime=0;
+ bool playbackPaused=false;
  std::size_t nestedPairs=0;
  double optimizedLineTravelMm=sourcePlan.travelMm;
  double nominalSeconds=0.0;
- auto stop=[&](){
-  clock.stop();play->setText("▶ Reproduzir");
+ bed198::Report bedReport;
+ auto stop=[&](bool paused=false){
+  clock.stop();playbackPaused=paused;
+  play->setText(paused?"▶ Continuar":"▶ Reproduzir");
+  play->setToolTip(paused?"Retomar simulação offline do ponto atual":
+                             "Reproduzir a simulação offline, sem laser físico");
  };
+ // Cache incremental: durante reproducao avanca so o trecho novo;
+ // ao retroceder pelo slider, reconstrói a partir do inicio.
+ std::size_t renderedMoves=0;
+ QPainterPath renderedLines,renderedTravels;
  auto render=[&](){
   const double now=timeline.totalSeconds*double(progress->value())/1000.0;
   timeLabel->setText(QString("%1 / %2 s").arg(now,0,'f',1).arg(timeline.totalSeconds,0,'f',1));
-  QImage image(740,440,QImage::Format_ARGB32);image.fill(QColor("#16252F"));
-  QPainter painter(&image);painter.setRenderHint(QPainter::Antialiasing,true);
   const double w=std::max(1.0,drawingWidthMm),h=std::max(1.0,drawingHeightMm);
   const double factor=std::min(660.0/w,365.0/h);
   const auto map=[&](Pt p){return QPointF(35+p.x*factor,35+p.y*factor);};
-  painter.setPen(QPen(QColor("#598777"),1.4));
-  painter.drawRect(QRectF(35,35,w*factor,h*factor));
   const std::size_t count=shown.moves.size();
   std::size_t completed=0;
   if(progress->value()==1000)completed=count;
@@ -264,30 +321,33 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    completed=std::size_t(std::lower_bound(timeline.endSeconds.begin(),
                       timeline.endSeconds.end(),now)-timeline.endSeconds.begin());
   }
-  // Limite visual para manter o slider responsivo com imagens densas.
-  const std::size_t stride=std::max<std::size_t>(1,shown.moves.size()/25000);
-  for(std::size_t i=0;i<completed;i+=stride){
-   const auto& move=shown.moves[i];
-   if(!move.laser&&!showTravel->isChecked())continue;
-   painter.setPen(QPen(move.laser?QColor("#E8ECEC"):QColor("#F26969"),move.laser?1.3:1.0));
-   painter.drawLine(map(move.from),map(move.to));
+  if(completed<renderedMoves){
+   renderedMoves=0;renderedLines=QPainterPath();renderedTravels=QPainterPath();
   }
-  if(completed<count&&progress->value()>0){
+  for(std::size_t i=renderedMoves;i<completed;++i){
+   const auto& move=shown.moves[i];
+   QPainterPath& target=move.laser?renderedLines:renderedTravels;
+   target.moveTo(map(move.from));target.lineTo(map(move.to));
+  }
+  renderedMoves=completed;
+  QPainterPath partial;
+  if(completed<count&&progress->value()>0&&completed<timeline.endSeconds.size()){
    const double start=completed?timeline.endSeconds[completed-1]:0.0;
    const double finish=timeline.endSeconds[completed];
    const double fraction=finish>start?std::clamp((now-start)/(finish-start),0.0,1.0):0.0;
    const auto& move=shown.moves[completed];
    if(move.laser||showTravel->isChecked()){
-    const Pt partial{move.from.x+(move.to.x-move.from.x)*fraction,
-                     move.from.y+(move.to.y-move.from.y)*fraction};
-    painter.setPen(QPen(move.laser?QColor("#E8ECEC"):QColor("#F26969"),1.3));
-    painter.drawLine(map(move.from),map(partial));
+    const Pt tip{move.from.x+(move.to.x-move.from.x)*fraction,
+                 move.from.y+(move.to.y-move.from.y)*fraction};
+    partial.moveTo(map(move.from));partial.lineTo(map(tip));
    }
   }
-  painter.end();canvas->showImage(image);
+  canvas->showPaths(renderedLines,renderedTravels,partial,
+                    showTravel->isChecked(),drawingWidthMm,drawingHeightMm);
  };
  auto recalculate=[&](){
   stop();
+  renderedMoves=0;renderedLines=QPainterPath();renderedTravels=QPainterPath();
   try{
    settings.cutMmMin=cut->value();settings.rapidMmMin=rapid->value();
    settings.maxXmmMin=maxX->value();settings.maxYmmMin=maxY->value();
@@ -327,7 +387,17 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
     raster::appendMask(combined,mask,{imageBounds.x(),imageBounds.y(),
                        imageBounds.width(),imageBounds.height()},scan);
    }
-   shown=repeatedByLayer(combined,source,passes->value());
+   const Plan repeated=repeatedByLayer(combined,source,passes->value());
+   if(restrictBed->isChecked()){
+    shown=bed198::restrictToBed(repeated,drawingWidthMm,drawingHeightMm,&bedReport);
+   }else{
+    shown=repeated;bedReport={};
+   }
+   const std::size_t omitted=bedReport.outsideSegments+bedReport.clippedSegments;
+   boundsWarning->setText(omitted?
+     QString("Atenção: %1 trechos fora ou parcialmente fora da mesa; %2 mm de gravação virtual fora da área ignorados.")
+       .arg(qulonglong(omitted)).arg(bedReport.omittedLaserMm,0,'f',1):
+     QString("Prévia: percursos dentro da mesa; emissão física permanece bloqueada."));
    const auto layerSpeed=[&](int id){
     const auto it=source.layers.find(id);
     return useLayerFeeds->isChecked()&&it!=source.layers.end()?
@@ -350,7 +420,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    play->setEnabled(!shown.moves.empty()&&timeline.totalSeconds>0);
    render();
   }catch(const std::exception& e){
-   shown={};timeline={};nominalSeconds=0.0;
+   shown={};timeline={};nominalSeconds=0.0;bedReport={};boundsWarning->setText("Prévia indisponível até corrigir dados.");
    stats->setText(QString("Previa limitada: %1").arg(QString::fromUtf8(e.what())));
    play->setEnabled(false);render();
   }
@@ -365,6 +435,10 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"schema","alencar-laser-simulation-report-19.8"},
    {"experimental",true},{"machine_commands_sent",false},
    {"model","kinematic-start-stop-angular-runs-12deg"},
+   {"limited_to_bed",restrictBed->isChecked()},
+   {"outside_segments_omitted",int(bedReport.outsideSegments)},
+   {"outside_segments_clipped",int(bedReport.clippedSegments)},
+   {"outside_laser_mm_omitted",bedReport.omittedLaserMm},
    {"notes","Experimental Line, vector Fill, binary image. Simplified scan, no GRBL/LightBurn equivalence"},
    {"global_passes",passes->value()},
    {"layer_passes_applied",true},
@@ -406,6 +480,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
       "Nao foi possivel salvar o relatorio. Nenhum dado foi enviado.");
   }
  });
+ QObject::connect(restrictBed,&QCheckBox::toggled,&dialog,[&](bool){recalculate();});
  QObject::connect(progress,&QSlider::valueChanged,&dialog,[&](int){render();});
  for(auto* box:{cut,rapid,maxX,maxY,accelX,accelY,rapidAx,rapidAy})
   QObject::connect(box,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
@@ -423,11 +498,13 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
                   &dialog,[&](int){recalculate();});
  QObject::connect(showTravel,&QCheckBox::toggled,&dialog,[&](bool){render();});
  QObject::connect(play,&QPushButton::clicked,&dialog,[&](){
-  if(clock.isActive()){stop();return;}
+  if(clock.isActive()){stop(true);return;}
   if(timeline.totalSeconds<=0)return;
-  if(progress->value()>=1000)progress->setValue(0);
+  if(progress->value()>=1000){progress->setValue(0);playbackPaused=false;}
   playbackTime=timeline.totalSeconds*double(progress->value())/1000.0;
-  elapsedClock.start();clock.start();play->setText("Ⅱ Pausar");
+  elapsedClock.start();clock.start();playbackPaused=false;
+  play->setText("Ⅱ Pausar");
+  play->setToolTip("Pausar a simulação; o mesmo botão permite continuar");
  });
  QObject::connect(&clock,&QTimer::timeout,&dialog,[&](){
   playbackTime+=elapsedClock.restart()*0.001*speed->value();

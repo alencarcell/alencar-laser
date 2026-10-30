@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -103,6 +103,18 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteMarca) {
+        Write-Host 'IDENTIDADE PEGASO_V1: compila Qt e testa o carregamento opcional, sem hardware.' -ForegroundColor Cyan
+        Compilar-QtComDiagnostico
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\\AUDITORIAS\\GITHUB_19_8\\marca_pegaso'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --branding-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Identidade Pegaso 19.8' (Join-Path $destino 'RESULTADO_IDENTIDADE_PEGASO_19_8.json')
+        Write-Host 'Identidade Pégaso: PASS sintético. Verificar cabeçalho, ícone e splash manualmente depois.' -ForegroundColor Green
+        return
+    }
     if ($SomenteDesenho) {
         Write-Host 'DESENHO 19.8: snap/Auto-Join, cliques e arraste Bézier sem hardware.' -ForegroundColor Cyan
         $testSource = Join-Path $fontes 'tests\preview_draw_join_19_8_standalone.cpp'
@@ -127,6 +139,12 @@ try {
     }
     if ($SomenteSimulacao) {
         Write-Host 'PREVIA OFFLINE: teste C++20 independente + Qt com relatorio JSON.' -ForegroundColor Cyan
+        $bedSource = Join-Path $fontes 'tests\preview_workarea_19_8_standalone.cpp'
+        $bedExe = Join-Path $build 'preview_workarea_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra -I (Join-Path $fontes 'src') $bedSource (Join-Path $fontes 'src\boost_json_impl.cpp') -lminizip -lz -o $bedExe
+        Checar-Saida 'Compilacao do recorte virtual restrito a mesa'
+        & $bedExe
+        Checar-Saida 'Regressao da area de trabalho da simulacao'
         $source = Join-Path $fontes 'tests\preview_motion_19_8_standalone.cpp'
         $standalone = Join-Path $build 'preview_motion_19_8_standalone.exe'
         & $gpp -std=c++20 -Wall -Wextra -Werror -O2 $source -o $standalone
@@ -214,6 +232,10 @@ try {
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
         $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\interacao'
         New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --layout-icons-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Barra compacta, alinhamento e espelhamento' (Join-Path $destino 'RESULTADO_LAYOUT_ICONES_19_8.json')
+        & $app --raster-object-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Imagem editavel salva no .alaser v5' (Join-Path $destino 'RESULTADO_IMAGEM_OBJETO_19_8.json')
         & $app --inline-transforms-19-8-test $fixture $destino
         Checar-ResultadoQt 'Texto e transformacoes' (Join-Path $destino 'RESULTADO_TEXTO_TRANSFORMACOES_19_8.json')
         & $app --text-format-19-8-test $fixture $destino
@@ -270,16 +292,25 @@ try {
         return
     }
     if ($SomenteTesoura) {
-        Write-Host 'DIAGNOSTICO FOCADO: compila apenas Qt e executa teste da Tesoura.' -ForegroundColor Cyan
-        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
-        Checar-Saida 'Compilacao Qt focada'
+        # Este gate precisa incluir tanto a geometria C++ dos recortes sucessivos
+        # quanto o hover real Qt; um PASS grafico isolado nao homologa a Tesoura.
+        Write-Host 'TESOURA: compilando nucleo 19.7/19.8 e regressao GUI Qt, offline.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6 alencar_test19_7_scissors_layers alencar_test19_8_scissors_span
+        Checar-Saida 'Compilacao Qt e nucleos Tesoura'
+        foreach ($nome in @('alencar_test19_7_scissors_layers', 'alencar_test19_8_scissors_span')) {
+            $executavel = Join-Path $build ($nome + '.exe')
+            if (-not (Test-Path -LiteralPath $executavel -PathType Leaf)) { throw "Teste da Tesoura ausente: $executavel" }
+            Write-Host "TESTANDO: $nome" -ForegroundColor Cyan
+            & $executavel
+            Checar-Saida "Regressao C++ $nome"
+        }
         $app = Join-Path $build 'alencar_test7_qt6.exe'
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
         $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\tesoura_foco'
         New-Item -ItemType Directory -Path $destino -Force | Out-Null
         & $app --edit-tools-19-7-test $fixture $destino
         Checar-ResultadoQt 'Tesoura - hover GUI' (Join-Path $destino 'RESULTADO_TESTE_19_7_GUI.json')
-        Write-Host 'Teste focado passou; validacao completa ainda obrigatoria.' -ForegroundColor Green
+        Write-Host 'Tesoura: C++ 19.7 + C++ 19.8 + GUI Qt PASS focado. Validacao manual e suite completa ainda obrigatorias.' -ForegroundColor Green
         return
     }
     $alvos = @(

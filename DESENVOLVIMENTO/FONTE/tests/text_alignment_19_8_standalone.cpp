@@ -34,6 +34,22 @@ int main(){
  auto legacy=metadata(editor.state());legacy.erase("editableTexts");
  const auto old=fromMetadata(editor.state().doc,legacy);
  assert(old.editableTexts.empty());
+ // Converting editable text must not alter geometry, IDs, or layers and
+ // must be reversible with a single Undo / Redo.
+ Editor flattened(editor.state());
+ const int firstTextMember=flattened.state().editableTexts.at(root).members.back();
+ const auto textNodeCount=countNodes(flattened.state().doc);
+ const auto originalLayer=flattened.state().objects.at(root).layer;
+ const auto changesBefore=flattened.undoCount();
+ assert(flattened.convertEditableTextToPaths(firstTextMember));
+ assert(flattened.undoCount()==changesBefore+1);
+ assert(flattened.state().editableTexts.empty()&&
+        countNodes(flattened.state().doc)==textNodeCount);
+ assert(flattened.state().objects.at(root).layer==originalLayer&&
+        flattened.state().objects.at(root).group==0);
+ assert(flattened.undo()&&flattened.state().editableTexts.at(root).text=="LASER");
+ assert(flattened.redo()&&flattened.state().editableTexts.empty());
+ assert(!flattened.convertEditableTextToPaths(root));
  // Alignment: X center, Y center, left and right, all using a reference shape.
  Editor align(Document{});
  const int a=align.rectangle({0,0},10,10);

@@ -18,6 +18,8 @@
 #include "raster_trace_19_8.hpp"
 #include "preview_dialog_19_8.hpp"
 #include "layer_settings_19_8.hpp"
+#include "branding_pegaso_19_8.hpp"
+#include "raster_project_19_8.hpp"
 #include "render_chunks.hpp"
 #include <QApplication>
 #include <QGraphicsView>
@@ -46,6 +48,8 @@
 #include <QCloseEvent>
 #include <QIcon>
 #include <QPixmap>
+#include <QSplashScreen>
+#include <QTemporaryDir>
 #include <QPolygonF>
 #include <QDoubleSpinBox>
 #include <QDialog>
@@ -179,6 +183,119 @@ static QPainterPath previewNode(const Document& d,Key key,int64_t id,Pt pos){
  return path;
 }
 
+// Tela de rastreamento: bitmap apenas como referencia; vetores Qt nativos
+// permanecem nitidos ao aproximar. Nao altera imagem/projeto/simulacao.
+class TracePreviewCanvas198 final:public QGraphicsView{
+ QGraphicsScene scene_;
+ QGraphicsPixmapItem* imageItem_=nullptr;
+ QGraphicsPathItem* traceItem_=nullptr;
+ QGraphicsPathItem* nodesItem_=nullptr;
+ QPixmap originalPreview_,binaryPreview_;
+ bool showOriginal_=true;
+ std::vector<std::vector<Pt>> cachedPaths_;
+ double lastScale_=1.0;
+ bool showNodes_=false;
+ bool imageFaded_=false;
+ int shownNodes_=0;
+ double zoom_=1.0;
+public:
+ explicit TracePreviewCanvas198(QWidget* parent=nullptr):QGraphicsView(parent){
+  setObjectName("trace_preview");
+  setScene(&scene_);
+  imageItem_=scene_.addPixmap(QPixmap());
+  imageItem_->setTransformationMode(Qt::FastTransformation);
+  traceItem_=scene_.addPath(QPainterPath());
+  QPen purple(QColor("#AF19E8"),1.4);purple.setCosmetic(true);
+  traceItem_->setPen(purple);traceItem_->setBrush(Qt::NoBrush);
+  traceItem_->setAcceptedMouseButtons(Qt::NoButton);
+  nodesItem_=scene_.addPath(QPainterPath());
+  nodesItem_->setBrush(QColor("#15A4EF"));
+  nodesItem_->setPen(QPen(Qt::NoPen));
+  nodesItem_->setAcceptedMouseButtons(Qt::NoButton);
+  nodesItem_->setVisible(false);
+  setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
+  setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+  setResizeAnchor(QGraphicsView::AnchorViewCenter);
+  setDragMode(QGraphicsView::ScrollHandDrag);
+  setBackgroundBrush(QColor("#EEEEEE"));
+  setToolTip("Roda: aproximar/afastar | arrastar: mover | ajustar imagem: enquadrar");
+ }
+ ~TracePreviewCanvas198()override{setScene(nullptr);}
+ void showResult(const QImage& original,const QImage& binary,double widthMm,
+                 const std::vector<std::vector<Pt>>& paths){
+  if(binary.isNull()||widthMm<=0)return;
+  // Duas referencias so de PREVIA: preservar o arquivo original como imagem,
+  // equalizar pixels para coordenadas de contorno calculadas no bitmap P&B.
+  const QImage reference=original.isNull()?binary:
+      original.scaled(binary.size(),Qt::IgnoreAspectRatio,Qt::SmoothTransformation);
+  originalPreview_=QPixmap::fromImage(reference);
+  binaryPreview_=QPixmap::fromImage(binary);
+  imageItem_->setPixmap(showOriginal_?originalPreview_:binaryPreview_);
+  const double scale=double(binary.width())/widthMm;
+  lastScale_=scale;cachedPaths_=paths;
+  QPainterPath lines;
+  for(const auto& contour:paths){
+   if(contour.empty())continue;
+   lines.moveTo(contour.front().x*scale,contour.front().y*scale);
+   for(std::size_t i=1;i<contour.size();++i)
+    lines.lineTo(contour[i].x*scale,contour[i].y*scale);
+   lines.closeSubpath();
+  }
+  traceItem_->setPath(lines);
+  scene_.setSceneRect(QRectF(0,0,binary.width(),binary.height()));
+  refreshNodeMarkers();
+ }
+ // Os vetores sao os mesmos, mesmo alternando referencia original/P&B.
+ void setShowOriginal(bool yes){
+  showOriginal_=yes;
+  imageItem_->setPixmap(showOriginal_?originalPreview_:binaryPreview_);
+ }
+ bool isShowingOriginal()const{return showOriginal_;}
+ // Visibilidade alterada sem recalcular vetorizacao nem modificar projeto.
+ void setImageFaded(bool faded){
+  imageFaded_=faded;imageItem_->setOpacity(faded?.20:1.0);
+ }
+ bool imageFaded()const{return imageFaded_;}
+ void setNodesVisible(bool enabled){showNodes_=enabled;refreshNodeMarkers();}
+ bool nodesVisible()const{return showNodes_;}
+ int shownNodeCount()const{return shownNodes_;}
+ void refreshNodeMarkers(){
+  nodesItem_->setVisible(false);
+  shownNodes_=0;
+  if(!showNodes_){nodesItem_->setPath(QPainterPath());return;}
+  size_t total=0;
+  for(const auto& path:cachedPaths_)total+=path.size();
+  // Nos em desenhos enormes nao devem congelar a GUI.
+  const size_t stride=std::max<size_t>(1,(total+1999)/2000);
+  QPainterPath markers;
+  size_t index=0;
+  for(const auto& path:cachedPaths_)for(const Pt& node:path){
+   if(index++%stride!=0)continue;
+   const QPointF p(node.x*lastScale_,node.y*lastScale_);
+   markers.addEllipse(p,1.8,1.8);
+   ++shownNodes_;
+  }
+  nodesItem_->setPath(markers);
+  nodesItem_->setVisible(true);
+ }
+ void resetView(){
+  if(scene_.sceneRect().isEmpty())return;
+  resetTransform();fitInView(scene_.sceneRect(),Qt::KeepAspectRatio);
+  zoom_=1.;
+ }
+ double zoomLevel()const{return zoom_;}
+protected:
+ void wheelEvent(QWheelEvent* e)override{
+  const int angle=e->angleDelta().y();
+  if(angle==0){QGraphicsView::wheelEvent(e);return;}
+  const double factor=std::pow(1.22,double(angle)/120.0);
+  if(zoom_*factor>=.12&&zoom_*factor<=30.){
+   scale(factor,factor);zoom_*=factor;
+  }
+  e->accept();
+ }
+};
+
 class QtEditorLab final:public QGraphicsView{
  QGraphicsScene scene_;
  WorkspaceConfig workspace_{};
@@ -195,9 +312,15 @@ class QtEditorLab final:public QGraphicsView{
  bool lastNativeAction_=false;
  uint64_t lastEditorGenerationSeen_=0;
  bool fillPreview_=false; // Editor LightBurn mostra linhas por padrao.
+ std::set<int> hiddenTextEditingMembers_; // somente visual; geometria canonica intacta
  QImage rasterSource_; // preview temporario fora do arquivo .alaser
  QRectF rasterRect_;
  QGraphicsPixmapItem* rasterOverlay_=nullptr;
+ QGraphicsRectItem* rasterFrame_=nullptr;
+ QGraphicsRectItem* rasterHandle_=nullptr;
+ bool rasterSelected_=false,rasterDragging_=false,rasterResizing_=false;
+ QRectF rasterStartRect_;
+ QPointF rasterStartMouse_;
  std::map<Key,QGraphicsPathItem*> nativeItems_;
  std::optional<CurveHit> nativeSelectedPart_;
  std::optional<Key> nativeStyledKey_;
@@ -716,7 +839,7 @@ class QtEditorLab final:public QGraphicsView{
   shapeDragStart_=origin;shapeDragging_=true;
  }
  void drawRasterOverlay(){
-  rasterOverlay_=nullptr;
+  rasterOverlay_=nullptr;rasterFrame_=nullptr;rasterHandle_=nullptr;
   if(rasterSource_.isNull())return;
   rasterOverlay_=scene_.addPixmap(QPixmap::fromImage(rasterSource_));
   rasterOverlay_->setAcceptedMouseButtons(Qt::NoButton);
@@ -725,15 +848,73 @@ class QtEditorLab final:public QGraphicsView{
   rasterOverlay_->setTransform(QTransform::fromScale(
     rasterRect_.width()/rasterSource_.width(),rasterRect_.height()/rasterSource_.height()));
   rasterOverlay_->setOpacity(.72);
+  QPen outline(QColor("#FFAA42"),1.,Qt::DashLine);outline.setCosmetic(true);
+  rasterFrame_=scene_.addRect(rasterRect_,outline,QBrush(Qt::NoBrush));
+  rasterFrame_->setZValue(92);rasterFrame_->setAcceptedMouseButtons(Qt::NoButton);
+  rasterHandle_=scene_.addRect(QRectF(-5,-5,10,10),
+    QPen(QColor("#17212A")),QBrush(QColor("#FFAA42")));
+  rasterHandle_->setFlag(QGraphicsItem::ItemIgnoresTransformations,true);
+  rasterHandle_->setPos(rasterRect_.bottomRight());rasterHandle_->setZValue(93);
+  rasterHandle_->setAcceptedMouseButtons(Qt::NoButton);
+  rasterFrame_->setVisible(rasterSelected_);rasterHandle_->setVisible(rasterSelected_);
+ }
+ void updateRasterVisual(){
+  if(rasterOverlay_&&!rasterSource_.isNull()){
+   rasterOverlay_->setPos(rasterRect_.topLeft());
+   rasterOverlay_->setTransform(QTransform::fromScale(
+     rasterRect_.width()/rasterSource_.width(),rasterRect_.height()/rasterSource_.height()));
+  }
+  if(rasterFrame_)rasterFrame_->setRect(rasterRect_);
+  if(rasterHandle_)rasterHandle_->setPos(rasterRect_.bottomRight());
+  viewport()->update();
+ }
+ bool beginRasterDrag(QPointF viewportPoint){
+  if(tool!=Tool::Select||rasterSource_.isNull()||busy())return false;
+  const QPointF mouse=mapToScene(viewportPoint.toPoint());
+  const double tolerance=std::max(.3,9./std::max(.01,currentZoom()));
+  const bool handle=rasterSelected_&&
+     QLineF(mouse,rasterRect_.bottomRight()).length()<=tolerance;
+  if(!handle&&!rasterRect_.contains(mouse))return false;
+  rasterSelected_=true;rasterDragging_=!handle;rasterResizing_=handle;
+  rasterStartMouse_=mouse;rasterStartRect_=rasterRect_;
+  active_.reset();selected.clear();applySelectionStyles();
+  rasterFrame_->setVisible(true);rasterHandle_->setVisible(true);
+  viewport()->setCursor(handle?Qt::SizeFDiagCursor:Qt::SizeAllCursor);
+  if(diagnosticEvent)diagnosticEvent("image_selected",1);
+  return true;
+ }
+ void updateRasterDrag(QPointF viewportPoint){
+  if(!rasterDragging_&&!rasterResizing_)return;
+  const QPointF delta=mapToScene(viewportPoint.toPoint())-rasterStartMouse_;
+  if(rasterDragging_)rasterRect_.moveTopLeft(rasterStartRect_.topLeft()+delta);
+  else{
+   const double width=std::clamp(rasterStartRect_.width()+delta.x(),1.,4000.);
+   rasterRect_.setSize(QSizeF(width,
+     width*double(rasterSource_.height())/std::max(1,rasterSource_.width())));
+  }
+  updateRasterVisual();
+ }
+ void finishRasterDrag(){
+  if(!rasterDragging_&&!rasterResizing_)return;
+  const bool changed=rasterStartRect_!=rasterRect_;
+  const bool resize=rasterResizing_;
+  rasterDragging_=rasterResizing_=false;
+  viewport()->setCursor(Qt::ArrowCursor);
+  if(changed&&diagnosticEvent)diagnosticEvent(resize?"image_resized":"image_moved",1);
+  if(changed&&stateChanged)stateChanged();
  }
 public:
  // API de imagem da mesa: acessível ao diálogo LabWindow; armazenamento continua privado.
  void setRasterWidthMm(double width){
   if(rasterSource_.isNull()||width<=0)return;
   rasterRect_.setSize(QSizeF(width,width*rasterSource_.height()/rasterSource_.width()));
-  if(rasterOverlay_)
-   rasterOverlay_->setTransform(QTransform::fromScale(
-     rasterRect_.width()/rasterSource_.width(),rasterRect_.height()/rasterSource_.height()));
+  updateRasterVisual();
+ }
+ void restoreRaster(const QImage& image,const QRectF& bounds){
+  if(image.isNull()||!bounds.isValid()||bounds.width()<=0||bounds.height()<=0)
+   throw std::runtime_error("Imagem ou dimensões salvas inválidas");
+  rasterSource_=image;rasterRect_=bounds;
+  rasterSelected_=false;rebuild();
  }
  void setRasterImage(const QImage& image){
   if(image.isNull())throw std::runtime_error("Imagem vazia");
@@ -741,15 +922,20 @@ public:
    throw std::runtime_error("Imagem excede 10000 pixels");
   rasterSource_=image;
   rasterRect_=QRectF(20,20,120.,120.*image.height()/image.width());
-  rebuild();viewport()->update();
+  rasterSelected_=true;rebuild();viewport()->update();
+  if(diagnosticEvent)diagnosticEvent("image_imported",1);
  }
  const QImage& rasterImage()const{return rasterSource_;}
  QRectF rasterBounds()const{return rasterRect_;}
  bool hasRasterImage()const{return !rasterSource_.isNull();}
  void clearRasterImage(){
+  rasterSelected_=rasterDragging_=rasterResizing_=false;
   rasterSource_=QImage();rasterRect_=QRectF();
   if(rasterOverlay_){scene_.removeItem(rasterOverlay_);delete rasterOverlay_;rasterOverlay_=nullptr;}
+  if(rasterFrame_){scene_.removeItem(rasterFrame_);delete rasterFrame_;rasterFrame_=nullptr;}
+  if(rasterHandle_){scene_.removeItem(rasterHandle_);delete rasterHandle_;rasterHandle_=nullptr;}
   viewport()->update();
+  if(stateChanged)stateChanged();
  }
 private:
  // Rotinas internas de atualização dos objetos nativos permanecem encapsuladas.
@@ -850,6 +1036,16 @@ public:
  void setFillPreview(bool enabled){
   if(fillPreview_==enabled)return;
   fillPreview_=enabled;rebuild();
+ }
+ // Esconder o texto antigo enquanto sua origem e reeditada, sem apagar
+ // contornos, metadata, undo, ou o arquivo de projeto. Tambem oculta Fill.
+ void setTextEditingMembersHidden(const std::vector<int>& members){
+  const std::set<int> next(members.begin(),members.end());
+  if(next==hiddenTextEditingMembers_)return;
+  hiddenTextEditingMembers_=next;rebuild();
+ }
+ bool textEditingMemberHidden(int id)const{
+  return hiddenTextEditingMembers_.count(id)!=0;
  }
  std::function<int()> drawingLayer;
  int targetLayer()const{return drawingLayer?drawingLayer():0;}
@@ -1092,14 +1288,14 @@ public:
  void invalidateSelectionCache(){picker_.invalidate();}
  void rebuild(){
   clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
-  clearPolyline();clearBezierDraft();clearMarquee();scene_.clear();rasterOverlay_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
+  clearPolyline();clearBezierDraft();clearMarquee();scene_.clear();rasterOverlay_=nullptr;rasterFrame_=nullptr;rasterHandle_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   // Composite closed Fill paths per layer with the same parity rule used
   // by the scan planner. One separate backdrop per layer, without selection.
   if(fillPreview_){
    std::map<int,QPainterPath> perLayer;
    for(const auto& c:editor.state().doc.contours){
     const auto mi=editor.state().objects.find(c.key.object);
-    if(mi==editor.state().objects.end())continue;
+    if(mi==editor.state().objects.end()||hiddenTextEditingMembers_.count(c.key.object))continue;
     const auto li=editor.state().layers.find(mi->second.layer);
     if(li==editor.state().layers.end()||!li->second.visible||
        li->second.mode!="Fill"||!(c.closed||hasExactDuplicateClosure(c)))continue;
@@ -1121,7 +1317,7 @@ public:
     const auto layer=editor.state().layers.at(meta.layer);
     auto* item=scene_.addPath(pathOf(c),QPen(layerColor(meta.layer),0));
     item->setZValue(1);
-    item->setVisible(layer.visible);
+    item->setVisible(layer.visible&&!hiddenTextEditingMembers_.count(c.key.object));
     objects_[c.key]=item;itemsByObject_[c.key.object].push_back(item);
   }
   for(auto it=selected.begin();it!=selected.end();)if(!editable(editor.state(),*it))it=selected.erase(it);else ++it;
@@ -1219,12 +1415,18 @@ public:
    next=scissorPlanner_.candidate(state.doc,hit);
    if(next)break;
   }
-  if(!next){if(scissorHover_)clearScissorHover();return;}
+  if(!next){
+   if(scissorHover_)clearScissorHover();
+   viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+   viewport()->setToolTip("Tesoura ativa: sem intervalo seguro neste ponto; verifique cruzamentos.");
+   return;
+  }
   if(scissorHover_&&scissorHover_->key==next->key&&
      std::abs(scissorHover_->from-next->from)<1e-8&&
      std::abs(scissorHover_->to-next->to)<1e-8)return;
   clearScissorHover();
   scissorHover_=std::move(next);
+  viewport()->setToolTip("Tesoura: todo o trecho laranja sera removido. Ctrl+Z desfaz.");
   QPainterPath colored;
   colored.moveTo(toQt(scissorHover_->preview.front()));
   for(size_t i=1;i<scissorHover_->preview.size();i++)
@@ -1253,6 +1455,10 @@ public:
   return {first.x()+std::copysign(size,dx),first.y()+std::copysign(size,dy)};
  }
  void cancelCurrentGesture(){
+  if(rasterDragging_||rasterResizing_){
+   rasterRect_=rasterStartRect_;
+   rasterDragging_=rasterResizing_=false;updateRasterVisual();
+  }
   if(nativeContourPressing_&&nativeSession_){nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(true);}
   if(nativePressing_&&nativeSession_){nativeSession_->cancel();nativePressing_=false;updateNativePaths(false);}
   if(shapeDragging_)clearShapePreview();
@@ -1307,7 +1513,11 @@ protected:
   const QPoint angle=e->angleDelta(),pixel=e->pixelDelta();
   const double steps=angle.y()!=0 ? double(angle.y())/120.0 : double(pixel.y())/100.0;
   if(steps==0.0){QGraphicsView::wheelEvent(e);return;}
-  if(busy()){e->accept();return;}
+  // Zoom continua disponivel durante Linha e Desenhar curva, mesmo com
+  // uma sequencia de nos em construcao; os pontos ja criados nao mudam.
+  // Gestos de arraste/transformacao permanecem protegidos.
+  if(busy()&&!((tool==Tool::Line&&polylineDrawing_)||
+               (tool==Tool::DrawBezier&&bezierDrawing_))){e->accept();return;}
   const double oldZoom=currentZoom();
   if(!std::isfinite(oldZoom)||oldZoom<=0.0){e->accept();return;}
   const double newZoom=alaser::zoom196::applyWheel(oldZoom,steps);
@@ -1320,6 +1530,18 @@ protected:
   const QPoint mapped=mapFromScene(pinnedScene);
   horizontalScrollBar()->setValue(horizontalScrollBar()->value()+mapped.x()-cursor.x());
   verticalScrollBar()->setValue(verticalScrollBar()->value()+mapped.y()-cursor.y());
+  // Recalcular somente a pre-visualizacao apos a mudanca de escala.
+  // Nao reamostrar nem mover os nos canonicos da ferramenta.
+  if(tool==Tool::Line&&polylineDrawing_){
+   Pt at=snapPolyline(fromQt(mapToScene(cursor)),
+                      e->modifiers().testFlag(Qt::ShiftModifier));
+   polylineCursor_=toQt(magneticPolyline(at,
+                      e->modifiers().testFlag(Qt::ControlModifier)));
+   redrawPolyline();
+  }
+  if(tool==Tool::DrawBezier&&bezierDrawing_){
+   bezierCursor_=mapToScene(cursor);redrawBezierDraft();
+  }
   reportZoom();viewport()->update();sample(wheelMs,wheelTimer.nsecsElapsed()/1e6);e->accept();
  }
  void paintEvent(QPaintEvent* e)override{
@@ -1390,13 +1612,36 @@ protected:
   if(draggedMarker){p->setBrush(QColor(255,186,84));p->drawEllipse(*draggedMarker,4./markerScale,4./markerScale);++markerDraws;}
   p->restore();
  }
+// Texto original deve aceitar clique no interior das letras, nao so
+// sobre vertices/arestas das polilinhas geradas pela fonte.
+std::optional<int> editableTextAt(Pt point)const{
+ const auto hits=editor.selectableHits(point,10./std::max(.001,currentZoom()));
+ for(const auto& hit:hits){
+  const auto text=editor.findEditableText(hit.key.object);
+  if(text)return text->first;
+ }
+ std::optional<int> best;
+ double smallest=std::numeric_limits<double>::infinity();
+ for(const auto& [root,text]:editor.state().editableTexts){
+  bool allowed=true;
+  for(int member:text.members)if(!editable(editor.state(),member)){
+   allowed=false;break;
+  }
+  if(!allowed)continue;
+  const auto [lo,hi]=boundsOf(editor.state().doc,text.members);
+  const QRectF bounds(toQt(lo),toQt(hi));
+  if(!bounds.contains(toQt(point)))continue;
+  const double area=std::max(1e-8,bounds.width()*bounds.height());
+  if(area<smallest){best=root;smallest=area;}
+ }
+ return best;
+}
 void mouseDoubleClickEvent(QMouseEvent* e)override{
  if(e->button()==Qt::LeftButton&&requestEditTextObject&&
     (tool==Tool::Select||tool==Tool::Text)){
-  const Pt point=fromQt(mapToScene(e->position().toPoint()));
-  const auto hits=editor.selectableHits(point,10./std::max(0.001,currentZoom()));
-  for(const auto& hit:hits)if(editor.findEditableText(hit.key.object)){
-   const int id=hit.key.object;
+  const auto target=editableTextAt(fromQt(mapToScene(e->position().toPoint())));
+  if(target){
+   const int id=*target;
    QTimer::singleShot(0,this,[this,id]{
     if(requestEditTextObject)requestEditTextObject(id);
    });
@@ -1434,12 +1679,20 @@ void mousePressEvent(QMouseEvent* e)override{
    }else{nativeMousePress(e);return;}
   }
    if(tool==Tool::Select){
-    if(beginSelectionTransform(e->position())){e->accept();return;}
+    if(rasterSelected_&&beginRasterDrag(e->position())){e->accept();return;}
+    if(beginSelectionTransform(e->position())){rasterSelected_=false;
+      if(rasterFrame_)rasterFrame_->setVisible(false);
+      if(rasterHandle_)rasterHandle_->setVisible(false);
+      e->accept();return;}
     if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),true)){
      e->accept();return;
     }
     auto hits=clickHits(e->position().toPoint());
    if(hits.empty()){
+    if(beginRasterDrag(e->position())){e->accept();return;}
+    rasterSelected_=false;
+    if(rasterFrame_)rasterFrame_->setVisible(false);
+    if(rasterHandle_)rasterHandle_->setVisible(false);
     marqueeActive_=true;marqueeStart_=e->position();
    }
    else {Key chosen=hits.front().key;
@@ -1517,7 +1770,18 @@ void mousePressEvent(QMouseEvent* e)override{
    e->accept();return;
   }
   if(tool==Tool::Text){
-   if(requestTextAt)requestTextAt(fromQt(mapToScene(e->position().toPoint())));
+   const Pt at=fromQt(mapToScene(e->position().toPoint()));
+   if(requestEditTextObject){
+    const auto existing=editableTextAt(at);
+    if(existing){
+     const int id=*existing;
+     QTimer::singleShot(0,this,[this,id]{
+      if(requestEditTextObject)requestEditTextObject(id);
+     });
+     e->accept();return;
+    }
+   }
+   if(requestTextAt)requestTextAt(at);
    e->accept();return;
   }
   if(tool==Tool::DrawBezier){
@@ -1610,6 +1874,9 @@ void mousePressEvent(QMouseEvent* e)override{
   }return p;
  }
 void mouseMoveEvent(QMouseEvent* e)override{
+ if(rasterDragging_||rasterResizing_){
+  updateRasterDrag(e->position());e->accept();return;
+ }
  if(middlePanning_){
   const QPointF delta=e->position()-middlePanLast_;
   middlePanLast_=e->position();
@@ -1702,6 +1969,9 @@ void mouseMoveEvent(QMouseEvent* e)override{
   QGraphicsView::mouseMoveEvent(e);
  }
 void mouseReleaseEvent(QMouseEvent* e)override{
+ if(e->button()==Qt::LeftButton&&(rasterDragging_||rasterResizing_)){
+  updateRasterDrag(e->position());finishRasterDrag();e->accept();return;
+ }
  if(e->button()==Qt::MiddleButton){
   if(middlePanning_){middlePanning_=false;viewport()->unsetCursor();}
   e->accept();return;
@@ -1940,10 +2210,13 @@ static QByteArray fingerprint(const EditorState& s){auto text=stateText(s);retur
 // Persistência v5 (curvas nativas + geometria poligonal). Mantém leitura v4 legada.
 static IntegratedProject saveNative(const QString& file,const EditorState& state,
                                     const CurveDocument& curves=CurveDocument{},
-                                    const IntegratedProject* previous=nullptr){
+                                    const IntegratedProject* previous=nullptr,
+                                    const QImage* image=nullptr,
+                                    QRectF bounds=QRectF()){
  QTemporaryDir temp;check(temp.isValid(),"temporary directory failed");
  auto zipped=temp.path()+"/project.alaser";
  IntegratedProject project=buildEditedIntegratedProject(state,curves,previous);
+ alaser::rasterproject198::apply(project,image,bounds);
  writeIntegratedProject(zipped.toStdString(),project);
  QFile source(zipped);check(source.open(QIODevice::ReadOnly),"cannot read temporary package");
  QSaveFile target(file);target.setDirectWriteFallback(false);check(target.open(QIODevice::WriteOnly),"cannot open native destination");
@@ -2124,7 +2397,8 @@ public:
    const QString folder=alaser::PersistentSessionStore::folder();
    if(folder.isEmpty()||!QDir().mkpath(folder))throw std::runtime_error("recovery folder unavailable");
    const QString target=alaser::PersistentSessionStore::snapshotPath();
-   saveNative(target,view.editor.state(),cd,loadedProject_?&*loadedProject_:nullptr);
+   saveNative(target,view.editor.state(),cd,loadedProject_?&*loadedProject_:nullptr,
+      view.hasRasterImage()?&view.rasterImage():nullptr,view.rasterBounds());
    if(!alaser::PersistentSessionStore::writeMarker(projectPath))
     throw std::runtime_error("could not commit recovery manifest");
    recoveryPolicy_.snapshotted();
@@ -2463,36 +2737,57 @@ public:
   loadWorkspaceSettings();view.setWorkspace(workspaceCfg_,isInteractive());
   setObjectName("alencarRoot");
   setWindowTitle("Alencar Laser | Estúdio Qt 6 — TESTE_19.8 (candidata)");
+  const QIcon newIcon=alaser::branding198::approvedIcon();
+  if(!newIcon.isNull())setWindowIcon(newIcon);
   resize(1390,870);setMinimumSize(950,620);
   auto* layout=new QVBoxLayout(this);layout->setContentsMargins(0,0,0,0);layout->setSpacing(0);
   auto* header=new QFrame;header->setObjectName("topHeader");
-  auto* headerRow=new QHBoxLayout(header);headerRow->setContentsMargins(11,4,11,4);
-  auto* identity=new QVBoxLayout;identity->setSpacing(1);
+  auto* headerRow=new QHBoxLayout(header);headerRow->setContentsMargins(9,1,9,1);
+  headerRow->setSpacing(6);
+  auto* identity=new QHBoxLayout;identity->setSpacing(5);
   auto* brand=new QLabel("ALENCAR LASER");brand->setObjectName("brandName");
-  // Identidade oficial: usa a arte ORIGINAL fornecida pelo proprietario,
-  // nunca redesenha nem cria um substituto. Fallback textual sem arquivo.
-  const QStringList logoCandidates={
-   QDir::current().absoluteFilePath("DADOS/LOGO/logo_alencar_laser.png"),
-   QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("logo_alencar_laser.png"),
-   QStringLiteral("C:/ProjetoAlencarLaser/DADOS/LOGO/logo_alencar_laser.png")
-  };
-  for(const QString& logoPath:logoCandidates){
-   QPixmap original(logoPath);
-   if(original.isNull())continue;
-   brand->setPixmap(original.scaled(162,42,Qt::KeepAspectRatio,Qt::SmoothTransformation));
-   brand->setToolTip("Logo oficial Alencar Laser: "+logoPath);
-   brand->setFixedHeight(44);
-   break;
+  // PEGASO_V1: identidade aprovada e opcional. A imagem antiga permanece
+  // intacta e ativa quando o kit ainda nao esta instalado no computador.
+  const QIcon pegasoIcon=alaser::branding198::approvedIcon();
+  if(!pegasoIcon.isNull()){
+   // Cabecalho estreito: simbolo aprovado isolado + nome em tipografia Qt,
+   // evita ampliar os residuos visuais do PNG horizontal anterior.
+   brand->setPixmap(pegasoIcon.pixmap(QSize(38,38)));
+   brand->setFixedSize(38,38);
+   brand->setToolTip("Pégaso — identidade visual Alencar Laser");
+  }else{
+   const QStringList logoCandidates={
+    QDir::current().absoluteFilePath("DADOS/LOGO/logo_alencar_laser.png"),
+    QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("logo_alencar_laser.png"),
+    QStringLiteral("C:/ProjetoAlencarLaser/DADOS/LOGO/logo_alencar_laser.png")
+   };
+   for(const QString& logoPath:logoCandidates){
+    QPixmap original(logoPath);
+    if(original.isNull())continue;
+    brand->setPixmap(original.scaled(162,42,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+    brand->setToolTip("Identidade anterior preservada: "+logoPath);
+    brand->setFixedHeight(44);
+    break;
+   }
   }
   if(brand->pixmap().isNull())
-   brand->setToolTip("Logo oficial ainda nao encontrada. Instale em DADOS/LOGO/logo_alencar_laser.png.");
+   brand->setToolTip("Sem recursos de marca; instale o kit Pégaso ou a logo anterior.");
   identity->addWidget(brand);
+  auto* wordmark=new QLabel;
+  wordmark->setObjectName("pegaso_wordmark_19_8");
+  wordmark->setText("<span style='color:#E3E7EA'>ALENCAR</span> <span style='color:#F28A28'>LASER</span>");
+  wordmark->setTextFormat(Qt::RichText);
+  QFont wordFont=wordmark->font();wordFont.setBold(true);wordFont.setPixelSize(18);
+  wordmark->setFont(wordFont);
+  wordmark->setVisible(!pegasoIcon.isNull());
+  identity->addWidget(wordmark);
   auto* subtitle=new QLabel("TESTE_19.8 • Candidata");subtitle->setObjectName("brandSub");subtitle->hide();identity->addWidget(subtitle);
   headerRow->addLayout(identity);headerRow->addStretch();
   auto* safety=new QLabel("● MÁQUINA DESCONECTADA   |   EMISSÃO BLOQUEADA");
   safety->setObjectName("machineState");safety->setToolTip("Leitura GRBL opcional; sem comandos de movimento ou laser.");
   machineHeaderStatus_=safety;
   headerRow->addWidget(safety);
+  header->setMaximumHeight(48);
   layout->addWidget(header);
   auto add=[&](QHBoxLayout* row,const QString& id,const QString& title,std::function<void()> action){
    auto* b=new QPushButton(title);b->setObjectName(id);buttons[id]=b;
@@ -2524,6 +2819,57 @@ public:
        workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight,
        view.rasterImage(),view.rasterBounds());
   })->setToolTip("Simular caminhos Line e tempo nominal. Nenhum envio físico.");
+  // Substituir textos repetitivos por glifos com dica e nomes acessiveis.
+  const std::vector<std::tuple<QString,QString,QString>> quickIcons={
+   {"open","open","Abrir projeto"},
+   {"open_other","open","Abrir outro projeto"},
+   {"save","save","Salvar"},
+   {"save_as","save","Salvar como"},
+   {"undo","undo","Desfazer (Ctrl+Z)"},
+   {"redo","redo","Refazer (Ctrl+Y)"},
+   {"preview_virtual","preview","Prévia virtual — simulação offline"}
+  };
+  for(const auto& [id,glyph,tip]:quickIcons){
+   auto* button=buttons.at(id);
+   button->setText("");button->setIcon(alaser::toolGlyph(glyph));
+   button->setIconSize(QSize(20,20));button->setFixedSize(35,32);
+   button->setToolTip(tip);button->setAccessibleName(tip);
+  }
+  auto* editIcons=new QFrame;
+  editIcons->setObjectName("quickEditIcons_19_8");
+  auto* iconRow=new QHBoxLayout(editIcons);
+  iconRow->setContentsMargins(0,0,0,0);iconRow->setSpacing(2);
+  const auto iconButton=[this,iconRow](const QString& object,
+                                     const QString& glyph,const QString& help,
+                                     std::function<void()> click){
+    auto* item=new QToolButton(this);
+    item->setObjectName(object);item->setIcon(alaser::toolGlyph(glyph));
+    item->setIconSize(QSize(20,20));item->setFixedSize(31,31);
+    item->setToolTip(help);item->setAccessibleName(help);
+    item->setFocusPolicy(Qt::NoFocus);
+    connect(item,&QToolButton::clicked,this,[this,click]{run(click);});
+    iconRow->addWidget(item);
+    return item;
+  };
+  for(const auto& [name,id,mode]:std::vector<std::tuple<QString,QString,int>>{
+       {"Esquerda","align_left",0},{"Centro X","align_center_x",4},
+       {"Direita","align_right",1},{"Topo","align_top",2},
+       {"Centro Y","align_center_y",5},{"Base","align_bottom",3}}){
+   iconButton(QString("quick_align_%1").arg(mode),id,
+      "Alinhar "+name+" (2 ou mais formas); referência: objeto ativo",
+      [this,mode]{
+       QAction* action=findChild<QAction*>(QString("align_action_%1_19_8").arg(mode));
+       check(action!=nullptr,"Comando de alinhamento indisponível.");
+       action->trigger();
+      });
+  }
+  iconButton("quick_flip_horizontal","flip_h","Espelhar horizontalmente — seleção",
+             [this]{buttons.at("mirror_horiz")->click();});
+  iconButton("quick_flip_vertical","flip_v","Espelhar verticalmente — seleção",
+             [this]{buttons.at("mirror_vertical")->click();});
+  iconButton("quick_rotate_90","rotate_90","Girar seleção 90°",
+             [this]{buttons.at("rotate_90")->click();});
+  quickRow->addWidget(editIcons);
   quickRow->addStretch();
   // Referências em SOMENTE LEITURA: sem mutação no Editor, sem movimento e sem G-code.
   auto* referenceMenuButton=new QToolButton;
@@ -2714,7 +3060,8 @@ public:
   configureBed->setToolTip("Configurar área de desenho e mesa");
   fitBed->setToolTip("Enquadrar a mesa configurada");
   fit->setToolTip("Ajustar desenho à área disponível");
-  view.zoomChanged=[zoom](double level){
+  view.zoomChanged=[this,zoom](double level){
+   updateInlineTextOverlay();
    QSignalBlocker block(zoom);
    int ix=-1;
    for(int i=0;i<zoom->count()-1;++i)
@@ -2727,11 +3074,14 @@ public:
    if(index<0||zoom->itemData(index).toDouble()<=0)return;
    QPointF focus=view.mapToScene(view.viewport()->rect().center());
    const double scale=alaser::zoom196::clampScale(zoom->itemData(index).toDouble());
-   view.setTransform(QTransform::fromScale(scale,scale));view.centerOn(focus);view.reportZoom();view.setFocus();
+   view.setTransform(QTransform::fromScale(scale,scale));view.centerOn(focus);view.reportZoom();
+   if(!inlineTextEntry_)view.setFocus();
   });
   canvasLayout->addLayout(canvasBar);
   view.setObjectName("drawingCanvas");view.setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Expanding);
   canvasLayout->addWidget(&view,1);
+  connect(view.horizontalScrollBar(),&QScrollBar::valueChanged,this,[this](int){updateInlineTextOverlay();});
+  connect(view.verticalScrollBar(),&QScrollBar::valueChanged,this,[this](int){updateInlineTextOverlay();});
   splitter->addWidget(center);
 
   auto* right=new QFrame;right->setObjectName("rightPanel");right->setMinimumWidth(260);right->setMaximumWidth(420);
@@ -2848,6 +3198,12 @@ addVertical(inspector,"mirror_horiz","Espelhar horizontal ↔",[this]{
  const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
  view.editor.mirrorX(ids,(lo.x+hi.x)/2.0);view.rebuild();
 });
+addVertical(inspector,"mirror_vertical","Espelhar vertical ↕",[this]{
+ if(bezierToolActive_)throw std::runtime_error("Espelhar: selecione polilinhas nesta beta.");
+ const auto ids=selection();check(!ids.empty(),"Espelhar: selecione um objeto.");
+ const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
+ view.editor.mirrorY(ids,(lo.y+hi.y)/2.0);view.rebuild();
+});
 addVertical(inspector,"rotate_90","Girar 90°",[this]{
  if(bezierToolActive_)throw std::runtime_error("Girar: somente polilinhas nesta beta.");
  const auto ids=selection();check(!ids.empty(),"Girar: selecione um objeto.");
@@ -2941,6 +3297,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    }
    status->setText("Selecione um texto editavel criado nesta versao.");
   });
+  auto* convertTextPaths=new QPushButton("Converter texto em caminhos (Ctrl+Shift+C)");
+  convertTextPaths->setObjectName("convert_text_paths_19_8");
+  convertTextPaths->setToolTip("Transforma texto editavel em contornos individuais. A fonte e a frase deixam de ser reeditaveis; Ctrl+Z desfaz.");
+  textLayout->addWidget(convertTextPaths);
+  connect(convertTextPaths,&QPushButton::clicked,this,[this]{run([this]{
+   if(inlineTextEntry_)finishInlineText(true);
+   for(int id:selection())if(view.editor.convertEditableTextToPaths(id)){
+    view.rebuild();recoveryPolicy_.edited();
+    status->setText("Texto convertido em caminhos individuais. Ctrl+Z restaura a edicao do texto.");
+    return;
+   }
+   status->setText("Selecione um texto editavel. As demais formas ja sao caminhos.");
+  });});
   auto* fontFamily=new QFontComboBox;
   fontFamily->setObjectName("text_font_windows");
   fontFamily->setToolTip("Fontes instaladas no Windows; fontes SHX ainda nao suportadas.");
@@ -3016,13 +3385,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    QFont sample=inlineTextFont_;sample.setPixelSize(20);
    sample.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
    example->setFont(sample);example->setAlignment(inlineTextAlign_);
-   if(inlineTextEntry_){
-    QFont live=inlineTextFont_;
-    live.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
-    live.setPixelSize(int(std::clamp(inlineTextHeightMm_*view.currentZoom(),12.,82.)));
-    inlineTextEntry_->setFont(live);
-    inlineTextEntry_->setAlignment(inlineTextAlign_);
-   }
+   updateInlineTextOverlay();
    QSettings prefs("AlencarLaser","DesktopBeta");
    prefs.setValue("text/fontFamily",inlineTextFont_.family());
    prefs.setValue("text/bold",inlineTextFont_.bold());
@@ -3320,6 +3683,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   command(arrangeMenu,"Agrupar","group");command(arrangeMenu,"Desagrupar","ungroup");
   command(arrangeMenu,"Enviar selecao para camada ativa (Ctrl+L)","move_layer");
   command(arrangeMenu,"Girar 90°","rotate_90");
+  command(arrangeMenu,"Espelhar horizontalmente","mirror_horiz");
+  command(arrangeMenu,"Espelhar verticalmente","mirror_vertical");
   auto* alignMenu=arrangeMenu->addMenu("Alinhar formas");
   for(const auto& [label,mode]:std::vector<std::pair<QString,int>>{
        {"Esquerda",0},{"Direita",1},{"Topo",2},{"Base",3},
@@ -3413,6 +3778,38 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* statusRow=new QHBoxLayout(statusFrame);statusRow->setContentsMargins(12,4,12,4);
   status=new QLabel;status->setObjectName("status");status->setMinimumHeight(24);
   statusRow->addWidget(status,1);layout->addWidget(statusFrame);
+  // Faixa operacional reservada e INTENCIONALMENTE INATIVA nesta candidata.
+  // O unico controle Pausar/Continuar ativo agora e o da PREVIA OFFLINE.
+  auto* operationStrip=new QFrame(this);operationStrip->setObjectName("operation_strip_19_8");
+  auto* operationRow=new QHBoxLayout(operationStrip);
+  operationRow->setContentsMargins(9,1,9,1);operationRow->setSpacing(4);
+  auto* operationTitle=new QLabel("OPERAÇÃO • BLOQUEADA");
+  operationTitle->setObjectName("operation_title_19_8");
+  operationTitle->setToolTip("Os comandos físicos terão homologação separada da edição offline.");
+  operationRow->addWidget(operationTitle);
+  auto addOperation=[&](const QString& key,const QString& glyph,const QString& name){
+   auto* b=new QToolButton(operationStrip);
+   b->setObjectName(key);b->setIcon(alaser::toolGlyph(glyph));b->setIconSize(QSize(19,19));
+   b->setFixedSize(30,28);b->setFocusPolicy(Qt::NoFocus);
+   b->setAccessibleName(name);b->setToolTip(name+" — INDISPONÍVEL: controle físico não homologado");
+   b->setEnabled(false);operationRow->addWidget(b);return b;
+  };
+  addOperation("operation_start_disabled","play","Iniciar trabalho");
+  addOperation("operation_pause_continue_disabled","pause","Pausar / Continuar trabalho");
+  addOperation("operation_stop_disabled","stop","Parar trabalho");
+  addOperation("operation_frame_disabled","fit","Enquadrar material (máquina)");
+  operationRow->addSpacing(8);
+  auto* estimated=new QLabel("Estimado: —");
+  estimated->setObjectName("operation_estimated_19_8");
+  estimated->setToolTip("Tempo físico ainda não calculado; consulte a prévia offline para estimativa virtual.");
+  operationRow->addWidget(estimated);
+  operationRow->addSpacing(5);
+  auto* elapsed=new QLabel("Decorrido: —");
+  elapsed->setObjectName("operation_elapsed_19_8");
+  elapsed->setToolTip("Relógio físico indisponível sem operação homologada.");
+  operationRow->addWidget(elapsed);
+  operationRow->addStretch();
+  layout->insertWidget(layout->count()-1,operationStrip);
   connect(layers,&QComboBox::currentIndexChanged,this,[this]{if(!refreshing)refreshFlags();});
   auto flags=[this]{if(!refreshing)run([this]{view.editor.setLayerFlags(layers->currentData().toInt(),visible->isChecked(),locked->isChecked());view.rebuild();});};
    connect(visible,&QCheckBox::clicked,this,flags);connect(locked,&QCheckBox::clicked,this,flags);
@@ -3434,9 +3831,11 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    view.requestTextAt=[this](Pt at){insertVectorText(at);};
    view.requestEditTextObject=[this](int id){editVectorTextObject(id);};
    view.requestTraceImage=[this]{traceImageDialog();};
-   connect(qApp,&QApplication::focusChanged,this,[this](QWidget* previous,QWidget* next){
+   connect(qApp,&QApplication::focusChanged,this,[this,zoom](QWidget* previous,QWidget* next){
     if(!inlineTextEntry_||previous!=inlineTextEntry_||next==inlineTextEntry_)return;
-    // Using the text formatting tab must not forcibly convert live text to outlines.
+    // Mudar o zoom ou os controles de texto nao finaliza a edicao.
+    if(next&&(next==zoom||zoom->isAncestorOf(next)||next==&view||
+              next==view.viewport()))return;
     if(textOptionsTab_&&next&&(next==textOptionsTab_||textOptionsTab_->isAncestorOf(next)))return;
     QTimer::singleShot(0,this,[this]{
      if(inlineTextEntry_&&QApplication::focusWidget()!=inlineTextEntry_)
@@ -3449,6 +3848,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     connect(sc,&QShortcut::activated,this,[this,fn]{run(fn);});
    };
   shortcut("Alt+J",[joinEndsAction]{joinEndsAction->trigger();});
+  shortcut("Ctrl+Shift+C",[convertTextPaths]{convertTextPaths->click();});
   shortcut("Ctrl+Z",[this]{if(view.shouldUseNativeHistory(false)){if(curves&&!curves->dragging())view.nativeHistory(false);}else view.history(false);});
   shortcut("Ctrl+Y",[this]{if(view.shouldUseNativeHistory(true)){if(curves&&!curves->dragging())view.nativeHistory(true);}else view.history(true);});
   shortcut("Ctrl+Shift+Z",[this]{if(view.shouldUseNativeHistory(true)){if(curves&&!curves->dragging())view.nativeHistory(true);}else view.history(true);});
@@ -3672,7 +4072,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(projectPath.isEmpty())return;
   CurveDocument cd=curves?curves->committed():CurveDocument{};
   loadedProject_=saveNative(projectPath,view.editor.state(),cd,
-    loadedProject_?&*loadedProject_:nullptr);
+    loadedProject_?&*loadedProject_:nullptr,
+    view.hasRasterImage()?&view.rasterImage():nullptr,view.rasterBounds());
   recoveryPolicy_.saved();
   alaser::PersistentSessionStore::discard();
   if(uiPersistenceEnabled_){
@@ -3697,6 +4098,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    return true;
   }
   if(object==view.viewport()){
+   if(event->type()==QEvent::Resize&&inlineTextEntry_){
+    QTimer::singleShot(0,this,[this]{updateInlineTextOverlay();});
+   }
    if(event->type()==QEvent::DragEnter){
     dragEnterEvent(static_cast<QDragEnterEvent*>(event));return true;
    }
@@ -3724,7 +4128,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    }
    if(event->type()==QEvent::KeyPress){
     auto* key=static_cast<QKeyEvent*>(event);
-    if(key->key()==Qt::Key_Escape){finishInlineText(true);return true;}
+    if(key->key()==Qt::Key_Escape){finishInlineText(false);return true;}
    }
   }
   return QWidget::eventFilter(object,event);
@@ -3737,6 +4141,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const auto editing=inlineTextEditRoot_;
   inlineTextEditRoot_.reset();inlineTextEntry_=nullptr;
   field->removeEventFilter(this);field->hide();field->deleteLater();
+  // Restaurar renderizacao anterior mesmo se o operador cancelar/errar.
+  view.setTextEditingMembersHidden({});
   for(QShortcut* sc:editingShortcuts_)sc->setEnabled(true);
   if(!commit||message.trimmed().isEmpty()){view.setFocus();return;}
   try{
@@ -3795,18 +4201,41 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    textAlignControl_->setCurrentIndex(
       std::max(0,textAlignControl_->findData(int(inlineTextAlign_))));
   }
-  insertVectorText(anchor);
+  insertVectorText(anchor,true);
   if(!inlineTextEntry_)return;
   inlineTextEditRoot_=root;
+  view.clearSelection();
+  view.setTextEditingMembersHidden(record.members);
   inlineTextEntry_->setText(QString::fromStdString(record.text));
   inlineTextEntry_->selectAll();
   status->setText("Editando texto original. Enter confirma; Esc cancela.");
  }
- void insertVectorText(Pt at){
+ // O campo e um QWidget no viewport, mas sua origem e em mm da cena.
+ // Sempre recalcular sua posicao a partir da transformacao atual (zoom,
+ // scroll, resize), sem clamp artificial que o deslocaria do desenho.
+ void updateInlineTextOverlay(){
+  QLineEdit* field=inlineTextEntry_;
+  if(!field)return;
+  const double zoom=std::max(.001,view.currentZoom());
+  QFont font=inlineTextFont_;
+  font.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
+  font.setPixelSize(int(std::clamp(inlineTextHeightMm_*zoom,12.,360.)));
+  field->setFont(font);
+  field->setAlignment(inlineTextAlign_);
+  const QString sample=field->text().isEmpty()?QStringLiteral("Digite texto..."):field->text();
+  const int estimated=QFontMetrics(font).horizontalAdvance(sample);
+  const int maxWidth=std::max(160,view.viewport()->width()*3);
+  const int width=std::clamp(estimated+40,80,maxWidth);
+  const QPoint anchor=view.mapFromScene(toQt(inlineTextAnchor_));
+  const int offset=inlineTextAlign_==Qt::AlignHCenter?width/2:
+                   (inlineTextAlign_==Qt::AlignRight?width:0);
+  field->setGeometry(anchor.x()-offset,anchor.y(),width,font.pixelSize()+12);
+ }
+ void insertVectorText(Pt at,bool editingExisting=false){
   if(inlineTextEntry_)finishInlineText(true);
   if(view.busy()||layers->currentIndex()<0)return;
   const auto layer=view.editor.state().layers.at(layers->currentData().toInt());
-  if(!layer.visible||layer.locked){
+  if(!editingExisting&&(!layer.visible||layer.locked)){
    status->setText("Texto: camada deve estar visivel e desbloqueada.");return;
   }
   inlineTextAnchor_=at;
@@ -3814,29 +4243,18 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* field=new QLineEdit(view.viewport());
   inlineTextEntry_=field;field->setObjectName("inlineTextEdit");
   field->setMaxLength(100);field->setPlaceholderText("Digite texto...");
-  const int px=int(std::clamp(inlineTextHeightMm_*view.currentZoom(),12.,82.));
-  QFont font=inlineTextFont_;
-  font.setLetterSpacing(QFont::PercentageSpacing,inlineTextLetterSpacing_);
-  font.setPixelSize(px);field->setFont(font);
-  field->setAlignment(inlineTextAlign_);
   field->setFrame(false);
   field->setStyleSheet("QLineEdit#inlineTextEdit { background:transparent; border:none;"
      " color:#FFAA54; padding:0; selection-background-color:#996031; }");
-  QPoint point=view.mapFromScene(QPointF(at.x,at.y));
-  point.setX(std::clamp(point.x(),0,std::max(0,view.viewport()->width()-80)));
-  point.setY(std::clamp(point.y(),0,std::max(0,view.viewport()->height()-px-12)));
-   field->move(point);field->resize(100,px+12);
-   connect(field,&QLineEdit::textChanged,this,[this,field](const QString& text){
-    if(field!=inlineTextEntry_)return;
-    const int textPixels=QFontMetrics(field->font()).horizontalAdvance(text);
-    const int available=std::max(80,view.viewport()->width()-field->x()-8);
-    field->setFixedWidth(std::clamp(textPixels+44,80,available));
-   });
-   for(QShortcut* shortcut:editingShortcuts_)shortcut->setEnabled(false);
-   field->installEventFilter(this);
+  connect(field,&QLineEdit::textChanged,this,[this,field](const QString&){
+   if(field==inlineTextEntry_)updateInlineTextOverlay();
+  });
+  updateInlineTextOverlay();
+  for(QShortcut* shortcut:editingShortcuts_)shortcut->setEnabled(false);
+  field->installEventFilter(this);
   connect(field,&QLineEdit::returnPressed,this,[this]{finishInlineText(true);});
   field->show();field->raise();field->setFocus(Qt::MouseFocusReason);
-   status->setText("Texto direto: digite no desenho; Enter/Esc conclui; trocar ferramenta cancela campo vazio.");
+  status->setText("Texto: Enter confirma; Esc cancela sem alterar o desenho.");
  }
 
  void createNativeBezier(){
@@ -3871,7 +4289,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const QImage image=reader.read();
   if(image.isNull())throw std::runtime_error("Imagem nao suportada (PNG/JPG/BMP/WebP)");
   view.setRasterImage(image);
-  status->setText("Imagem importada. Clique direito na mesa > Tracar imagem (Alt+T).");
+  status->setText("Imagem selecionada: arraste para mover, puxe a alça laranja para redimensionar. Salve em .alaser para preservar.");
  }
  void traceImageDialog(){
   if(!view.hasRasterImage()){status->setText("Importe uma imagem primeiro.");return;}
@@ -3887,48 +4305,84 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* optimize=new QDoubleSpinBox;optimize->setRange(0,2);optimize->setDecimals(2);optimize->setSingleStep(.1);optimize->setValue(.45);
   auto* smooth=new QCheckBox("Arredondamento leve (pode deformar cantos)");
   auto* width=new QDoubleSpinBox;width->setRange(1,400);width->setSuffix(" mm");width->setValue(view.rasterBounds().width());
+  auto* traceProfile=new QComboBox;
+  traceProfile->addItem("Automático (Otsu)");
+  traceProfile->addItem("Logotipo / desenho sólido");
+  traceProfile->addItem("Texto e traços finos");
+  traceProfile->setToolTip("Pré-ajustes; nenhum reconhece magicamente o conteúdo. Confira o resultado.");
+  form->addRow("Perfil de limpeza",traceProfile);
   form->addRow("Limiar P&B",threshold);form->addRow("Ignorar ilhas menores",minPixels);
   form->addRow("Otimizar (px)",optimize);form->addRow("Suavizar",smooth);
   form->addRow("Largura física",width);
-  auto* preview=new QLabel("Clique em Previsualizar para calcular os vetores");
-  preview->setObjectName("trace_preview");preview->setMinimumHeight(280);
-  preview->setAlignment(Qt::AlignCenter);
-  preview->setStyleSheet("background:#fff;color:#202020;border:1px solid #666;");
+  auto* preview=new TracePreviewCanvas198(&dlg);
+  preview->setMinimumHeight(280);
   layout->addWidget(preview,1);
+  auto* traceViewOptions=new QHBoxLayout;
+  auto* showOriginal=new QCheckBox("Imagem original");
+  showOriginal->setObjectName("trace_show_original");
+  showOriginal->setChecked(true);
+  auto* fadeReference=new QCheckBox("Esmaecer referência");
+  fadeReference->setObjectName("trace_fade_reference");
+  fadeReference->setChecked(true);
+  auto* showTraceNodes=new QCheckBox("Mostrar nós do traçado");
+  showTraceNodes->setObjectName("trace_show_nodes");
+  traceViewOptions->addWidget(showOriginal);
+  traceViewOptions->addWidget(fadeReference);
+  traceViewOptions->addWidget(showTraceNodes);
+  traceViewOptions->addStretch();
+  layout->addLayout(traceViewOptions);
+  preview->setImageFaded(true);
+  connect(showOriginal,&QCheckBox::toggled,preview,&TracePreviewCanvas198::setShowOriginal);
+  connect(fadeReference,&QCheckBox::toggled,preview,&TracePreviewCanvas198::setImageFaded);
+  connect(showTraceNodes,&QCheckBox::toggled,preview,&TracePreviewCanvas198::setNodesVisible);
+  auto* fitTrace=new QPushButton("Ajustar imagem na janela");
+  layout->addWidget(fitTrace);
+  connect(fitTrace,&QPushButton::clicked,preview,&TracePreviewCanvas198::resetView);
   auto* information=new QLabel("Limite 50 mil nós / 1000 contornos. Arquivo original preservado.");
   information->setWordWrap(true);layout->addWidget(information);
-  auto* previewButton=new QPushButton("Previsualizar vetores (roxo)");layout->addWidget(previewButton);
+  auto* previewButton=new QPushButton("Atualizar traçado (vetores roxos)");layout->addWidget(previewButton);
+  auto* livePreview=new QCheckBox("Atualizar automaticamente ao alterar ajustes");
+  livePreview->setChecked(true);layout->addWidget(livePreview);
+  auto* debounceTrace=new QTimer(&dlg);
+  debounceTrace->setSingleShot(true);debounceTrace->setInterval(220);
+  connect(debounceTrace,&QTimer::timeout,&dlg,[previewButton]{previewButton->click();});
   auto* actions=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
   auto* okay=actions->button(QDialogButtonBox::Ok);okay->setText("Criar traçado");okay->setEnabled(false);
   layout->addWidget(actions);
   std::optional<trace198::Result> prepared;
-  auto stale=[&]{prepared.reset();okay->setEnabled(false);information->setText("Atualize a prévia após alterar parâmetros.");};
+  auto stale=[&]{
+   prepared.reset();okay->setEnabled(false);
+   information->setText("Recalculando traçado... (o projeto não foi alterado)");
+   if(livePreview->isChecked())debounceTrace->start();
+  };
   connect(threshold,&QSlider::valueChanged,&dlg,[&](int){stale();});
   connect(minPixels,QOverload<int>::of(&QSpinBox::valueChanged),&dlg,[&](int){stale();});
   connect(optimize,QOverload<double>::of(&QDoubleSpinBox::valueChanged),&dlg,[&](double){stale();});
   connect(width,QOverload<double>::of(&QDoubleSpinBox::valueChanged),&dlg,[&](double){stale();});
   connect(smooth,&QCheckBox::toggled,&dlg,[&](bool){stale();});
+  connect(traceProfile,QOverload<int>::of(&QComboBox::currentIndexChanged),&dlg,[&](int profile){
+   if(profile==0){
+    threshold->setValue(std::clamp(trace198::otsuThreshold(trace198::grayscale(
+      view.rasterImage().scaled(960,960,Qt::KeepAspectRatio,Qt::SmoothTransformation))),1,254));
+    minPixels->setValue(5);optimize->setValue(.45);smooth->setChecked(false);
+   }else if(profile==1){
+    minPixels->setValue(12);optimize->setValue(.65);smooth->setChecked(false);
+   }else{
+    minPixels->setValue(2);optimize->setValue(.15);smooth->setChecked(false);
+   }
+   stale();
+  });
   connect(previewButton,&QPushButton::clicked,&dlg,[&]{
+   debounceTrace->stop();
    try{
     trace198::Options opts;opts.threshold=threshold->value();
     opts.minPixels=minPixels->value();opts.optimizePx=optimize->value();
     opts.smooth=smooth->isChecked();opts.widthMm=width->value();
     prepared=trace198::trace(view.rasterImage(),opts);
-    const QSize target=prepared->binary.size().scaled(QSize(460,320),Qt::KeepAspectRatio);
-    QImage image=prepared->binary.scaled(target,Qt::IgnoreAspectRatio,Qt::FastTransformation)
-       .convertToFormat(QImage::Format_ARGB32);
-    QPainter painter(&image);painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(QPen(QColor("#A200E2"),1.2));painter.setBrush(Qt::NoBrush);
-    const double scale=target.width()/opts.widthMm;
+    // Nao perder o zoom escolhido quando o usuario muda limiar/otimizacao.
+    preview->showResult(view.rasterImage(),prepared->binary,opts.widthMm,prepared->contours);
     size_t nodes=0;
-    for(const auto& path:prepared->contours){
-     if(path.empty())continue;nodes+=path.size();
-     QPainterPath vector;vector.moveTo(path.front().x*scale,path.front().y*scale);
-     for(size_t i=1;i<path.size();++i)
-      vector.lineTo(path[i].x*scale,path[i].y*scale);
-     vector.closeSubpath();painter.drawPath(vector);
-    }
-    painter.end();preview->setPixmap(QPixmap::fromImage(image));
+    for(const auto& path:prepared->contours)nodes+=path.size();
     information->setText(QString("%1 contornos, %2 nós; %3 pequenos componentes removidos. Revisar texto pequeno.")
       .arg(prepared->contours.size()).arg(nodes).arg(prepared->discardedComponents));
     okay->setEnabled(true);
@@ -3941,6 +4395,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   connect(actions,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
   // Prévia Otsu em preto/branco ao abrir. Nenhuma conversao gravada.
   previewButton->click();
+  QTimer::singleShot(0,preview,&TracePreviewCanvas198::resetView);
   if(dlg.exec()!=QDialog::Accepted||!prepared){captureEvent("image_trace_cancelled");return;}
   const QRectF anchor=view.rasterBounds();
   auto contours=std::move(prepared->contours);
@@ -4026,6 +4481,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    projectPath=chosen;
   }
   auto project=openNative(projectPath);
+  // Validar hashes/PNG ANTES de trocar o desenho exibido.
+  const auto image=alaser::rasterproject198::decode(project);
   auto state=editorStateForIntegratedProject(project);
   view.editor=Editor(std::move(state));
   view.invalidateSelectionCache();view.clearSelection();view.rebuild();
@@ -4035,6 +4492,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   else
    curves.reset();
   bezierToolActive_=false;view.attachNative(curves.get());
+  view.clearRasterImage();
+  if(image)view.restoreRaster(image->image,image->bounds);
   buttons.at("select")->setChecked(true);
   loadedProject_=std::move(project);
   recoveryPolicy_.opened();
@@ -4440,11 +4899,16 @@ static QJsonObject editTools197Test(const QString& directory){
  }
  check(v.viewport()->cursor().shape()!=Qt::ArrowCursor,"cursor nao mudou sobre trecho valido");
  moveHover(clearPoint);
- if(v.scissorPreview()||v.viewport()->cursor().shape()!=Qt::ArrowCursor){
+ // A ferramenta continua SELECIONADA fora do desenho; isso nao significa
+ // que exista trecho cortavel. O destaque laranja precisa desaparecer.
+ // Preservar o cursor da Tesoura responde ao problema reportado no Windows.
+ if(v.scissorPreview()||v.viewport()->cursor().shape()==Qt::ArrowCursor){
   w.grab().save(directory+"/FALHA_SAIDA_TESOURA.png");
-  throw std::runtime_error("Tesoura permaneceu ativa fora do trecho: "+
+  throw std::runtime_error("Tesoura: destaque nao foi removido ou cursor da ferramenta sumiu: "+
                            v.scissorHoverDiagnostics(clearPoint));
  }
+ check(v.viewport()->toolTip().contains("sem intervalo seguro"),
+       "Tesoura fora de contorno nao informa que o corte esta indisponivel");
  const size_t old=v.editor.undoCount();
  clickScene(w,{110,100});
  check(v.editor.undoCount()==old+1,"scissor mouse click did not create history");
@@ -5391,6 +5855,20 @@ static QJsonObject editorMultitool198Test(const QString& directory){
  clickScene(w,{20,20});clickScene(w,{40,20});clickScene(w,{40,40});
  check(v.isPolylineActive()&&v.polylineVertexCount()==3,
        "Linha continua nao manteve os tres nos no mesmo gesto");
+ // Regressao do relato real: a roda deve funcionar com a linha ainda aberta.
+ const auto originalZoom=v.currentZoom();
+ const auto originalState=stateText(v.editor.state());
+ const QPoint wheelAt=v.mapFromScene(QPointF(38,37));
+ QWheelEvent duringLine(QPointF(wheelAt),QPointF(wheelAt),
+                        QPoint(0,0),QPoint(0,120),
+                        Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+ QApplication::sendEvent(v.viewport(),&duringLine);
+ QApplication::processEvents();
+ check(v.currentZoom()>originalZoom,
+       "Zoom por scroll foi bloqueado enquanto desenhava linha continua");
+ check(v.isPolylineActive()&&v.polylineVertexCount()==3&&
+       stateText(v.editor.state())==originalState,
+       "Zoom durante linha alterou nos canonicos ou concluiu o gesto");
  clickScene(w,{20,20});
  check(!v.isPolylineActive(),"Fechamento na origem nao finalizou a linha");
  const auto* closed=get(v.editor.state().doc,{v.lastCreated(),0});
@@ -5828,9 +6306,47 @@ static QJsonObject textFillAlign198Test(){
        "Criacao real de texto nao salvou registro editavel");
  const int liveRoot=ui.view.editor.state().editableTexts.begin()->first;
  const auto prior=ui.view.editor.undoCount();
- ui.editVectorTextObject(liveRoot);
- check(ui.inlineTextEntry_&&ui.inlineTextEntry_->text()=="PRIMEIRO",
-       "Reedicao nao recuperou frase original");
+ // No modo Texto, um clique no interior da palavra deve abrir o editor,
+ // sem criar outro objeto/texto fantasma na mesma posicao.
+ const auto members=ui.view.editor.state().editableTexts.at(liveRoot).members;
+ const auto textBox=boundsOf(ui.view.editor.state().doc,members);
+ const QPoint textClick=ui.view.mapFromScene(QPointF(
+   (textBox.first.x+textBox.second.x)*.5,
+   (textBox.first.y+textBox.second.y)*.5));
+ clickButton(ui,"text");
+ QTest::mouseClick(ui.view.viewport(),Qt::LeftButton,Qt::NoModifier,textClick);
+ QApplication::processEvents();
+ check(ui.inlineTextEntry_&&ui.inlineTextEntry_->text()=="PRIMEIRO"&&
+       ui.view.editor.state().editableTexts.size()==1,
+       "Clique direto no texto nao recuperou edicao original");
+ check(ui.view.editor.undoCount()==prior,
+       "Clique para reeditar criou objeto/Undo indevido");
+ check(ui.view.textEditingMemberHidden(liveRoot)&&
+       !ui.view.pathItem({liveRoot,0})->isVisible(),
+       "Contorno antigo permaneceu visivel durante reedicao");
+ const auto anchoredOverlay=[&](){
+  const QPoint anchor=ui.view.mapFromScene(toQt(ui.inlineTextAnchor_));
+  const auto* field=ui.inlineTextEntry_;
+  const int offset=ui.inlineTextAlign_==Qt::AlignHCenter?field->width()/2:
+                   (ui.inlineTextAlign_==Qt::AlignRight?field->width():0);
+  return QPoint(anchor.x()-offset,anchor.y());
+ };
+ check(ui.inlineTextEntry_->pos()==anchoredOverlay(),
+       "Campo de texto nao inicia na ancora da cena");
+ // Zoom e barra de rolagem devem mover a sobreposicao com a mesa,
+ // sem alterar a ancora ou duplicar o texto original.
+ const auto originalTextAnchor=ui.inlineTextAnchor_;
+ ui.view.scale(1.5,1.5);ui.view.reportZoom();
+ QApplication::processEvents();
+ check(ui.inlineTextEntry_->pos()==anchoredOverlay()&&
+       ui.inlineTextAnchor_.x==originalTextAnchor.x&&
+       ui.inlineTextAnchor_.y==originalTextAnchor.y&&
+       ui.view.textEditingMemberHidden(liveRoot),
+       "Zoom deslocou campo de texto de sua ancora ou mostrou contorno antigo");
+ ui.view.horizontalScrollBar()->setValue(ui.view.horizontalScrollBar()->value()+12);
+ QApplication::processEvents();
+ check(ui.inlineTextEntry_->pos()==anchoredOverlay(),
+       "Rolagem separou o campo de texto do objeto editado");
  ui.inlineTextEntry_->setText("SEGUNDO");
  ui.finishInlineText(true);
  check(ui.view.editor.state().editableTexts.at(liveRoot).text=="SEGUNDO"&&
@@ -5844,6 +6360,34 @@ static QJsonObject textFillAlign198Test(){
        ui.view.editor.state().editableTexts.at(liveRoot).text=="PRIMEIRO",
        "Undo apos reeditacao nao devolveu texto original");
  ui.view.editor.redo();ui.view.rebuild();
+ // Escape durante reedicao descarta rascunho e restaura desenho original.
+ const auto beforeCancel=stateText(ui.view.editor.state());
+ ui.editVectorTextObject(liveRoot);
+ check(ui.inlineTextEntry_&&ui.view.textEditingMemberHidden(liveRoot),
+       "Reedicao nao ocultou contornos antes de cancelar");
+ ui.inlineTextEntry_->setText("NAO SALVAR");
+ QTest::keyClick(ui.inlineTextEntry_,Qt::Key_Escape);
+ QApplication::processEvents();
+ check(!ui.inlineTextEntry_&&
+       !ui.view.textEditingMemberHidden(liveRoot)&&
+       ui.view.pathItem({liveRoot,0})->isVisible()&&
+       stateText(ui.view.editor.state())==beforeCancel,
+       "Escape nao cancelou reedicao/restaurou contornos e metadados");
+ // Acao visivel em portugues para remover a semantica de fonte e liberar nos.
+ auto* convert=ui.findChild<QPushButton*>("convert_text_paths_19_8");
+ check(convert!=nullptr,"Acao Converter texto em caminhos nao aparece");
+ ui.view.clearSelection();ui.view.activate({liveRoot,0});
+ const auto geometryBeforePath=serialize(encode(ui.view.editor.state().doc));
+ const auto historyBeforePath=ui.view.editor.undoCount();
+ convert->click();QApplication::processEvents();
+ check(ui.view.editor.state().editableTexts.empty()&&
+       ui.view.editor.undoCount()==historyBeforePath+1&&
+       serialize(encode(ui.view.editor.state().doc))==geometryBeforePath,
+       "Converter texto em caminhos mudou geometria ou nao removeu metadados");
+ check(ui.view.editor.undo()&&
+       ui.view.editor.state().editableTexts.at(liveRoot).text=="SEGUNDO",
+       "Ctrl+Z nao restaurou texto editavel apos converter caminho");
+ ui.view.rebuild();
  ui.view.editor.setLayerMode(0,"Fill");
  const int outer=ui.view.editor.ellipse({100,100},45,45,128);
  const int hole=ui.view.editor.ellipse({100,100},20,20,128);
@@ -5874,7 +6418,35 @@ static QJsonObject textFillAlign198Test(){
  check(camera.zoomLevel()>1.0,"Roda do mouse nao ampliou a previa");
  camera.resetView();
  check(std::abs(camera.zoomLevel()-1.)<1e-7,"Ajustar imagem nao restaurou camera");
+ QPainterPath vectorLines;vectorLines.moveTo(0,0);vectorLines.lineTo(100,100);
+ camera.showPaths(vectorLines,QPainterPath(),QPainterPath(),false,400,400);
+ check(camera.vectorMode(),"Previa vetorial nao substituiu o bitmap");
+ QApplication::sendEvent(camera.viewport(),&wheel);
+ check(camera.vectorMode()&&camera.zoomLevel()>1.0,
+       "Zoom vetorial voltou a rasterizar a simulacao");
  camera.close();
+ TracePreviewCanvas198 tracer;
+ tracer.resize(340,240);tracer.show();QApplication::processEvents();
+ QImage sourceImage(100,80,QImage::Format_ARGB32);sourceImage.fill(Qt::white);
+ tracer.showResult(sourceImage,sourceImage,100.,{{{10,10},{50,10},{50,35}}});
+ check(tracer.isShowingOriginal(),"Traçado não exibiu imagem original de referência");
+ tracer.setShowOriginal(false);
+ check(!tracer.isShowingOriginal(),"Traçado não alternou original/P&B");
+ tracer.setShowOriginal(true);
+ tracer.setImageFaded(true);
+ tracer.setNodesVisible(true);
+ check(tracer.imageFaded()&&tracer.nodesVisible()&&tracer.shownNodeCount()==3,
+       "Traçado: a imagem não esmaeceu ou os nós não foram exibidos");
+ tracer.setNodesVisible(false);
+ check(!tracer.nodesVisible()&&tracer.shownNodeCount()==0,
+       "Traçado: nós continuaram visíveis após desativação");
+ tracer.resetView();
+ QWheelEvent traceWheel(QPointF(160,100),QPointF(160,100),QPoint(0,0),
+                   QPoint(0,120),Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+ QApplication::sendEvent(tracer.viewport(),&traceWheel);
+ check(tracer.zoomLevel()>1.0,
+       "Rastreamento de imagem nao suporta zoom pela roda");
+ tracer.close();
  return {{"status","PASS"},{"editable_text_metadata",true},
    {"text_replace_undo",true},{"align_x_y_right",true},
    {"fill_even_odd_visual",true},{"preview_wheel_zoom",true},
@@ -6007,8 +6579,128 @@ static QJsonObject drawAndJoin198Test(){
   {"undo_redo",true},{"hardware_commands_sent",false}};
 }
 
+static QJsonObject layoutIcons198Test(){
+ LabWindow w(Document{});w.resize(1280,760);w.show();QApplication::processEvents();
+ auto* header=w.findChild<QFrame*>("topHeader");
+ check(header&&header->maximumHeight()<=48,"Cabecalho ultrapassou altura compacta");
+ for(const QString& name:{"quick_align_0","quick_align_4","quick_align_1",
+                          "quick_flip_horizontal","quick_flip_vertical","quick_rotate_90"}){
+  auto* b=w.findChild<QToolButton*>(name);
+  check(b&&b->isEnabled()&&!b->icon().isNull()&&!b->toolTip().isEmpty(),
+        "Barra de icones sem comando, icone ou descricao");
+ }
+ for(const QString& name:{"operation_start_disabled","operation_pause_continue_disabled",
+                          "operation_stop_disabled","operation_frame_disabled"}){
+  auto* b=w.findChild<QToolButton*>(name);
+  check(b&&!b->isEnabled(),"Comando fisico foi habilitado indevidamente");
+ }
+ const int one=w.view.editor.addContour({{10,10},{20,10},{18,25}},true);
+ const int two=w.view.editor.addContour({{80,30},{110,30},{95,40}},true);
+ w.view.rebuild();w.view.activate({one,0});w.view.selected.insert(two);
+ w.findChild<QToolButton*>("quick_align_0")->click();
+ const auto boundsOne=boundsOf(w.view.editor.state().doc,{one});
+ const auto boundsTwo=boundsOf(w.view.editor.state().doc,{two});
+ check(std::abs(boundsOne.first.x-boundsTwo.first.x)<1e-7,
+       "Alinhar pelo icone nao moveu as formas");
+ w.view.activate({one,0});
+ const auto* before=get(w.view.editor.state().doc,{one,0});
+ const double startY=before->nodes.front().p.y;
+ w.findChild<QToolButton*>("quick_flip_vertical")->click();
+ const auto* after=get(w.view.editor.state().doc,{one,0});
+ check(std::abs(after->nodes.front().p.y-(35.-startY))<1e-7,
+       "Espelhamento vertical nao refletiu os nos do objeto");
+ w.close();
+ return {{"status","PASS"},{"icon_actions_working",true},
+         {"vertical_mirror",true},{"header_compact",true},
+         {"physical_operation_disabled",true}};
+}
+static QJsonObject rasterObject198Test(){
+ QTemporaryDir temporary;
+ check(temporary.isValid(),"Nao criou diretorio temporario");
+ const QString filename=temporary.filePath("imagem_v5.alaser");
+ QImage original(48,32,QImage::Format_ARGB32);
+ original.fill(QColor("#EFEFEF"));
+ original.setPixelColor(5,7,QColor(12,64,230,150));
+ original.setPixelColor(32,12,QColor(120,20,5));
+ QRectF bounds(38.25,61.5,100.5,67.);
+ Editor state(Document{});
+ const IntegratedProject saved=saveNative(filename,state.state(),CurveDocument{},nullptr,&original,bounds);
+ check(saved.legacy.layers.as_object().contains("raster_object_19_8"),
+       "PNG nao foi armazenado no .alaser");
+ const IntegratedProject reopened=openNative(filename);
+ auto bitmap=alaser::rasterproject198::decode(reopened);
+ check(bitmap&&bitmap->image.size()==original.size(),
+       "Reabertura perdeu dimensoes da imagem");
+ check(bitmap->bounds==bounds&&bitmap->image.pixelColor(5,7)==original.pixelColor(5,7),
+       "Reabertura mudou posicao, escala ou pixels");
+ IntegratedProject tampered=reopened;
+ auto& raster=tampered.legacy.layers.as_object().at("raster_object_19_8").as_object();
+ raster["sha256"]="0000000000000000000000000000000000000000000000000000000000000000";
+ bool rejected=false;
+ try{(void)alaser::rasterproject198::decode(tampered);}catch(...){rejected=true;}
+ check(rejected,"PNG alterado nao foi recusado pelo SHA");
+ const QString legacy=temporary.filePath("sem_imagem.alaser");
+ (void)saveNative(legacy,state.state());
+ check(!alaser::rasterproject198::decode(openNative(legacy)),
+       "Projeto legado sem PNG criou imagem fantasma");
+ return {{"status","PASS"},{"image_embedded_png",true},
+         {"image_position_scale_preserved",true},{"sha256_guard",true},
+         {"legacy_without_bitmap",true},{"hardware_commands_sent",false}};
+}
 int main(int argc,char** argv){
- QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";if(mode=="--recovery-19-8-test"){
+ QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";
+ if(mode=="--layout-icons-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=layoutIcons198Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_LAYOUT_ICONES_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
+ if(mode=="--raster-object-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=rasterObject198Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_IMAGEM_OBJETO_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
+ if(mode=="--branding-19-8-test"){
+  QDir().mkpath(out);
+  QJsonObject report;bool passed=false;
+  try{
+   QTemporaryDir temp;
+   if(!temp.isValid())throw std::runtime_error("Diretorio temporario indisponivel");
+   const QString assets=QDir(temp.path()).absoluteFilePath("DADOS/LOGO/PEGASO_V1");
+   if(!QDir().mkpath(assets))throw std::runtime_error("Nao foi possivel criar fixture");
+   const QString name="pegaso_icone_256.png";
+   QImage fixture(4,4,QImage::Format_ARGB32);
+   fixture.fill(QColor("#F77F00"));
+   if(!fixture.save(QDir(assets).absoluteFilePath(name)))
+    throw std::runtime_error("Fixture PNG da marca nao foi criada");
+   const QString discovered=alaser::branding198::findInRoots(name,{assets});
+   if(discovered.isEmpty()||!QFileInfo(discovered).isFile())
+    throw std::runtime_error("Nao encontrou o icone na pasta versionada");
+   if(!alaser::branding198::findInRoots("../fora.png",{assets}).isEmpty())
+    throw std::runtime_error("Busca de recurso aceitou caminho arbitrario");
+   const QString previous=QDir::currentPath();
+   const bool changed=QDir::setCurrent(temp.path());
+   if(!changed)throw std::runtime_error("Falha ao usar diretorio temporario");
+   const bool iconOk=!alaser::branding198::approvedIcon().isNull();
+   QDir::setCurrent(previous);
+   if(!iconOk)throw std::runtime_error("Icone versionado nao foi carregado");
+   passed=true;
+   report={{"status","PASS"},{"pegaso_resolver",true},{"legacy_fallback_optional",true},
+           {"hardware_commands_sent",false}};
+  }catch(const std::exception& e){
+   report={{"status","FAIL"},{"error",e.what()}};
+  }
+  QFile file(out+"/RESULTADO_IDENTIDADE_PEGASO_19_8.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson());
+  return passed?0:1;
+ }
+ if(mode=="--recovery-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=recovery198Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_RECUPERACAO_19_8.json");if(!file.open(QIODevice::WriteOnly))return 2;
@@ -6133,8 +6825,26 @@ int main(int argc,char** argv){
  }
  QDir().mkpath(out);
  if(mode=="--interactive"){
-  LabWindow w(readCsv(csv.toStdString()));w.show();w.view.setTransform(QTransform::fromScale(6.,6.));w.view.reportZoom();w.view.centerOn(toQt(w.view.editor.state().doc.contours[0].nodes[15].p));
-  QObject::connect(&app,&QCoreApplication::aboutToQuit,[&]{QFile f(out+"/SESSAO_INTERATIVA_TESTE_6.json");if(f.open(QIODevice::WriteOnly))f.write(QJsonDocument(telemetry(w)).toJson());});return app.exec();
+  // Splash apenas durante abertura interativa; em testes sinteticos e sem
+  // assets, nao e criado. Nenhum comando GRBL e executado neste processo.
+  std::unique_ptr<QSplashScreen> splash;
+  const QPixmap intro=alaser::branding198::approvedSplash();
+  if(!intro.isNull()){
+   splash=std::make_unique<QSplashScreen>(intro);
+   splash->show();app.processEvents();
+  }
+  LabWindow w(readCsv(csv.toStdString()));
+  const QIcon icon=alaser::branding198::approvedIcon();
+  if(!icon.isNull())app.setWindowIcon(icon);
+  w.show();
+  if(splash)splash->finish(&w);
+  w.view.setTransform(QTransform::fromScale(6.,6.));
+  w.view.reportZoom();
+  if(!w.view.editor.state().doc.contours.empty()&&
+     w.view.editor.state().doc.contours.front().nodes.size()>15)
+   w.view.centerOn(toQt(w.view.editor.state().doc.contours.front().nodes[15].p));
+  QObject::connect(&app,&QCoreApplication::aboutToQuit,[&]{QFile f(out+"/SESSAO_INTERATIVA_TESTE_6.json");if(f.open(QIODevice::WriteOnly))f.write(QJsonDocument(telemetry(w)).toJson());});
+  return app.exec();
  }
  QJsonObject report;bool success=true;
  try{if(mode=="--write")report=integratedTest(csv,out);else if(mode=="--reopen")report=reopenTest(out);else if(mode=="--navigation-test")report=navigationTest(csv,out);else if(mode=="--workspace-test")report=workspaceLayoutTest(csv,out);else throw std::runtime_error("unknown mode");}

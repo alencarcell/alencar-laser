@@ -68,6 +68,72 @@ int main(){
   require(beforeOrigin->preview.size()==4,
           "arco de retorno recebeu limite incorreto");
 
+  // Caso real: depois de remover uma ponta da linha que cruza uma guia,
+  // o resto termina exatamente no cruzamento antigo. Deve ser possivel
+  // destacar e excluir o restante; tangencias INTERIORES ficam bloqueadas.
+  Editor residual(Document{});
+  const int segment=residual.line({0,0},{10,0});
+  const int boundary=residual.line({5,-3},{5,3});
+  planner.reset(residual.state().doc);
+  auto firstTail=planner.candidate(residual.state().doc,
+                      {{segment,0},0,0,{2.5,0}});
+  require(bool(firstTail)&&firstTail->preview.size()==2,
+          "nao identificou a primeira ponta excedente");
+  residual.removeScissorSpan(*firstTail);
+  planner.reset(residual.state().doc);
+  auto remaining=planner.candidate(residual.state().doc,
+                     {{segment,0},0,0,{7.5,0}});
+  require(bool(remaining)&&remaining->preview.size()==2,
+          "extremidade ja cortada bloqueou restante da linha aberta");
+  require(residual.removeScissorSpan(*remaining)==0,
+          "tesoura nao removeu o segundo excedente/contorno remanescente");
+  require(!get(residual.state().doc,{segment,0})&&
+          get(residual.state().doc,{boundary,0}),
+          "segundo corte alterou linha de referencia");
+  require(residual.undo()&&get(residual.state().doc,{segment,0}),
+          "undo do segundo corte nao restaurou linha remanescente");
+
+  Editor unsafeInterior(Document{});
+  const int base=unsafeInterior.addContour({{0,0},{5,0},{10,0}},false);
+  unsafeInterior.line({5,-3},{5,3});
+  planner.reset(unsafeInterior.state().doc);
+  auto ambiguous=planner.candidate(unsafeInterior.state().doc,
+                     {{base,0},0,0,{2.5,0}});
+  require(!ambiguous,"cruzamento no vertice interior foi excluido sem seguranca");
+
+  // Reproducao numerica da geometria enviada pelo operador: objeto 575.
+  // O caminho aberto tem uma ponta acima do triangulo e termina com um
+  // vertice sobre a PRIMEIRA aresta, uma junção em T de ponta externa.
+  Editor realTriangle(Document{});
+  const int triangle=realTriangle.addContour({
+     {36.42090666666665,171.17826133333327},
+     {36.42090666666666,234.15374697766455},
+     {85.90379017754454,234.15374697766455},
+     {36.42090666666665,184.67086346678667}},false);
+  const Document triangleBefore=realTriangle.state().doc;
+  planner.reset(realTriangle.state().doc);
+  auto excess=planner.candidate(realTriangle.state().doc,
+          {{triangle,0},0,0,{36.42090666666665,174.}});
+  require(bool(excess),"objeto 575: ponta externa na junta T nao ficou em laranja");
+  require(excess->from<1e-7&&excess->to>0.20&&excess->to<0.23,
+          "objeto 575: ponta excedente nao termina na junta T");
+  realTriangle.removeScissorSpan(*excess);
+  const auto* onlyShape=get(realTriangle.state().doc,{triangle,0});
+  require(onlyShape&&hasExactDuplicateClosure(*onlyShape),
+          "objeto 575: primeiro recorte nao deixou triangulo fechado logicamente");
+  planner.reset(realTriangle.state().doc);
+  auto remainder=planner.candidate(realTriangle.state().doc,
+          {{triangle,0},1,0,{60.,234.15374697766455}});
+  require(bool(remainder)&&remainder->closed,
+          "objeto 575: resto do triangulo nao recebeu contorno laranja");
+  require(realTriangle.removeScissorSpan(*remainder)==0&&
+          realTriangle.state().doc.contours.empty(),
+          "objeto 575: Tesoura nao apagou segunda forma restante");
+  require(realTriangle.undo()&&get(realTriangle.state().doc,{triangle,0}),
+          "objeto 575: segundo recorte nao pode ser desfeito");
+  require(realTriangle.undo()&&sameDoc(triangleBefore,realTriangle.state().doc),
+          "objeto 575: segundo Undo nao restaurou original binario");
+
   Editor ring(Document{});
   const int circle=ring.ellipse({0,0},10,10,64);
   const int knife=ring.line({-20,2},{20,2});
@@ -81,9 +147,9 @@ int main(){
   const auto n0=get(ring.state().doc,{circle,0})->nodes.size();
   const int result=ring.removeScissorSpan(*arc);
   require(result==circle,"arco fechado deveria manter objeto original");
-  const auto* remainder=get(ring.state().doc,{circle,0});
-  require(remainder&&!remainder->closed,"arco fechado nao virou caminho aberto");
-  require(remainder->nodes.size()<n0&&remainder->nodes.size()>5,"arco removido de maneira fragmentada");
+  const auto* circleRemainder=get(ring.state().doc,{circle,0});
+  require(circleRemainder&&!circleRemainder->closed,"arco fechado nao virou caminho aberto");
+  require(circleRemainder->nodes.size()<n0&&circleRemainder->nodes.size()>5,"arco removido de maneira fragmentada");
   require(get(ring.state().doc,{knife,0})&&get(ring.state().doc,{knife,0})->nodes.size()==2,
           "corte alterou linha cruzadora");
   require(ring.undo()&&sameDoc(ringBefore,ring.state().doc),"undo do arco falhou");

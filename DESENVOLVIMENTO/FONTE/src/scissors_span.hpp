@@ -100,6 +100,23 @@ class ScissorSpanPlanner {
     }
     const double x=cross2(q-a,t)/d,y=cross2(q-a,r)/d;
     if(x< -1e-9||x>1.+1e-9||y< -1e-9||y>1.+1e-9)continue;
+    // Um caminho ABERTO pode voltar com sua ponta ao interior de uma
+    // aresta anterior, formando o 'T' da tesoura (fixture real: objeto 575).
+    // So a ponta EXTERNA (primeiro/ultimo no) recebe tratamento especial:
+    // criar limite na aresta INTERIOR e ignorar o duplicado na ponta.
+    // Cruzamentos em vertices interiores continuam recusados.
+    if(s.key==c.key&&!c.closed){
+     const bool targetInterior=x>1e-7&&x<1.-1e-7;
+     const bool otherInterior=y>1e-7&&y<1.-1e-7;
+     const bool otherOpenTip=(s.idx==0&&y<1e-7)||
+                             (s.idx==edges-1&&y>1.-1e-7);
+     const bool targetOpenTip=(i==0&&x<1e-7)||
+                              (i==edges-1&&x>1.-1e-7);
+     if(targetInterior&&otherOpenTip){
+      out.crossings.push_back(double(i)+x);continue;
+     }
+     if(otherInterior&&targetOpenTip)continue;
+    }
     // Intersecoes exatamente em vertices podem ser tangencias; recusamos
     // estes casos ate haver classificacao topologica de ambos os lados.
     if(x<1e-7||x>1.-1e-7||y<1e-7||y>1.-1e-7){
@@ -143,8 +160,15 @@ public:
   // Exatamente um cruzamento no contorno fechado continua ambiguo.
   if(c->closed&&bs.crossings.size()==1)return {};
   if(bs.crossings.empty()){
-   // Sobreposicoes e tangencias nao resolvidas precisam ser recusadas.
-   if(!bs.unsafe.empty())return {};
+   // Apos o primeiro corte, a extremidade do caminho aberto pode coincidir
+   // exatamente com a linha usada como limite. Essa intersecao terminal
+   // NAO deve impedir o recorte posterior do resto (caso real 29/10).
+   // Manter bloqueios para sobreposicoes e tangencias no MEIO do caminho.
+   for(const auto& bad:bs.unsafe){
+    const bool onlyOpenEndpoint=!c->closed&&
+      (bad.second<=1e-5||bad.first>=double(m)-1e-5);
+    if(!onlyOpenEndpoint)return {};
+   }
    return ScissorSpan{hit.key,0.,double(m),c->closed,
                       spanPoints(*c,0.,double(m))};
   }

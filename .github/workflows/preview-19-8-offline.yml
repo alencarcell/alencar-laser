@@ -4,39 +4,103 @@ on:
   push:
     branches:
       - feat/refino-curvas-rastreio-diagnosticos-19-8
+      - fix/validacao-real-19-8-20261029
     paths:
       - "DESENVOLVIMENTO/FONTE/src/**"
+      - "DESENVOLVIMENTO/FONTE/qt/**"
       - "DESENVOLVIMENTO/FONTE/tests/**"
+      - "DESENVOLVIMENTO/FONTE/CMakeLists.txt"
+      - "SCRIPTS/TESTAR_19_8_WINDOWS.ps1"
+      - ".github/workflows/preview-19-8-offline.yml"
+  pull_request:
+    branches:
+      - feat/refino-curvas-rastreio-diagnosticos-19-8
+    paths:
+      - "DESENVOLVIMENTO/FONTE/src/**"
+      - "DESENVOLVIMENTO/FONTE/qt/**"
+      - "DESENVOLVIMENTO/FONTE/tests/**"
+      - "DESENVOLVIMENTO/FONTE/CMakeLists.txt"
+      - "SCRIPTS/TESTAR_19_8_WINDOWS.ps1"
       - ".github/workflows/preview-19-8-offline.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-portable-core:
-    name: "Portable simulator (no hardware)"
+    name: "C++20 offline: tesoura, texto, simulador"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Checkout experimental branch
+      - name: Checkout experimental source
         uses: actions/checkout@v4
         with:
           persist-credentials: false
       - name: Install C++20 and Boost JSON headers
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends g++ libboost-json1.83-dev
-      - name: Build and test motion, Fill, route
+          sudo apt-get install -y --no-install-recommends g++ libboost-json1.83-dev libminizip-dev zlib1g-dev
+      - name: Build and test portable offline models
         shell: bash
         run: |
           set -euo pipefail
           cd DESENVOLVIMENTO/FONTE
           mkdir -p build-ci-offline
-          g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic             tests/preview_motion_19_8_standalone.cpp             -o build-ci-offline/preview_motion
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic tests/preview_motion_19_8_standalone.cpp -o build-ci-offline/preview_motion
           build-ci-offline/preview_motion
-          for target in preview_raster_19_8_standalone preview_route_19_8_standalone preview_draw_join_19_8_standalone text_alignment_19_8_standalone; do
-            g++ -std=c++20 -O2 -Wall -Wextra -pedantic               "tests/${target}.cpp" -lboost_json -o "build-ci-offline/${target}"
+          for target in preview_raster_19_8_standalone preview_route_19_8_standalone preview_draw_join_19_8_standalone; do
+            g++ -std=c++20 -O2 -Wall -Wextra -pedantic "tests/${target}.cpp" -o "build-ci-offline/${target}"
             "build-ci-offline/${target}"
           done
-          echo "PASS: C++20 offline only; Qt6/Windows/laser remain unvalidated."
+          for target in text_alignment_19_8_standalone test19_7_scissors_layers test19_8_scissors_span preview_workarea_19_8_standalone; do
+            g++ -std=c++20 -O2 -Wall -Wextra -pedantic -I src "tests/${target}.cpp" src/boost_json_impl.cpp -lminizip -lz -o "build-ci-offline/${target}"
+            "build-ci-offline/${target}"
+          done
+          echo "PASS: portable C++ tests only. Qt6/Windows and physical laser NOT validated."
+
+  build-qt-windows:
+    name: "Qt6 UCRT64 - compile (sem laser)"
+    if: github.event_name != 'pull_request'
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Preserve checkout line endings
+        shell: bash
+        run: git config --global core.autocrlf input
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-boost
+            mingw-w64-ucrt-x86_64-minizip
+            mingw-w64-ucrt-x86_64-zlib
+      - name: Compile Qt6 interface without physical device
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S DESENVOLVIMENTO/FONTE -B build-ci-qt-19-8 -G Ninja -DALENCAR_REQUIRE_QT=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/ucrt64
+          cmake --build build-ci-qt-19-8 --target alencar_test7_qt6 --parallel 1
+          echo "PASS: compilacao Qt6 Windows; mouse real e laser ainda NAO homologados."
+      - name: Test PNG embedded and layout icons (Qt6 offscreen)
+        shell: msys2 {0}
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          mkdir -p build-ci-qt-19-8/qa
+          ./build-ci-qt-19-8/alencar_test7_qt6.exe --raster-object-19-8-test none build-ci-qt-19-8/qa
+          ./build-ci-qt-19-8/alencar_test7_qt6.exe --layout-icons-19-8-test none build-ci-qt-19-8/qa
+          echo "PASS: GUI Qt offscreen. Ainda exigir mouse fisico e copia de projeto no Windows."
