@@ -6744,12 +6744,33 @@ static QJsonObject layoutIcons198Test(){
        std::abs(spareBefore.second.y-spareAfter.second.y)<1e-7,
        "Centralizar selecao moveu objeto de reserva que nao foi selecionado");
  w.view.activate({one,0});
+ check(w.view.selected.size()==1&&w.view.selected.count(one)==1,
+       "Espelhamento isolado exige apenas o objeto ativo selecionado");
+ const auto [mirrorLo,mirrorHi]=boundsOf(w.view.editor.state().doc,{one});
+ const double mirrorAxisSum=mirrorLo.y+mirrorHi.y;
  const auto* before=get(w.view.editor.state().doc,{one,0});
- const double startY=before->nodes.front().p.y;
+ check(before!=nullptr&&!before->nodes.empty(),"Objeto nao encontrado para espelhar");
+ std::vector<Pt> originalNodes;
+ for(const auto& n:before->nodes)originalNodes.push_back(n.p);
+ const auto historyBeforeMirror=w.view.editor.undoCount();
  w.findChild<QToolButton*>("quick_flip_vertical")->click();
  const auto* after=get(w.view.editor.state().doc,{one,0});
- check(std::abs(after->nodes.front().p.y-(35.-startY))<1e-7,
-       "Espelhamento vertical nao refletiu os nos do objeto");
+ check(after!=nullptr&&after->nodes.size()==originalNodes.size(),
+       "Espelhamento vertical mudou a topologia do objeto");
+ for(std::size_t i=0;i<originalNodes.size();++i){
+  check(std::abs(after->nodes[i].p.y-(mirrorAxisSum-originalNodes[i].y))<1e-7&&
+        std::abs(after->nodes[i].p.x-originalNodes[i].x)<1e-7,
+        "Espelhamento vertical nao refletiu todos os nos no eixo atual");
+ }
+ check(w.view.editor.undoCount()==historyBeforeMirror+1,
+       "Espelhamento vertical nao criou uma unica transacao de Undo");
+ check(w.view.editor.undo(),"Undo do espelhamento vertical falhou");
+ const auto* undone=get(w.view.editor.state().doc,{one,0});
+ check(undone&&undone->nodes.size()==originalNodes.size(),
+       "Undo do espelhamento perdeu nos");
+ for(std::size_t i=0;i<originalNodes.size();++i)
+  check(dist(undone->nodes[i].p,originalNodes[i])<1e-7,
+        "Undo do espelhamento nao restaurou a geometria");
  w.close();
  return {{"status","PASS"},{"icon_actions_working",true},
          {"align_both_centers",true},{"center_selection_on_bed",true},
