@@ -13,7 +13,7 @@ struct Report {
  // Laser-ON statistics exclude positioning travels, avoiding false alarms
  // about non-cutting motion that happens to run outside the visual rectangle.
  std::size_t outsideLaserSegments=0,clippedLaserSegments=0;
- double omittedLaserMm=0.;
+ double omittedLaserMm=0.,clippedLaserMm=0.;
 };
 // A completely external object can be kept as an offline spare in the
 // editor. Only a laser-ON segment crossing the physical bed is a warning.
@@ -71,7 +71,9 @@ inline Plan restrictToBed(const Plan& original,double width,double height,Report
    ++r.clippedSegments;
    if(move.laser){
     ++r.clippedLaserSegments;
-    r.omittedLaserMm+=std::max(0.,total-std::hypot(end.x-start.x,end.y-start.y));
+    const double excluded=std::max(0.,total-std::hypot(end.x-start.x,end.y-start.y));
+    r.omittedLaserMm+=excluded;
+    r.clippedLaserMm+=excluded;
    }
   }
   // Rejoin retained fragments as OFF travel, never as an ON jump.
