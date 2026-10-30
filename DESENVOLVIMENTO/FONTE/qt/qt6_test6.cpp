@@ -2900,7 +2900,7 @@ public:
                                      std::function<void()> click){
     auto* item=new QToolButton(this);
     item->setObjectName(object);item->setIcon(alaser::toolGlyph(glyph));
-    item->setIconSize(QSize(20,20));item->setFixedSize(31,31);
+    item->setIconSize(QSize(19,19));item->setFixedSize(29,29);
     item->setToolTip(help);item->setAccessibleName(help);
     item->setFocusPolicy(Qt::NoFocus);
     connect(item,&QToolButton::clicked,this,[this,click]{run(click);});
@@ -2919,6 +2919,35 @@ public:
        action->trigger();
       });
   }
+  // LightBurn-like distinction: six directional alignments, both centers,
+  // then positioning the WHOLE selection on the configured machine bed.
+  iconButton("quick_align_6","align_both",
+             "Alinhar centros X e Y das formas selecionadas; referência: objeto ativo (2+)",
+             [this]{
+              QAction* action=findChild<QAction*>("align_action_6_19_8");
+              check(action!=nullptr,"Alinhamento central indisponível.");
+              action->trigger();
+             });
+  iconRow->addSpacing(4);
+  iconButton("quick_center_bed_19_8","center_bed",
+             "Centralizar a seleção inteira na mesa física configurada (sem redimensionar); objetos não selecionados permanecem no lugar",
+             [this]{
+              check(!bezierToolActive_,
+                    "Centralizar na mesa: nesta beta selecione polilinhas, não curvas Bézier nativas.");
+              const auto ids=selection();
+              check(!ids.empty(),"Selecione uma ou mais formas para centralizar na mesa.");
+              const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
+              const Pt currentCenter{(lo.x+hi.x)/2.,(lo.y+hi.y)/2.};
+              const Pt shift{workspaceCfg_.machineWidth/2.-currentCenter.x,
+                             workspaceCfg_.machineHeight/2.-currentCenter.y};
+              if(std::hypot(shift.x,shift.y)<=1e-9)return;
+              view.editor.moveObjects(ids,shift);
+              view.rebuild();
+              recoveryPolicy_.edited();
+              captureEvent("selection_centered_on_bed");
+              status->setText("Seleção centralizada na mesa configurada. Outras formas preservadas.");
+             });
+  iconRow->addSpacing(4);
   iconButton("quick_flip_horizontal","flip_h","Espelhar horizontalmente — seleção",
              [this]{buttons.at("mirror_horiz")->click();});
   iconButton("quick_flip_vertical","flip_v","Espelhar verticalmente — seleção",
@@ -3761,6 +3790,13 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     });
    });
   }
+  auto* centerBedAction=alignMenu->addAction("Centralizar seleção na mesa física (não altera outros objetos)");
+  centerBedAction->setObjectName("align_center_bed_19_8");
+  connect(centerBedAction,&QAction::triggered,this,[this]{
+   auto* control=findChild<QToolButton*>("quick_center_bed_19_8");
+   check(control!=nullptr,"Comando centralizar na mesa indisponível.");
+   control->click();
+  });
   auto* laserMenu=mainMenu->addMenu("Laser");
   auto* wifiEntry=laserMenu->addAction("USB / Wi-Fi — Diagnóstico apenas");
   connect(wifiEntry,&QAction::triggered,this,[wifiLauncher]{wifiLauncher->click();});
