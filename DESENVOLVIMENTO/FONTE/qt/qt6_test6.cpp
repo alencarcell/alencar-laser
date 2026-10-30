@@ -1444,6 +1444,10 @@ public:
   return {first.x()+std::copysign(size,dx),first.y()+std::copysign(size,dy)};
  }
  void cancelCurrentGesture(){
+  if(rasterDragging_||rasterResizing_){
+   rasterRect_=rasterStartRect_;
+   rasterDragging_=rasterResizing_=false;updateRasterVisual();
+  }
   if(nativeContourPressing_&&nativeSession_){nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(true);}
   if(nativePressing_&&nativeSession_){nativeSession_->cancel();nativePressing_=false;updateNativePaths(false);}
   if(shapeDragging_)clearShapePreview();
@@ -1664,12 +1668,20 @@ void mousePressEvent(QMouseEvent* e)override{
    }else{nativeMousePress(e);return;}
   }
    if(tool==Tool::Select){
-    if(beginSelectionTransform(e->position())){e->accept();return;}
+    if(rasterSelected_&&beginRasterDrag(e->position())){e->accept();return;}
+    if(beginSelectionTransform(e->position())){rasterSelected_=false;
+      if(rasterFrame_)rasterFrame_->setVisible(false);
+      if(rasterHandle_)rasterHandle_->setVisible(false);
+      e->accept();return;}
     if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),true)){
      e->accept();return;
     }
     auto hits=clickHits(e->position().toPoint());
    if(hits.empty()){
+    if(beginRasterDrag(e->position())){e->accept();return;}
+    rasterSelected_=false;
+    if(rasterFrame_)rasterFrame_->setVisible(false);
+    if(rasterHandle_)rasterHandle_->setVisible(false);
     marqueeActive_=true;marqueeStart_=e->position();
    }
    else {Key chosen=hits.front().key;
@@ -1851,6 +1863,9 @@ void mousePressEvent(QMouseEvent* e)override{
   }return p;
  }
 void mouseMoveEvent(QMouseEvent* e)override{
+ if(rasterDragging_||rasterResizing_){
+  updateRasterDrag(e->position());e->accept();return;
+ }
  if(middlePanning_){
   const QPointF delta=e->position()-middlePanLast_;
   middlePanLast_=e->position();
@@ -1943,6 +1958,9 @@ void mouseMoveEvent(QMouseEvent* e)override{
   QGraphicsView::mouseMoveEvent(e);
  }
 void mouseReleaseEvent(QMouseEvent* e)override{
+ if(e->button()==Qt::LeftButton&&(rasterDragging_||rasterResizing_)){
+  updateRasterDrag(e->position());finishRasterDrag();e->accept();return;
+ }
  if(e->button()==Qt::MiddleButton){
   if(middlePanning_){middlePanning_=false;viewport()->unsetCursor();}
   e->accept();return;
