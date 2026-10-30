@@ -270,16 +270,25 @@ try {
         return
     }
     if ($SomenteTesoura) {
-        Write-Host 'DIAGNOSTICO FOCADO: compila apenas Qt e executa teste da Tesoura.' -ForegroundColor Cyan
-        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
-        Checar-Saida 'Compilacao Qt focada'
+        # Este gate precisa incluir tanto a geometria C++ dos recortes sucessivos
+        # quanto o hover real Qt; um PASS grafico isolado nao homologa a Tesoura.
+        Write-Host 'TESOURA: compilando nucleo 19.7/19.8 e regressao GUI Qt, offline.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6 alencar_test19_7_scissors_layers alencar_test19_8_scissors_span
+        Checar-Saida 'Compilacao Qt e nucleos Tesoura'
+        foreach ($nome in @('alencar_test19_7_scissors_layers', 'alencar_test19_8_scissors_span')) {
+            $executavel = Join-Path $build ($nome + '.exe')
+            if (-not (Test-Path -LiteralPath $executavel -PathType Leaf)) { throw "Teste da Tesoura ausente: $executavel" }
+            Write-Host "TESTANDO: $nome" -ForegroundColor Cyan
+            & $executavel
+            Checar-Saida "Regressao C++ $nome"
+        }
         $app = Join-Path $build 'alencar_test7_qt6.exe'
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
         $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\tesoura_foco'
         New-Item -ItemType Directory -Path $destino -Force | Out-Null
         & $app --edit-tools-19-7-test $fixture $destino
         Checar-ResultadoQt 'Tesoura - hover GUI' (Join-Path $destino 'RESULTADO_TESTE_19_7_GUI.json')
-        Write-Host 'Teste focado passou; validacao completa ainda obrigatoria.' -ForegroundColor Green
+        Write-Host 'Tesoura: C++ 19.7 + C++ 19.8 + GUI Qt PASS focado. Validacao manual e suite completa ainda obrigatorias.' -ForegroundColor Green
         return
     }
     $alvos = @(
