@@ -705,3 +705,12 @@ Registrar mudanças, testes e pendências.
 - **Imagem:** `QtEditorLab` possui moldura selecionável, arraste, alça de redimensionamento proporcional e diagnóstico agregado; estrutura atual ainda oferece **apenas uma imagem** e não integra rotação, múltiplos bitmaps ou Undo/Redo de bitmap. A imagem se mantém sob os vetores na renderização. `qt/raster_project_19_8.hpp` guarda PNG, SHA256, pixelWidth/Height e posição/escala mm dentro do próprio ZIP .alaser v5 como campo versionado `raster_object_19_8` de `design/layers.json`. Reabre validando integridade ANTES de alterar documento. Recuperação também passa a salvar bitmap. Não enviar imagem física nem declarar fotogravação pronta.
 - **Testes Qt novos:** `--raster-object-19-8-test` (pixels, escala, SHA corrompido, legado), `--layout-icons-19-8-test` (ícones, alinhamento, espelho vertical, comandos físicos desabilitados) ligados a `-SomenteInteracao`; porta de preview C++ `-SomenteSimulacao`. **Ainda sem PASS final comprovado no Windows após os últimos commits; pendentes mouse real, projeto de cliente, 1366×768 e escala 125%**.
 - **Especificação:** `DESENVOLVIMENTO/ESPECIFICACOES/LAYOUT_V2_ICONES_IMAGEM_MESA_20261030.md` detalha aceitação e pendências. Branch experimental `fix/validacao-real-19-8-20261029` PR #12 rascunho. Não mesclar na main, não tocar `APLICATIVO`, laser desconectado.
+
+
+## 30/10/2026 — CI final da rodada Layout V2: PASS (Windows Qt6 e C++ portátil)
+
+- Workflow verificado: `https://github.com/alencarcell/alencar-laser/actions/runs/41061084518`, commit de código `365fa3802`, ambos os jobs **SUCCESS**.
+- Job `C++20 offline: tesoura, texto, simulador` => compilação e regressões portáteis PASS, incluindo `preview_workarea_19_8_standalone.cpp` (corte a mesa).
+- Job `Qt6 UCRT64 - compile (sem laser)` => compilação Qt6 Windows PASS; etapa adicional `Test PNG embedded and layout icons (Qt6 offscreen)` PASS em ambos os modos `--raster-object-19-8-test` e `--layout-icons-19-8-test`.
+- Esse PASS é do runner Windows headless; **não equivale à validação visual nem à homologação em Windows do operador**. PENDÊNCIAS: testes `-SomenteInteracao`, `-SomenteSimulacao`, `-Abrir` na máquina real, seleção/movimentação/redimensionamento da imagem no mouse, salva/reabre cópia .alaser real, escala DPI 125/150%, clip de projeto externo e inspeção do cabeçalho Pégaso.
+- Segurança permanece: `APLICATIVO` e `main` sem alterações, máquina desconectada e comandos físicos desabilitados; PR #12 rascunho. Não liberar versão final por este CI.
