@@ -4,6 +4,14 @@ on:
   push:
     branches:
       - feat/refino-curvas-rastreio-diagnosticos-19-8
+      - fix/validacao-real-19-8-20261029
+    paths:
+      - "DESENVOLVIMENTO/FONTE/src/**"
+      - "DESENVOLVIMENTO/FONTE/tests/**"
+      - ".github/workflows/preview-19-8-offline.yml"
+  pull_request:
+    branches:
+      - feat/refino-curvas-rastreio-diagnosticos-19-8
     paths:
       - "DESENVOLVIMENTO/FONTE/src/**"
       - "DESENVOLVIMENTO/FONTE/tests/**"
@@ -15,11 +23,11 @@ permissions:
 
 jobs:
   test-portable-core:
-    name: "Portable simulator (no hardware)"
+    name: "C++20 offline: tesoura, texto, simulador"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Checkout experimental branch
+      - name: Checkout experimental source
         uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -27,16 +35,20 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends g++ libboost-json1.83-dev
-      - name: Build and test motion, Fill, route
+      - name: Build and test portable offline models
         shell: bash
         run: |
           set -euo pipefail
           cd DESENVOLVIMENTO/FONTE
           mkdir -p build-ci-offline
-          g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic             tests/preview_motion_19_8_standalone.cpp             -o build-ci-offline/preview_motion
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic tests/preview_motion_19_8_standalone.cpp -o build-ci-offline/preview_motion
           build-ci-offline/preview_motion
-          for target in preview_raster_19_8_standalone preview_route_19_8_standalone preview_draw_join_19_8_standalone text_alignment_19_8_standalone; do
-            g++ -std=c++20 -O2 -Wall -Wextra -pedantic               "tests/${target}.cpp" -lboost_json -o "build-ci-offline/${target}"
+          for target in preview_raster_19_8_standalone preview_route_19_8_standalone preview_draw_join_19_8_standalone; do
+            g++ -std=c++20 -O2 -Wall -Wextra -pedantic "tests/${target}.cpp" -o "build-ci-offline/${target}"
             "build-ci-offline/${target}"
           done
-          echo "PASS: C++20 offline only; Qt6/Windows/laser remain unvalidated."
+          for target in text_alignment_19_8_standalone test19_7_scissors_layers test19_8_scissors_span; do
+            g++ -std=c++20 -O2 -Wall -Wextra -pedantic -I src "tests/${target}.cpp" src/boost_json_impl.cpp -o "build-ci-offline/${target}"
+            "build-ci-offline/${target}"
+          done
+          echo "PASS: portable C++ tests only. Qt6/Windows and physical laser NOT validated."
