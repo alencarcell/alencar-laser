@@ -83,3 +83,11 @@ Referências:
 - Sem alteração em engine de corte ou firmware. **Código alterado não compilado e não homologado no Windows nesta rodada.**
 
 **Próxima ação do operador quando voltar:** `git status --short`; se seguro, `git pull --ff-only origin fix/validacao-real-19-8-20261029`; iniciar `-SomenteInteracao` para validar trace/fade/nós, em seguida `-SomenteTesoura`; só então `-Abrir`. Manter laser desconectado e `main`/`APLICATIVO` preservados.
+
+
+## 7. Complemento da rodada — 29/10/2026
+
+- **Traçado:** a janela agora permite alternar `Imagem original` (bitmap-fonte em visualização redimensionada, preservado fora do traçado) e `P&B` (máscara do resultado); os contornos vetoriais continuam sobrepostos em ambas. Separados controles `Esmaecer referência` e `Mostrar nós do traçado`; todos em português. O comando de criar traçado só confirma geometria após resultado válido, não altera imagem-fonte durante prévia.
+- **Testes:** `-SomenteTesoura` agora confere C++ 19.7 + C++ 19.8 + teste Qt. GitHub Actions portátil Linux roda texto, Tesoura e desenho sem hardware, resultado PASS confirmado para commit `63ffc651e` (antes dos últimos ajustes de interface). Em seguida foi adicionado um gate **Windows Qt6/UCRT64 de compilação** com pacotes MSYS2; resultado do novo gate ainda pendente na redação, e nunca equivale a homologação com mouse físico.
+- **CI:** workflow `.github/workflows/preview-19-8-offline.yml` usa agrupamento/concurrency para cancelar execuções obsoletas; a instalação `libminizip-dev zlib1g-dev` corrigiu falha anterior de cabeçalho ausente. Qt6 compilado em Windows via `msys2/setup-msys2@v2`; `-Abrir` continua sendo o gate real com aplicação e mouse.
+- **Sem mudança de escopo:** recursos complexos — bitmap como objeto persistente no arquivo, seleção Bézier unificada, alça de curvatura de texto, matrizes, booleanas e controle físico — permanecem pendentes. Nenhum dos commits desta rodada foi incorporado à `main` nem à pasta `APLICATIVO`.
