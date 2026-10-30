@@ -42,6 +42,15 @@ int main(){
   req(!bed198::partiallyOutsideActiveGeometry(externalReport)&&
       externalReport.clippedLaserMm==0,
       "fully outside spare shape must not trigger workarea warning");
+  Plan mixedSpare=external;
+  mixedSpare.moves.push_back({{10,10},{25,15},true,2});
+  bed198::Report mixedReport;
+  const Plan mixedPreview=bed198::restrictToBed(mixedSpare,100,100,&mixedReport);
+  req(!bed198::partiallyOutsideActiveGeometry(mixedReport)&&
+      mixedReport.outsideLaserSegments==1&&mixedReport.clippedLaserSegments==0,
+      "outside spare plus inside work must not trigger warning");
+  req(mixedPreview.cutMm>0&&mixedPreview.cutMm<mixedSpare.moves.size()*100.,
+      "inside artwork still simulated while outside spare is ignored");
   req(!filtered.moves.empty(),"filtered plan");
   for(const auto& move:filtered.moves)
    req(bed198::inside(move.from,100,100)&&bed198::inside(move.to,100,100),
