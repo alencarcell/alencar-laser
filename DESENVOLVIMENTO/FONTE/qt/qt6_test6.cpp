@@ -6730,9 +6730,9 @@ static QJsonObject layoutIcons198Test(){
  w.view.activate({one,0});w.view.selected.insert(two);
  w.findChild<QToolButton*>("quick_center_bed_19_8")->click();
  const auto [unionLo,unionHi]=boundsOf(w.view.editor.state().doc,{one,two});
- check(std::abs((unionLo.x+unionHi.x)/2.-200.)<1e-7&&
-       std::abs((unionLo.y+unionHi.y)/2.-200.)<1e-7,
-       "Centralizar selecao na mesa fisica nao posicionou o grupo em 200,200");
+ check(std::abs((unionLo.x+unionHi.x)/2.-w.workspaceCfg_.machineWidth/2.)<1e-7&&
+       std::abs((unionLo.y+unionHi.y)/2.-w.workspaceCfg_.machineHeight/2.)<1e-7,
+       "Centralizar selecao na mesa fisica nao respeitou dimensoes configuradas");
  const auto spareAfter=boundsOf(w.view.editor.state().doc,{spare});
  check(std::abs(spareBefore.first.x-spareAfter.first.x)<1e-7&&
        std::abs(spareBefore.second.y-spareAfter.second.y)<1e-7,
