@@ -6579,6 +6579,41 @@ static QJsonObject drawAndJoin198Test(){
   {"undo_redo",true},{"hardware_commands_sent",false}};
 }
 
+static QJsonObject layoutIcons198Test(){
+ LabWindow w(Document{});w.resize(1280,760);w.show();QApplication::processEvents();
+ auto* header=w.findChild<QFrame*>("topHeader");
+ check(header&&header->maximumHeight()<=48,"Cabecalho ultrapassou altura compacta");
+ for(const QString& name:{"quick_align_0","quick_align_4","quick_align_1",
+                          "quick_flip_horizontal","quick_flip_vertical","quick_rotate_90"}){
+  auto* b=w.findChild<QToolButton*>(name);
+  check(b&&b->isEnabled()&&!b->icon().isNull()&&!b->toolTip().isEmpty(),
+        "Barra de icones sem comando/tooltip: "+name.toStdString());
+ }
+ for(const QString& name:{"operation_start_disabled","operation_pause_continue_disabled",
+                          "operation_stop_disabled","operation_frame_disabled"}){
+  auto* b=w.findChild<QToolButton*>(name);
+  check(b&&!b->isEnabled(),"Comando fisico foi habilitado indevidamente");
+ }
+ const int one=w.view.editor.addContour({{10,10},{20,10},{18,25}},true);
+ const int two=w.view.editor.addContour({{80,30},{110,30},{95,40}},true);
+ w.view.rebuild();w.view.activate({one,0});w.view.selected.insert(two);
+ w.findChild<QToolButton*>("quick_align_0")->click();
+ const auto boundsOne=boundsOf(w.view.editor.state().doc,{one});
+ const auto boundsTwo=boundsOf(w.view.editor.state().doc,{two});
+ check(std::abs(boundsOne.first.x-boundsTwo.first.x)<1e-7,
+       "Alinhar pelo icone nao moveu as formas");
+ w.view.activate({one,0});
+ const auto* before=get(w.view.editor.state().doc,{one,0});
+ const double startY=before->nodes.front().p.y;
+ w.findChild<QToolButton*>("quick_flip_vertical")->click();
+ const auto* after=get(w.view.editor.state().doc,{one,0});
+ check(std::abs(after->nodes.front().p.y-(35.-startY))<1e-7,
+       "Espelhamento vertical nao refletiu os nos do objeto");
+ w.close();
+ return {{"status","PASS"},{"icon_actions_working",true},
+         {"vertical_mirror",true},{"header_compact",true},
+         {"physical_operation_disabled",true}};
+}
 static QJsonObject rasterObject198Test(){
  QTemporaryDir temporary;
  check(temporary.isValid(),"Nao criou diretorio temporario");
@@ -6614,6 +6649,14 @@ static QJsonObject rasterObject198Test(){
 }
 int main(int argc,char** argv){
  QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";
+ if(mode=="--layout-icons-19-8-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=layoutIcons198Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile f(out+"/RESULTADO_LAYOUT_ICONES_19_8.json");
+  if(!f.open(QIODevice::WriteOnly))return 2;
+  f.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
  if(mode=="--raster-object-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=rasterObject198Test();}
