@@ -675,3 +675,12 @@ Registrar mudanças, testes e pendências.
 - **GitHub Actions verificado na mesma rodada:** run `40983905046`, commit `83b3f66de`, com jobs `Qt6 UCRT64 - compile (sem laser)` e `C++20 offline: tesoura, texto, simulador` finalizados **SUCCESS** (passos de compilacao/tese passaram). Isto cobre compilação dos novos headers, interface e modo `--branding-19-8-test` no fonte presente nesse commit, mas não executa efetivamente a GUI com o kit de imagem.
 - **PR run mais recente verificado:** `40983999178`, commit `ea70e68d5`, `SUCCESS`, somente teste portatil (Qt real no Windows ainda depende do gate local). A verificação de ícone no Windows com assets instalados, qualidade visual do cabeçalho/splash e reversão continua pendente.
 - Fonte e documentação atualizados; **não declarar homologação** da versão 19.8 ou da aplicação da identidade em `APLICATIVO`.
+
+
+## 30/10/2026 — Instalacao automatizada do kit Pegaso via pasta Downloads
+
+- Usuário preferiu baixar somente `Alencar_Laser_Pegaso_Kit_v1.zip` em Downloads e executar comando simples no terminal VS Code, sem extração manual/menus.
+- Criados `04_INSTALAR_PEGASO.bat` (raiz do projeto) e `SCRIPTS/INSTALAR_PEGASO_DOWNLOADS_19_8.ps1`. Após atualizar a branch experimental, comando único de instalação: `.\04_INSTALAR_PEGASO.bat`. `-Simular` opcional.
+- Script valida branch e presença do header Qt, encontra ZIP em Downloads mesmo com sufixo `(1)`, valida SHA256 fixado `f1db7c250d72b9d702af3a1d493079d32e0fc3744465affee54edfa5bdaaecee` ANTES da extração e os 13 recursos do manifesto APÓS; extrai temporariamente, instala SOMENTE `DADOS/LOGO/PEGASO_V1`, move a identidade anterior para `BACKUP/IDENTIDADE_PEGASO` se necessário, e tenta restaurar em caso de falha. Não executa script embutido no ZIP, não sobrescreve logo original, `APLICATIVO`, main, EXE ou projetos .alaser.
+- ZIP original validado na área de desenvolvimento por checksum e integridade ZIP/manifesto, sem discrepâncias. Script foi publicado/conferido no GitHub, mas ainda NÃO executado no PowerShell Windows do operador; não alegar instalação realizada nem homologação.
+- Manual simplificado: `DESENVOLVIMENTO/ESPECIFICACOES/IDENTIDADE_PEGASO_V1_20261029.md`.
