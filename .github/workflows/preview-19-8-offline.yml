@@ -21,6 +21,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-portable-core:
     name: "C++20 offline: tesoura, texto, simulador"
@@ -52,3 +56,35 @@ jobs:
             "build-ci-offline/${target}"
           done
           echo "PASS: portable C++ tests only. Qt6/Windows and physical laser NOT validated."
+
+  build-qt-windows:
+    name: "Qt6 UCRT64 - compile (sem laser)"
+    if: github.event_name != 'pull_request'
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - name: Preserve checkout line endings
+        shell: bash
+        run: git config --global core.autocrlf input
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-boost
+            mingw-w64-ucrt-x86_64-minizip
+            mingw-w64-ucrt-x86_64-zlib
+      - name: Compile Qt6 interface without physical device
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S DESENVOLVIMENTO/FONTE -B build-ci-qt-19-8 -G Ninja -DALENCAR_REQUIRE_QT=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/ucrt64
+          cmake --build build-ci-qt-19-8 --target alencar_test7_qt6 --parallel 1
+          echo "PASS: cross-check da compilacao Qt6; UI real Windows e laser ainda NAO homologados."
