@@ -123,6 +123,12 @@ try {
         Checar-Saida 'Compilacao standalone de snap, Auto-Join e Bezier'
         & $testExe
         Checar-Saida 'Teste standalone de desenho'
+        $nativeSource = Join-Path $fontes 'tests\native_transform_19_8_standalone.cpp'
+        $nativeExe = Join-Path $build 'native_transform_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $nativeSource -o $nativeExe
+        Checar-Saida 'Compilacao isolada de escala e rotacao Bezier'
+        & $nativeExe
+        Checar-Saida 'Regressao Bezier nativa: escala, rotacao e Undo'
         Compilar-QtComDiagnostico
         $app = Join-Path $build 'alencar_test7_qt6.exe'
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
