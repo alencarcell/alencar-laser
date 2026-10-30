@@ -315,6 +315,11 @@ class QtEditorLab final:public QGraphicsView{
  QImage rasterSource_; // preview temporario fora do arquivo .alaser
  QRectF rasterRect_;
  QGraphicsPixmapItem* rasterOverlay_=nullptr;
+ QGraphicsRectItem* rasterFrame_=nullptr;
+ QGraphicsRectItem* rasterHandle_=nullptr;
+ bool rasterSelected_=false,rasterDragging_=false,rasterResizing_=false;
+ QRectF rasterStartRect_;
+ QPointF rasterStartMouse_;
  std::map<Key,QGraphicsPathItem*> nativeItems_;
  std::optional<CurveHit> nativeSelectedPart_;
  std::optional<Key> nativeStyledKey_;
@@ -833,7 +838,7 @@ class QtEditorLab final:public QGraphicsView{
   shapeDragStart_=origin;shapeDragging_=true;
  }
  void drawRasterOverlay(){
-  rasterOverlay_=nullptr;
+  rasterOverlay_=nullptr;rasterFrame_=nullptr;rasterHandle_=nullptr;
   if(rasterSource_.isNull())return;
   rasterOverlay_=scene_.addPixmap(QPixmap::fromImage(rasterSource_));
   rasterOverlay_->setAcceptedMouseButtons(Qt::NoButton);
@@ -842,15 +847,67 @@ class QtEditorLab final:public QGraphicsView{
   rasterOverlay_->setTransform(QTransform::fromScale(
     rasterRect_.width()/rasterSource_.width(),rasterRect_.height()/rasterSource_.height()));
   rasterOverlay_->setOpacity(.72);
+  QPen outline(QColor("#FFAA42"),1.,Qt::DashLine);outline.setCosmetic(true);
+  rasterFrame_=scene_.addRect(rasterRect_,outline,QBrush(Qt::NoBrush));
+  rasterFrame_->setZValue(92);rasterFrame_->setAcceptedMouseButtons(Qt::NoButton);
+  rasterHandle_=scene_.addRect(QRectF(-5,-5,10,10),
+    QPen(QColor("#17212A")),QBrush(QColor("#FFAA42")));
+  rasterHandle_->setFlag(QGraphicsItem::ItemIgnoresTransformations,true);
+  rasterHandle_->setPos(rasterRect_.bottomRight());rasterHandle_->setZValue(93);
+  rasterHandle_->setAcceptedMouseButtons(Qt::NoButton);
+  rasterFrame_->setVisible(rasterSelected_);rasterHandle_->setVisible(rasterSelected_);
+ }
+ void updateRasterVisual(){
+  if(rasterOverlay_&&!rasterSource_.isNull()){
+   rasterOverlay_->setPos(rasterRect_.topLeft());
+   rasterOverlay_->setTransform(QTransform::fromScale(
+     rasterRect_.width()/rasterSource_.width(),rasterRect_.height()/rasterSource_.height()));
+  }
+  if(rasterFrame_)rasterFrame_->setRect(rasterRect_);
+  if(rasterHandle_)rasterHandle_->setPos(rasterRect_.bottomRight());
+  viewport()->update();
+ }
+ bool beginRasterDrag(QPointF viewportPoint){
+  if(tool!=Tool::Select||rasterSource_.isNull()||busy())return false;
+  const QPointF mouse=mapToScene(viewportPoint.toPoint());
+  const double tolerance=std::max(.3,9./std::max(.01,currentZoom()));
+  const bool handle=rasterSelected_&&
+     QLineF(mouse,rasterRect_.bottomRight()).length()<=tolerance;
+  if(!handle&&!rasterRect_.contains(mouse))return false;
+  rasterSelected_=true;rasterDragging_=!handle;rasterResizing_=handle;
+  rasterStartMouse_=mouse;rasterStartRect_=rasterRect_;
+  active_.reset();selected.clear();applySelectionStyles();
+  rasterFrame_->setVisible(true);rasterHandle_->setVisible(true);
+  viewport()->setCursor(handle?Qt::SizeFDiagCursor:Qt::SizeAllCursor);
+  if(diagnosticEvent)diagnosticEvent("image_selected",1);
+  return true;
+ }
+ void updateRasterDrag(QPointF viewportPoint){
+  if(!rasterDragging_&&!rasterResizing_)return;
+  const QPointF delta=mapToScene(viewportPoint.toPoint())-rasterStartMouse_;
+  if(rasterDragging_)rasterRect_.moveTopLeft(rasterStartRect_.topLeft()+delta);
+  else{
+   const double width=std::clamp(rasterStartRect_.width()+delta.x(),1.,4000.);
+   rasterRect_.setSize(QSizeF(width,
+     width*double(rasterSource_.height())/std::max(1,rasterSource_.width())));
+  }
+  updateRasterVisual();
+ }
+ void finishRasterDrag(){
+  if(!rasterDragging_&&!rasterResizing_)return;
+  const bool changed=rasterStartRect_!=rasterRect_;
+  const bool resize=rasterResizing_;
+  rasterDragging_=rasterResizing_=false;
+  viewport()->setCursor(Qt::ArrowCursor);
+  if(changed&&diagnosticEvent)diagnosticEvent(resize?"image_resized":"image_moved",1);
+  if(changed&&stateChanged)stateChanged();
  }
 public:
  // API de imagem da mesa: acessível ao diálogo LabWindow; armazenamento continua privado.
  void setRasterWidthMm(double width){
   if(rasterSource_.isNull()||width<=0)return;
   rasterRect_.setSize(QSizeF(width,width*rasterSource_.height()/rasterSource_.width()));
-  if(rasterOverlay_)
-   rasterOverlay_->setTransform(QTransform::fromScale(
-     rasterRect_.width()/rasterSource_.width(),rasterRect_.height()/rasterSource_.height()));
+  updateRasterVisual();
  }
  void setRasterImage(const QImage& image){
   if(image.isNull())throw std::runtime_error("Imagem vazia");
@@ -858,12 +915,13 @@ public:
    throw std::runtime_error("Imagem excede 10000 pixels");
   rasterSource_=image;
   rasterRect_=QRectF(20,20,120.,120.*image.height()/image.width());
-  rebuild();viewport()->update();
+  rasterSelected_=true;rebuild();viewport()->update();
  }
  const QImage& rasterImage()const{return rasterSource_;}
  QRectF rasterBounds()const{return rasterRect_;}
  bool hasRasterImage()const{return !rasterSource_.isNull();}
  void clearRasterImage(){
+  rasterSelected_=rasterDragging_=rasterResizing_=false;
   rasterSource_=QImage();rasterRect_=QRectF();
   if(rasterOverlay_){scene_.removeItem(rasterOverlay_);delete rasterOverlay_;rasterOverlay_=nullptr;}
   viewport()->update();
@@ -1219,7 +1277,7 @@ public:
  void invalidateSelectionCache(){picker_.invalidate();}
  void rebuild(){
   clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
-  clearPolyline();clearBezierDraft();clearMarquee();scene_.clear();rasterOverlay_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
+  clearPolyline();clearBezierDraft();clearMarquee();scene_.clear();rasterOverlay_=nullptr;rasterFrame_=nullptr;rasterHandle_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   // Composite closed Fill paths per layer with the same parity rule used
   // by the scan planner. One separate backdrop per layer, without selection.
   if(fillPreview_){
