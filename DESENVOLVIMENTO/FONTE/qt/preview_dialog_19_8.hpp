@@ -246,9 +246,12 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  auto* boundsWarning=new QLabel;
  boundsWarning->setObjectName("preview_bed_warning");
  boundsWarning->setWordWrap(true);
- boundsWarning->setStyleSheet("color:#FFA64B;");
+ // Warning remains visible above the scrolling settings.
+ boundsWarning->setStyleSheet("color:#FFA64B; background:#36261B; padding:7px; border:1px solid #B96922;");
+ boundsWarning->setAccessibleName("Aviso de geometria fora da mesa");
+ boundsWarning->setMinimumHeight(36);
  settingsColumn->addWidget(restrictBed);
- settingsColumn->addWidget(boundsWarning);
+ column->addWidget(boundsWarning);
  auto* useLayerFeeds=new QCheckBox("Utilizar velocidades virtuais salvas por camada");
  useLayerFeeds->setChecked(true);
  useLayerFeeds->setToolTip("Velocidade e passes de cada camada influenciam a simulacao. Potencia/M3/M4 continuam apenas registrados.");
@@ -388,16 +391,24 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
                        imageBounds.width(),imageBounds.height()},scan);
    }
    const Plan repeated=repeatedByLayer(combined,source,passes->value());
-   if(restrictBed->isChecked()){
-    shown=bed198::restrictToBed(repeated,drawingWidthMm,drawingHeightMm,&bedReport);
-   }else{
-    shown=repeated;bedReport={};
-   }
+   // Diagnose ALWAYS, including when limiting the preview is unchecked.
+   // Otherwise the operator loses the warning when inspecting full geometry.
+   const Plan bounded=bed198::restrictToBed(repeated,drawingWidthMm,drawingHeightMm,&bedReport);
+   shown=restrictBed->isChecked()?bounded:repeated;
    const std::size_t omitted=bedReport.outsideSegments+bedReport.clippedSegments;
-   boundsWarning->setText(omitted?
-     QString("Atenção: %1 trechos fora ou parcialmente fora da mesa; %2 mm de gravação virtual fora da área ignorados.")
-       .arg(qulonglong(omitted)).arg(bedReport.omittedLaserMm,0,'f',1):
-     QString("Prévia: percursos dentro da mesa; emissão física permanece bloqueada."));
+   boundsWarning->setVisible(omitted>0);
+   if(omitted){
+    boundsWarning->setText(QString(
+      "ATENÇÃO — Fora da mesa física: %1 segmentos totalmente fora; "
+      "%2 cruzando o limite; %3 mm de trajeto laser virtual fora. "
+      "%4. Ajuste a posição/escala antes de iniciar qualquer trabalho real.")
+      .arg(qulonglong(bedReport.outsideSegments))
+      .arg(qulonglong(bedReport.clippedSegments))
+      .arg(bedReport.omittedLaserMm,0,'f',2)
+      .arg(restrictBed->isChecked()?
+        "Prévia recortada: arte NÃO está completa":
+        "Limite desligado SOMENTE para inspeção; operação física bloqueada"));
+   }
    const auto layerSpeed=[&](int id){
     const auto it=source.layers.find(id);
     return useLayerFeeds->isChecked()&&it!=source.layers.end()?
@@ -420,7 +431,9 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    play->setEnabled(!shown.moves.empty()&&timeline.totalSeconds>0);
    render();
   }catch(const std::exception& e){
-   shown={};timeline={};nominalSeconds=0.0;bedReport={};boundsWarning->setText("Prévia indisponível até corrigir dados.");
+   shown={};timeline={};nominalSeconds=0.0;bedReport={};
+   boundsWarning->setVisible(true);
+   boundsWarning->setText("Prévia indisponível até corrigir dados.");
    stats->setText(QString("Previa limitada: %1").arg(QString::fromUtf8(e.what())));
    play->setEnabled(false);render();
   }
