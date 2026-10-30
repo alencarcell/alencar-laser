@@ -18,6 +18,7 @@
 #include "raster_trace_19_8.hpp"
 #include "preview_dialog_19_8.hpp"
 #include "layer_settings_19_8.hpp"
+#include "branding_pegaso_19_8.hpp"
 #include "render_chunks.hpp"
 #include <QApplication>
 #include <QGraphicsView>
@@ -46,6 +47,8 @@
 #include <QCloseEvent>
 #include <QIcon>
 #include <QPixmap>
+#include <QSplashScreen>
+#include <QTemporaryDir>
 #include <QPolygonF>
 #include <QDoubleSpinBox>
 #include <QDialog>
@@ -2643,29 +2646,38 @@ public:
   loadWorkspaceSettings();view.setWorkspace(workspaceCfg_,isInteractive());
   setObjectName("alencarRoot");
   setWindowTitle("Alencar Laser | Estúdio Qt 6 — TESTE_19.8 (candidata)");
+  const QIcon newIcon=alaser::branding198::approvedIcon();
+  if(!newIcon.isNull())setWindowIcon(newIcon);
   resize(1390,870);setMinimumSize(950,620);
   auto* layout=new QVBoxLayout(this);layout->setContentsMargins(0,0,0,0);layout->setSpacing(0);
   auto* header=new QFrame;header->setObjectName("topHeader");
   auto* headerRow=new QHBoxLayout(header);headerRow->setContentsMargins(11,4,11,4);
   auto* identity=new QVBoxLayout;identity->setSpacing(1);
   auto* brand=new QLabel("ALENCAR LASER");brand->setObjectName("brandName");
-  // Identidade oficial: usa a arte ORIGINAL fornecida pelo proprietario,
-  // nunca redesenha nem cria um substituto. Fallback textual sem arquivo.
-  const QStringList logoCandidates={
-   QDir::current().absoluteFilePath("DADOS/LOGO/logo_alencar_laser.png"),
-   QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("logo_alencar_laser.png"),
-   QStringLiteral("C:/ProjetoAlencarLaser/DADOS/LOGO/logo_alencar_laser.png")
-  };
-  for(const QString& logoPath:logoCandidates){
-   QPixmap original(logoPath);
-   if(original.isNull())continue;
-   brand->setPixmap(original.scaled(162,42,Qt::KeepAspectRatio,Qt::SmoothTransformation));
-   brand->setToolTip("Logo oficial Alencar Laser: "+logoPath);
-   brand->setFixedHeight(44);
-   break;
+  // PEGASO_V1: identidade aprovada e opcional. A imagem antiga permanece
+  // intacta e ativa quando o kit ainda nao esta instalado no computador.
+  const QPixmap pegasus=alaser::branding198::approvedHeader();
+  if(!pegasus.isNull()){
+   brand->setPixmap(pegasus.scaled(270,54,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+   brand->setFixedHeight(54);
+   brand->setToolTip("Identidade Pégaso V1 aprovada — editor experimental offline");
+  }else{
+   const QStringList logoCandidates={
+    QDir::current().absoluteFilePath("DADOS/LOGO/logo_alencar_laser.png"),
+    QDir(QCoreApplication::applicationDirPath()).absoluteFilePath("logo_alencar_laser.png"),
+    QStringLiteral("C:/ProjetoAlencarLaser/DADOS/LOGO/logo_alencar_laser.png")
+   };
+   for(const QString& logoPath:logoCandidates){
+    QPixmap original(logoPath);
+    if(original.isNull())continue;
+    brand->setPixmap(original.scaled(162,42,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+    brand->setToolTip("Identidade anterior preservada: "+logoPath);
+    brand->setFixedHeight(44);
+    break;
+   }
   }
   if(brand->pixmap().isNull())
-   brand->setToolTip("Logo oficial ainda nao encontrada. Instale em DADOS/LOGO/logo_alencar_laser.png.");
+   brand->setToolTip("Sem recursos de marca; instale o kit Pégaso ou a logo anterior.");
   identity->addWidget(brand);
   auto* subtitle=new QLabel("TESTE_19.8 • Candidata");subtitle->setObjectName("brandSub");subtitle->hide();identity->addWidget(subtitle);
   headerRow->addLayout(identity);headerRow->addStretch();
@@ -6494,8 +6506,26 @@ int main(int argc,char** argv){
  }
  QDir().mkpath(out);
  if(mode=="--interactive"){
-  LabWindow w(readCsv(csv.toStdString()));w.show();w.view.setTransform(QTransform::fromScale(6.,6.));w.view.reportZoom();w.view.centerOn(toQt(w.view.editor.state().doc.contours[0].nodes[15].p));
-  QObject::connect(&app,&QCoreApplication::aboutToQuit,[&]{QFile f(out+"/SESSAO_INTERATIVA_TESTE_6.json");if(f.open(QIODevice::WriteOnly))f.write(QJsonDocument(telemetry(w)).toJson());});return app.exec();
+  // Splash apenas durante abertura interativa; em testes sinteticos e sem
+  // assets, nao e criado. Nenhum comando GRBL e executado neste processo.
+  std::unique_ptr<QSplashScreen> splash;
+  const QPixmap intro=alaser::branding198::approvedSplash();
+  if(!intro.isNull()){
+   splash=std::make_unique<QSplashScreen>(intro);
+   splash->show();app.processEvents();
+  }
+  LabWindow w(readCsv(csv.toStdString()));
+  const QIcon icon=alaser::branding198::approvedIcon();
+  if(!icon.isNull())app.setWindowIcon(icon);
+  w.show();
+  if(splash)splash->finish(&w);
+  w.view.setTransform(QTransform::fromScale(6.,6.));
+  w.view.reportZoom();
+  if(!w.view.editor.state().doc.contours.empty()&&
+     w.view.editor.state().doc.contours.front().nodes.size()>15)
+   w.view.centerOn(toQt(w.view.editor.state().doc.contours.front().nodes[15].p));
+  QObject::connect(&app,&QCoreApplication::aboutToQuit,[&]{QFile f(out+"/SESSAO_INTERATIVA_TESTE_6.json");if(f.open(QIODevice::WriteOnly))f.write(QJsonDocument(telemetry(w)).toJson());});
+  return app.exec();
  }
  QJsonObject report;bool success=true;
  try{if(mode=="--write")report=integratedTest(csv,out);else if(mode=="--reopen")report=reopenTest(out);else if(mode=="--navigation-test")report=navigationTest(csv,out);else if(mode=="--workspace-test")report=workspaceLayoutTest(csv,out);else throw std::runtime_error("unknown mode");}
