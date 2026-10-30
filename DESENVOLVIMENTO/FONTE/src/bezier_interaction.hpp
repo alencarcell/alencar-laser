@@ -7,6 +7,7 @@
 #include <limits>
 #include <tuple>
 #include <cmath>
+#include <numbers>
 #include <memory>
 
 namespace alaser {
