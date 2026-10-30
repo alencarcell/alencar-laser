@@ -147,7 +147,7 @@ try {
         Write-Host 'PREVIA OFFLINE: teste C++20 independente + Qt com relatorio JSON.' -ForegroundColor Cyan
         $intervalSource = Join-Path $fontes 'tests\line_interval_19_8_standalone.cpp'
         $intervalExe = Join-Path $build 'line_interval_19_8_standalone.exe'
-        & $gpp -std=c++20 -O2 -Wall -Wextra $intervalSource -o $intervalExe
+        & $gpp -std=c++20 -O2 -Wall -Wextra $intervalSource (Join-Path $fontes 'src\boost_json_impl.cpp') -o $intervalExe
         Checar-Saida 'Compilacao do intervalo Fill por camada'
         & $intervalExe
         Checar-Saida 'Regressao de Line Interval por camada e metadata'
