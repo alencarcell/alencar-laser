@@ -6381,7 +6381,43 @@ static QJsonObject drawAndJoin198Test(){
 }
 
 int main(int argc,char** argv){
- QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";if(mode=="--recovery-19-8-test"){
+ QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";
+ if(mode=="--branding-19-8-test"){
+  QDir().mkpath(out);
+  QJsonObject report;bool passed=false;
+  try{
+   QTemporaryDir temp;
+   if(!temp.isValid())throw std::runtime_error("Diretorio temporario indisponivel");
+   const QString assets=QDir(temp.path()).absoluteFilePath("DADOS/LOGO/PEGASO_V1");
+   if(!QDir().mkpath(assets))throw std::runtime_error("Nao foi possivel criar fixture");
+   const QString name="pegaso_icone_256.png";
+   QImage fixture(4,4,QImage::Format_ARGB32);
+   fixture.fill(QColor("#F77F00"));
+   if(!fixture.save(QDir(assets).absoluteFilePath(name)))
+    throw std::runtime_error("Fixture PNG da marca nao foi criada");
+   const QString discovered=alaser::branding198::findInRoots(name,{assets});
+   if(discovered.isEmpty()||!QFileInfo(discovered).isFile())
+    throw std::runtime_error("Nao encontrou o icone na pasta versionada");
+   if(!alaser::branding198::findInRoots("../fora.png",{assets}).isEmpty())
+    throw std::runtime_error("Busca de recurso aceitou caminho arbitrario");
+   const QString previous=QDir::currentPath();
+   const bool changed=QDir::setCurrent(temp.path());
+   if(!changed)throw std::runtime_error("Falha ao usar diretorio temporario");
+   const bool iconOk=!alaser::branding198::approvedIcon().isNull();
+   QDir::setCurrent(previous);
+   if(!iconOk)throw std::runtime_error("Icone versionado nao foi carregado");
+   passed=true;
+   report={{"status","PASS"},{"pegaso_resolver",true},{"legacy_fallback_optional",true},
+           {"hardware_commands_sent",false}};
+  }catch(const std::exception& e){
+   report={{"status","FAIL"},{"error",e.what()}};
+  }
+  QFile file(out+"/RESULTADO_IDENTIDADE_PEGASO_19_8.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson());
+  return passed?0:1;
+ }
+ if(mode=="--recovery-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=recovery198Test(out);}catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_RECUPERACAO_19_8.json");if(!file.open(QIODevice::WriteOnly))return 2;
