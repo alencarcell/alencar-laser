@@ -139,6 +139,12 @@ try {
     }
     if ($SomenteSimulacao) {
         Write-Host 'PREVIA OFFLINE: teste C++20 independente + Qt com relatorio JSON.' -ForegroundColor Cyan
+        $bedSource = Join-Path $fontes 'tests\preview_workarea_19_8_standalone.cpp'
+        $bedExe = Join-Path $build 'preview_workarea_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra -I (Join-Path $fontes 'src') $bedSource (Join-Path $fontes 'src\boost_json_impl.cpp') -lminizip -lz -o $bedExe
+        Checar-Saida 'Compilacao do recorte virtual restrito a mesa'
+        & $bedExe
+        Checar-Saida 'Regressao da area de trabalho da simulacao'
         $source = Join-Path $fontes 'tests\preview_motion_19_8_standalone.cpp'
         $standalone = Join-Path $build 'preview_motion_19_8_standalone.exe'
         & $gpp -std=c++20 -Wall -Wextra -Werror -O2 $source -o $standalone
