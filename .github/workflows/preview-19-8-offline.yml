@@ -34,7 +34,7 @@ jobs:
       - name: Install C++20 and Boost JSON headers
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends g++ libboost-json1.83-dev
+          sudo apt-get install -y --no-install-recommends g++ libboost-json1.83-dev libminizip-dev zlib1g-dev
       - name: Build and test portable offline models
         shell: bash
         run: |
@@ -48,7 +48,7 @@ jobs:
             "build-ci-offline/${target}"
           done
           for target in text_alignment_19_8_standalone test19_7_scissors_layers test19_8_scissors_span; do
-            g++ -std=c++20 -O2 -Wall -Wextra -pedantic -I src "tests/${target}.cpp" src/boost_json_impl.cpp -o "build-ci-offline/${target}"
+            g++ -std=c++20 -O2 -Wall -Wextra -pedantic -I src "tests/${target}.cpp" src/boost_json_impl.cpp -lminizip -lz -o "build-ci-offline/${target}"
             "build-ci-offline/${target}"
           done
           echo "PASS: portable C++ tests only. Qt6/Windows and physical laser NOT validated."
