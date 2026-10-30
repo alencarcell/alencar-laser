@@ -93,4 +93,14 @@ jobs:
           set -euo pipefail
           cmake -S DESENVOLVIMENTO/FONTE -B build-ci-qt-19-8 -G Ninja -DALENCAR_REQUIRE_QT=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/ucrt64
           cmake --build build-ci-qt-19-8 --target alencar_test7_qt6 --parallel 1
-          echo "PASS: cross-check da compilacao Qt6; UI real Windows e laser ainda NAO homologados."
+          echo "PASS: compilacao Qt6 Windows; mouse real e laser ainda NAO homologados."
+      - name: Test PNG embedded and layout icons (Qt6 offscreen)
+        shell: msys2 {0}
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          set -euo pipefail
+          mkdir -p build-ci-qt-19-8/qa
+          ./build-ci-qt-19-8/alencar_test7_qt6.exe --raster-object-19-8-test none build-ci-qt-19-8/qa
+          ./build-ci-qt-19-8/alencar_test7_qt6.exe --layout-icons-19-8-test none build-ci-qt-19-8/qa
+          echo "PASS: GUI Qt offscreen. Ainda exigir mouse fisico e copia de projeto no Windows."
