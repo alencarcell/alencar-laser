@@ -57,7 +57,7 @@ jobs:
             g++ -std=c++20 -O2 -Wall -Wextra -pedantic "tests/${target}.cpp" -o "build-ci-offline/${target}"
             "build-ci-offline/${target}"
           done
-          for target in text_alignment_19_8_standalone test19_7_scissors_layers test19_8_scissors_span; do
+          for target in text_alignment_19_8_standalone test19_7_scissors_layers test19_8_scissors_span preview_workarea_19_8_standalone; do
             g++ -std=c++20 -O2 -Wall -Wextra -pedantic -I src "tests/${target}.cpp" src/boost_json_impl.cpp -lminizip -lz -o "build-ci-offline/${target}"
             "build-ci-offline/${target}"
           done
