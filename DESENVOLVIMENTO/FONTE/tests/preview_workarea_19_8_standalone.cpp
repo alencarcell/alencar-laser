@@ -24,6 +24,8 @@ int main(){
   bed198::Report summary;
   const Plan filtered=bed198::restrictToBed(full,100,100,&summary);
   req(summary.outsideSegments>=1&&summary.clippedSegments>=2,"out-of-bed counters");
+  req(summary.outsideLaserSegments==1&&summary.clippedLaserSegments>=2,
+      "laser-only outside counters must exclude travel");
   req(summary.omittedLaserMm>0,"excluded laser distance");
   req(!filtered.moves.empty(),"filtered plan");
   for(const auto& move:filtered.moves)
