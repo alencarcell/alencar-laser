@@ -1683,6 +1683,16 @@ void mouseDoubleClickEvent(QMouseEvent* e)override{
    e->accept();return;
   }
  }
+ // Keep polyline node editing accessible without the old toolbar icon.
+ // Editable text takes precedence above so a letter still opens text editing.
+ if(e->button()==Qt::LeftButton&&tool==Tool::Select){
+  const auto hits=clickHits(e->position().toPoint());
+  if(!hits.empty()){
+   activate(hits.front().key);
+   setTool(Tool::Nodes);
+   e->accept();return;
+  }
+ }
  QGraphicsView::mouseDoubleClickEvent(e);
 }
 void mousePressEvent(QMouseEvent* e)override{
