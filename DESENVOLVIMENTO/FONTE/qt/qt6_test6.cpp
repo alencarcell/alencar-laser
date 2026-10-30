@@ -6747,11 +6747,41 @@ static QJsonObject drawAndJoin198Test(){
        lineUi.view.editor.state().doc.contours.front().key.object==pathId,
        "Clique em duas pontas nao fechou retangulo no mesmo objeto");
  lineUi.close();
+ // Reproduce user report: abandoning an unfinished Bezier draw must not lock
+ // the editor in busy() and must allow another tool to be selected.
+ LabWindow recoveryUi(Document{});
+ recoveryUi.show();QApplication::processEvents();
+ clickButton(recoveryUi,"new_bezier");
+ auto* recoveryViewport=recoveryUi.view.viewport();
+ const QPoint at=recoveryViewport->rect().center();
+ QTest::mouseClick(recoveryViewport,Qt::LeftButton,Qt::NoModifier,at);
+ check(recoveryUi.view.busy(),"Fixture did not enter unfinished Bezier draft");
+ clickButton(recoveryUi,"select");
+ check(!recoveryUi.view.busy()&&recoveryUi.view.tool==QtEditorLab::Tool::Select,
+       "Unfinished Bezier drawing kept editor locked after tool switch");
+ // Even if mouse-release was missed during a native drag, switching tools
+ // must cancel it instead of leaving the entire editor disabled.
+ clickButton(recoveryUi,"new_bezier");
+ QTest::mouseClick(recoveryViewport,Qt::LeftButton,Qt::NoModifier,at+QPoint(-30,0));
+ QTest::mouseClick(recoveryViewport,Qt::LeftButton,Qt::NoModifier,at+QPoint(40,0));
+ clickButton(recoveryUi,"select");
+ check(recoveryUi.view.nativeItemCount()==1&&!recoveryUi.view.busy(),
+       "Tool switch lost valid Bezier draft or locked editor");
+ const auto curvePath=recoveryUi.view.nativeItemPath({1,0});
+ const QPoint pressAt=recoveryUi.view.mapFromScene(curvePath.pointAtPercent(0.5));
+ QTest::mousePress(recoveryViewport,Qt::LeftButton,Qt::NoModifier,pressAt);
+ check(recoveryUi.view.busy(),"Native contour press fixture did not start drag");
+ clickButton(recoveryUi,"new_bezier"); // intentionally no mouseRelease
+ check(!recoveryUi.view.busy()&&recoveryUi.view.tool==QtEditorLab::Tool::DrawBezier,
+       "Interrupted native contour drag blocked changing tools");
+ QTest::mouseRelease(recoveryViewport,Qt::LeftButton,Qt::NoModifier,pressAt);
+ recoveryUi.close();
  return {{"status","PASS"},{"rectangle_join_atomic",true},
   {"snap_endpoint",true},{"bezier_native_handles",true},
   {"bezier_viewport_drag",true},{"bezier_select_after_finish",true},
   {"bezier_undo_redo_no_ghosts",true},{"bezier_scissor_split",true},
   {"bezier_edit_handles_accessible",true},{"bezier_delete_and_restore",true},
+  {"bezier_resize_handles",true},{"bezier_stuck_gesture_recovery",true},
   {"line_viewport_auto_join",true},
   {"undo_redo",true},{"hardware_commands_sent",false}};
 }
