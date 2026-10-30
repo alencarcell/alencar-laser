@@ -19,6 +19,7 @@
 #include "preview_dialog_19_8.hpp"
 #include "layer_settings_19_8.hpp"
 #include "branding_pegaso_19_8.hpp"
+#include "raster_project_19_8.hpp"
 #include "render_chunks.hpp"
 #include <QApplication>
 #include <QGraphicsView>
@@ -908,6 +909,12 @@ public:
   if(rasterSource_.isNull()||width<=0)return;
   rasterRect_.setSize(QSizeF(width,width*rasterSource_.height()/rasterSource_.width()));
   updateRasterVisual();
+ }
+ void restoreRaster(const QImage& image,const QRectF& bounds){
+  if(image.isNull()||!bounds.isValid()||bounds.width()<=0||bounds.height()<=0)
+   throw std::runtime_error("Imagem ou dimensões salvas inválidas");
+  rasterSource_=image;rasterRect_=bounds;
+  rasterSelected_=false;rebuild();
  }
  void setRasterImage(const QImage& image){
   if(image.isNull())throw std::runtime_error("Imagem vazia");
@@ -2199,10 +2206,13 @@ static QByteArray fingerprint(const EditorState& s){auto text=stateText(s);retur
 // Persistência v5 (curvas nativas + geometria poligonal). Mantém leitura v4 legada.
 static IntegratedProject saveNative(const QString& file,const EditorState& state,
                                     const CurveDocument& curves=CurveDocument{},
-                                    const IntegratedProject* previous=nullptr){
+                                    const IntegratedProject* previous=nullptr,
+                                    const QImage* image=nullptr,
+                                    QRectF bounds=QRectF()){
  QTemporaryDir temp;check(temp.isValid(),"temporary directory failed");
  auto zipped=temp.path()+"/project.alaser";
  IntegratedProject project=buildEditedIntegratedProject(state,curves,previous);
+ alaser::rasterproject198::apply(project,image,bounds);
  writeIntegratedProject(zipped.toStdString(),project);
  QFile source(zipped);check(source.open(QIODevice::ReadOnly),"cannot read temporary package");
  QSaveFile target(file);target.setDirectWriteFallback(false);check(target.open(QIODevice::WriteOnly),"cannot open native destination");
@@ -2383,7 +2393,8 @@ public:
    const QString folder=alaser::PersistentSessionStore::folder();
    if(folder.isEmpty()||!QDir().mkpath(folder))throw std::runtime_error("recovery folder unavailable");
    const QString target=alaser::PersistentSessionStore::snapshotPath();
-   saveNative(target,view.editor.state(),cd,loadedProject_?&*loadedProject_:nullptr);
+   saveNative(target,view.editor.state(),cd,loadedProject_?&*loadedProject_:nullptr,
+      view.hasRasterImage()?&view.rasterImage():nullptr,view.rasterBounds());
    if(!alaser::PersistentSessionStore::writeMarker(projectPath))
     throw std::runtime_error("could not commit recovery manifest");
    recoveryPolicy_.snapshotted();
@@ -4025,7 +4036,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(projectPath.isEmpty())return;
   CurveDocument cd=curves?curves->committed():CurveDocument{};
   loadedProject_=saveNative(projectPath,view.editor.state(),cd,
-    loadedProject_?&*loadedProject_:nullptr);
+    loadedProject_?&*loadedProject_:nullptr,
+    view.hasRasterImage()?&view.rasterImage():nullptr,view.rasterBounds());
   recoveryPolicy_.saved();
   alaser::PersistentSessionStore::discard();
   if(uiPersistenceEnabled_){
@@ -4433,6 +4445,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    projectPath=chosen;
   }
   auto project=openNative(projectPath);
+  // Validar hashes/PNG ANTES de trocar o desenho exibido.
+  const auto image=alaser::rasterproject198::decode(project);
   auto state=editorStateForIntegratedProject(project);
   view.editor=Editor(std::move(state));
   view.invalidateSelectionCache();view.clearSelection();view.rebuild();
@@ -4442,6 +4456,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   else
    curves.reset();
   bezierToolActive_=false;view.attachNative(curves.get());
+  view.clearRasterImage();
+  if(image)view.restoreRaster(image->image,image->bounds);
   buttons.at("select")->setChecked(true);
   loadedProject_=std::move(project);
   recoveryPolicy_.opened();
