@@ -1112,6 +1112,7 @@ public:
   for(const auto& [id,_]:editor.state().objects)next=std::max(next,id+1);
   for(const auto& c:nativeSession_->committed().contours)next=std::max(next,c.key.object+1);
   if(!nativeSession_->cutContourAtEdge(hits.front(),next))return false;
+  clearScissorHover(); // Remove orange preview together with actual edge.
   // Remain in Scissors tool, do not silently switch into selection.
   nativeMode_=false;nativeEditHandles_=false;
   createNativeItems();updateNativePaths(true);
@@ -1396,6 +1397,32 @@ public:
   ++scissorHoverEvents_;
   scissorLastHoverPosition_=where;
   if(tool!=Tool::Scissors||nativeMode_||busy()){clearScissorHover();return;}
+  // Preview the full mathematical Bezier edge that the click will REMOVE.
+  // Never imply that splitting a cubic is equivalent to deleting it.
+  if(nativeSession_&&hasNativeDocument()){
+   const auto hits=nativeSession_->pickEdges(fromQt(mapToScene(where)),
+       nativePxPerMm(),viewport()->devicePixelRatioF(),9);
+   if(!hits.empty()){
+    const auto& hit=hits.front();
+    const auto* curve=findNativeCurve(nativeSession_->committed(),hit.key);
+    if(curve&&hit.edge>=0&&std::size_t(hit.edge)<edgeCount(*curve)){
+     const Cubic edge=edgeAt(*curve,std::size_t(hit.edge));
+     QPainterPath preview;preview.moveTo(toQt(edge.p0));
+     if(curve->edgeKind[std::size_t(hit.edge)]==1)
+      preview.cubicTo(toQt(edge.p1),toQt(edge.p2),toQt(edge.p3));
+     else preview.lineTo(toQt(edge.p3));
+     clearScissorHover();
+     QPen pen(QColor(255,160,37),3);pen.setCosmetic(true);
+     pen.setCapStyle(Qt::RoundCap);pen.setJoinStyle(Qt::RoundJoin);
+     scissorPreview_=scene_.addPath(preview,pen);
+     scissorPreview_->setZValue(45);
+     scissorPreview_->setAcceptedMouseButtons(Qt::NoButton);
+     viewport()->setToolTip("Tesoura: aresta Bezier inteira em laranja sera removida. Ctrl+Z desfaz.");
+     viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+     return;
+    }
+   }
+  }
   if(scissorIndexVersion_!=editor.generation){
    clearScissorHover();
    const auto& state=editor.state();
@@ -1416,7 +1443,7 @@ public:
    if(next)break;
   }
   if(!next){
-   if(scissorHover_)clearScissorHover();
+   if(scissorHover_||scissorPreview_)clearScissorHover();
    viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
    viewport()->setToolTip("Tesoura ativa: sem intervalo seguro neste ponto; verifique cruzamentos.");
    return;
@@ -1637,6 +1664,14 @@ std::optional<int> editableTextAt(Pt point)const{
  return best;
 }
 void mouseDoubleClickEvent(QMouseEvent* e)override{
+ // Selection tool doubles as native node editor on double click.
+ if(e->button()==Qt::LeftButton&&tool==Tool::Select){
+  const Pt at=fromQt(mapToScene(e->position().toPoint()));
+  if(selectNativeAt(at,false)){
+   enableNative(true);
+   e->accept();return;
+  }
+ }
  if(e->button()==Qt::LeftButton&&requestEditTextObject&&
     (tool==Tool::Select||tool==Tool::Text)){
   const auto target=editableTextAt(fromQt(mapToScene(e->position().toPoint())));
@@ -1676,6 +1711,17 @@ void mousePressEvent(QMouseEvent* e)override{
     nativeMode_=false;
     nativeSession_->clearSelection();
     updateNativePaths(true);
+   }else if(tool==Tool::Select&&nativeEditHandles_){
+    // A click away from native edges/handles returns to ordinary selection.
+    const Pt at=fromQt(mapToScene(e->position().toPoint()));
+    const auto part=nativeSession_->selected()?pickCurveNode(
+      nativeSession_->committed(),*nativeSession_->selected(),
+      at,nativePxPerMm(),viewport()->devicePixelRatioF(),7):std::nullopt;
+    const auto hits=nativeSession_->pickEdges(
+      at,nativePxPerMm(),viewport()->devicePixelRatioF(),6);
+    if(part||!hits.empty()){nativeMousePress(e);return;}
+    nativeMode_=false;nativeEditHandles_=false;
+    nativeSession_->clearSelection();updateNativePaths(true);
    }else{nativeMousePress(e);return;}
   }
    if(tool==Tool::Select){
@@ -2951,12 +2997,12 @@ public:
      bezierToolActive_=true;view.enableNative(true);
      captureEvent("tool_bezier_activated");
      status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
-  compact(editorGrid,3,0,"scissors","✂ Tesoura","Ao aproximar, marca em laranja o trecho entre cruzamentos; clique remove tudo (K). Bézier nativa indisponivel.",
+  compact(editorGrid,3,0,"scissors","✂ Tesoura","Trecho laranja = removido no clique (K). Em Bézier, remove a aresta entre âncoras; Ctrl+Z desfaz.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
      captureEvent("tool_scissors_activated");
      status->setText("Tesoura: passe o mouse sobre um trecho; destaque laranja = corte completo. Ctrl+Z desfaz.");});
-  compact(editorGrid,4,0,"new_bezier","⌁ Desenhar curva",
-    "Clique cria reta; clique e arraste cria alcas Bézier. Direito termina; origem fecha; Esc cancela.",
+  compact(editorGrid,4,0,"new_bezier","Desenhar caminhos e curvas",
+    "Clique cria segmento reto; clique e arraste cria curva Bézier. Duplo clique com Seleção edita nós. Direito conclui; Esc cancela.",
      [this]{
        if(!curves){
         curves=std::make_unique<CurveDragSession>(CurveDocument{});
@@ -2967,6 +3013,9 @@ public:
        status->setText("Desenhar Bézier: clique = canto/reta; clique+arraste = curva; direito conclui; Esc cancela.");
        captureEvent("tool_draw_bezier_activated");
      });
+  // Preserve old commands for rollback/tests, but hide redundant icons.
+  buttons.at("nodes")->hide();
+  buttons.at("bezier")->hide();
   tools->addSpacing(5); // Ferramentas de desenho
   auto* shapeGrid=newGrid();
   compact(shapeGrid,0,0,"line","╱ Desenhar linhas","Clique cria retas; atração magnética a pontas abertas (10 px); unir caminhos; Ctrl sem snap; direito termina; Esc cancela.",
@@ -6523,17 +6572,22 @@ static QJsonObject drawAndJoin198Test(){
  // Native curve is reselectable and its handles are editable after redo.
  clickButton(ui,"select");
  QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,hitPoint);
- clickButton(ui,"bezier");
+ QTest::mouseDClick(viewport,Qt::LeftButton,Qt::NoModifier,hitPoint);
  check(ui.view.nativeEditingMode()&&ui.view.nativeSelected(),
-       "Ferramenta editar Bézier nao ativou alcas da curva criada");
- // Scissors splits the native path exactly (not flattened to polyline).
+       "Duplo clique na curva nao ativou edicao de ancoras");
+ check(!ui.findChild<QPushButton*>("nodes")->isVisible()&&
+       !ui.findChild<QPushButton*>("bezier")->isVisible(),
+       "Ferramentas legadas ainda aparecem na barra");
+ // Scissors removes the clicked mathematical edge (no flattening).
  clickButton(ui,"scissors");
  const QPoint scissorPt=ui.view.mapFromScene(
      ui.view.nativeItemPath(nativeKey).pointAtPercent(.35));
  QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,scissorPt);
  QApplication::processEvents();
- check(ui.view.nativeItemCount()==2,
-       "Tesoura nao separou Bézier nativa em dois caminhos editaveis");
+ check(ui.view.nativeItemCount()==1&&
+       ui.view.nativeItemPath(nativeKey).boundingRect().left()>
+       initialCurve.boundingRect().left()+3.0,
+       "Tesoura nativa manteve toda a geometria em vez de remover aresta");
  clickButton(ui,"undo");
  check(ui.view.nativeItemCount()==1,
        "Desfazer Tesoura nao restaurou um unico contorno Bézier");
