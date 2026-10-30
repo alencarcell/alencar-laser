@@ -338,6 +338,40 @@ public:
   index_.reset();
   return true;
  }
+ // Affine transform of a WHOLE native Bezier. Exact cubic controls are
+ // transformed along with anchors: no polyline flattening or fake contour.
+ // Commits as ONE history entry; destination must be finite and nondegenerate.
+ bool transformSelectedContour(Pt pivot,double sx,double sy,double degrees,Pt offset={}){
+  if(dragging()||!selected_)return false;
+  if(!std::isfinite(pivot.x)||!std::isfinite(pivot.y)||
+     !std::isfinite(sx)||!std::isfinite(sy)||
+     !std::isfinite(degrees)||!std::isfinite(offset.x)||!std::isfinite(offset.y)||
+     sx<=0.0||sy<=0.0||sx>100.0||sy>100.0)
+   throw std::invalid_argument("invalid native transform");
+  if(std::abs(sx-1)<1e-10&&std::abs(sy-1)<1e-10&&
+     std::abs(degrees)<1e-10&&dist(offset,{})<1e-10)return false;
+  const Key key=*selected_;
+  bool found=false;
+  for(const auto& c:committed().contours)if(c.key==key){found=true;break;}
+  if(!found)return false;
+  const double angle=degrees*std::numbers::pi/180.0;
+  const double c=std::cos(angle),s=std::sin(angle);
+  const auto changePoint=[&](Pt pt){
+   const double dx=(pt.x-pivot.x)*sx,dy=(pt.y-pivot.y)*sy;
+   return Pt{pivot.x+dx*c-dy*s+offset.x,
+             pivot.y+dx*s+dy*c+offset.y};
+  };
+  history_.change([&](CurveDocument& d){
+   for(auto& contour:d.contours)if(contour.key==key){
+    for(auto& node:contour.nodes){
+     node.anchor=changePoint(node.anchor);
+     node.handleIn=changePoint(node.handleIn);
+     node.handleOut=changePoint(node.handleOut);
+    }
+   }
+  });
+  index_.reset();return true;
+ }
  // Move um contorno inteiro (âncoras E alças) com uma única entrada no histórico.
  // A prévia não altera o documento confirmado nem o índice espacial.
  bool startContourMove(Key key,Pt at){
