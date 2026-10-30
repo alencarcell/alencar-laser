@@ -145,6 +145,12 @@ try {
     }
     if ($SomenteSimulacao) {
         Write-Host 'PREVIA OFFLINE: teste C++20 independente + Qt com relatorio JSON.' -ForegroundColor Cyan
+        $intervalSource = Join-Path $fontes 'tests\line_interval_19_8_standalone.cpp'
+        $intervalExe = Join-Path $build 'line_interval_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $intervalSource -o $intervalExe
+        Checar-Saida 'Compilacao do intervalo Fill por camada'
+        & $intervalExe
+        Checar-Saida 'Regressao de Line Interval por camada e metadata'
         $bedSource = Join-Path $fontes 'tests\preview_workarea_19_8_standalone.cpp'
         $bedExe = Join-Path $build 'preview_workarea_19_8_standalone.exe'
         & $gpp -std=c++20 -O2 -Wall -Wextra -I (Join-Path $fontes 'src') $bedSource (Join-Path $fontes 'src\boost_json_impl.cpp') -lminizip -lz -o $bedExe
