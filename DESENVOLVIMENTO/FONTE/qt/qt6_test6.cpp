@@ -6587,7 +6587,7 @@ static QJsonObject layoutIcons198Test(){
                           "quick_flip_horizontal","quick_flip_vertical","quick_rotate_90"}){
   auto* b=w.findChild<QToolButton*>(name);
   check(b&&b->isEnabled()&&!b->icon().isNull()&&!b->toolTip().isEmpty(),
-        "Barra de icones sem comando/tooltip: "+name.toStdString());
+        "Barra de icones sem comando, icone ou descricao");
  }
  for(const QString& name:{"operation_start_disabled","operation_pause_continue_disabled",
                           "operation_stop_disabled","operation_frame_disabled"}){
