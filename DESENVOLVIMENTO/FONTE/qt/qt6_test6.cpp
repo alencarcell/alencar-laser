@@ -3087,7 +3087,7 @@ public:
   auto newGrid=[&](){auto* g=new QGridLayout;g->setSpacing(3);g->setAlignment(Qt::AlignHCenter);tools->addLayout(g);return g;};
   tools->addSpacing(4); // Barra compacta: ferramentas de edicao
   auto* editorGrid=newGrid();
-  compact(editorGrid,0,0,"select","↖ Seleção","Selecionar (Alt alterna contornos sobrepostos)",
+  compact(editorGrid,0,0,"select","↖ Seleção","Selecionar e redimensionar: alças nas formas e Bézier | Duplo clique edita nós | Alt alterna contornos",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Select);});
   compact(editorGrid,1,0,"nodes","✎ Nós","Editar nós das polilinhas",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Nodes);});
@@ -4219,7 +4219,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     .arg(curveCount)
     .arg(view.nativeEditingMode()?"editar nos Bézier":(nativeSelected?"curva Bézier selecionada":(bezierToolActive_?"desenhar Bézier":"modo polilinha")))
     .arg(view.nativeEditingMode()?"Arraste ancoras/alcas | Delete no | Ctrl+Delete curva":
-      (nativeSelected?"Arraste para mover | Delete curva | K tesoura | Ctrl+Z desfaz":
+      (nativeSelected?"Alças redimensionam/giram | Arraste move | Duplo clique edita nós | Esc cancela gesto":
       "Arraste move formas | Esc selecionar | K tesoura | Ctrl+L camada"))
     +QString(" | Desenho %1×%2 mm / mesa %3×%4 mm")
       .arg(workspaceCfg_.drawingWidth,0,'f',0).arg(workspaceCfg_.drawingHeight,0,'f',0)
