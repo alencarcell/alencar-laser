@@ -2862,7 +2862,7 @@ public:
   });
   add(quickRow,"preview_virtual","Prévia virtual",[this]{
    alaser::sim198::showPreviewDialog(this,view.editor.state(),
-       workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight,
+       workspaceCfg_.machineWidth,workspaceCfg_.machineHeight,
        view.rasterImage(),view.rasterBounds());
   })->setToolTip("Simular caminhos Line e tempo nominal. Nenhum envio físico.");
   // Substituir textos repetitivos por glifos com dica e nomes acessiveis.
