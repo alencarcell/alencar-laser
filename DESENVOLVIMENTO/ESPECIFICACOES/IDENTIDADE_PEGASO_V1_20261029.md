@@ -46,3 +46,23 @@ A alteração visual não toca o formato `.alaser`, os documentos, o sistema de 
 - Antes de aprovar visualmente, checar se o pégaso é reconhecível em 16, 32 e 48 px, se o nome não fica minúsculo no cabeçalho e se os controles do editor continuam visíveis em monitor 1366×768.
 - A reversão mais segura é **renomear** `DADOS/LOGO/PEGASO_V1` para `PEGASO_V1_DESATIVADO` com aplicativo fechado; o software volta a usar a logo anterior sem alterar projeto, versão ou executável.
 - A PR #12 mantém estado rascunho e base experimental; sem merge em `main` nem substituição da versão homologada.
+
+
+## Instalacao simplificada — ZIP em Downloads e um comando no VS Code
+
+**Esta e a forma preferida para o operador.** Nao extrair manualmente o ZIP.
+
+1. Baixe `Alencar_Laser_Pegaso_Kit_v1.zip` na pasta **Downloads** do Windows (pode conter `(1)` no nome se foi baixado novamente).
+2. Atualize uma unica vez o repositorio experimental no VS Code com `git pull --ff-only origin fix/validacao-real-19-8-20261029`, estando nessa mesma branch e sem conflitos.
+3. No terminal PowerShell localizado em `C:\ProjetoAlencarLaser`, execute **`.\04_INSTALAR_PEGASO.bat`**. Opcional para conferência sem copiar: `.\04_INSTALAR_PEGASO.bat -Simular`.
+
+O arquivo `04_INSTALAR_PEGASO.bat` apenas inicia `SCRIPTS/INSTALAR_PEGASO_DOWNLOADS_19_8.ps1`. O script:
+- verifica se o Git está na branch experimental e se o código de integração está presente;
+- encontra o ZIP em Downloads (inclusive caminhos redirecionados pelo Windows);
+- valida o SHA-256 fixado do ZIP aprovado `f1db7c250d72b9d702af3a1d493079d32e0fc3744465affee54edfa5bdaaecee` **antes de extrair**;
+- extrai em pasta temporaria e confere os 13 itens/bytes/hashes de `manifesto.json`;
+- prepara nova pasta e, se ja houver instalação diferente, move a anterior para `BACKUP/IDENTIDADE_PEGASO` antes de colocar `DADOS/LOGO/PEGASO_V1`;
+- se houver falha durante substituição, tenta restaurar o backup. Nunca abre/executa scripts embutidos no ZIP.
+- nao modifica `APLICATIVO`, EXE, `main`, logo anterior ou arquivos de trabalho `.alaser`.
+
+**Limites:** instalação do kit visual apenas, nao é instalador do software. A compilação da integração Qt6, a abertura do editor e a avaliação visual ainda precisam passar no Windows. Esta rotina de instalação só foi verificada por revisão estática e validação do conteúdo do ZIP; nao houve execução de PowerShell no computador do operador.
