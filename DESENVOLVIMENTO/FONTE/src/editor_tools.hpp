@@ -21,6 +21,7 @@ struct Layer {
  int passes=1;
  std::string powerMode="M4"; // M4=dinamica / M3=constante (somente metadados)
  bool optimizeTravel=true; // reordenacao VIRTUAL na previa apenas
+ double lineIntervalMm=0.20; // distancia entre linhas Fill (metadado offline)
 };
 struct Meta {int layer=0,group=0;};
 struct EditableText {
@@ -51,7 +52,9 @@ inline void validate(const EditorState& s){
   else if(!std::isfinite(layer.speedMmMin)||layer.speedMmMin<10||layer.speedMmMin>100000||
           !std::isfinite(layer.powerPercent)||layer.powerPercent<0||layer.powerPercent>100||
           layer.passes<1||layer.passes>20||
-          (layer.powerMode!="M3"&&layer.powerMode!="M4"))
+          (layer.powerMode!="M3"&&layer.powerMode!="M4")||
+          !std::isfinite(layer.lineIntervalMm)||layer.lineIntervalMm<0.05||
+          layer.lineIntervalMm>5.0)
    throw std::runtime_error("invalid layer simulation parameters");
  for(auto obj:objs){auto i=s.objects.find(obj);if(i==s.objects.end()||!s.layers.count(i->second.layer)||i->second.group<0)throw std::runtime_error("unregistered object/layer");}
  for(auto& [id,meta]:s.objects)if(!objs.count(id))throw std::runtime_error("metadata on missing object");
@@ -776,19 +779,23 @@ public:
      !std::isfinite(desired.speedMmMin)||desired.speedMmMin<10||desired.speedMmMin>100000||
      !std::isfinite(desired.powerPercent)||desired.powerPercent<0||desired.powerPercent>100||
      desired.passes<1||desired.passes>20||
-     (desired.powerMode!="M3"&&desired.powerMode!="M4"))
+     (desired.powerMode!="M3"&&desired.powerMode!="M4")||
+     !std::isfinite(desired.lineIntervalMm)||desired.lineIntervalMm<0.05||
+     desired.lineIntervalMm>5.0)
    throw std::runtime_error("invalid virtual layer configuration");
   const auto& present=current.layers.at(id);
   if(present.name==desired.name&&present.mode==desired.mode&&
      present.speedMmMin==desired.speedMmMin&&
      present.powerPercent==desired.powerPercent&&present.passes==desired.passes&&
-     present.powerMode==desired.powerMode&&present.optimizeTravel==desired.optimizeTravel)return;
+     present.powerMode==desired.powerMode&&present.optimizeTravel==desired.optimizeTravel&&
+     present.lineIntervalMm==desired.lineIntervalMm)return;
   change([&](EditorState& state){
    auto& item=state.layers.at(id);
    item.name=desired.name;item.mode=desired.mode;
    item.speedMmMin=desired.speedMmMin;item.powerPercent=desired.powerPercent;
    item.passes=desired.passes;item.powerMode=desired.powerMode;
    item.optimizeTravel=desired.optimizeTravel;
+   item.lineIntervalMm=desired.lineIntervalMm;
   },false);
  }
  void setLayerMode(int id,const std::string& mode){
@@ -845,7 +852,8 @@ inline boost::json::object metadata(const EditorState& s){
  using namespace boost::json;object m;m["schema"]="editor-meta-1";m["nextGroup"]=s.nextGroup;array layers;
  for(auto&[id,l]:s.layers)layers.push_back(object{{"id",id},{"name",l.name},{"visible",l.visible},{"locked",l.locked},{"mode",l.mode},{"output",l.output},{"air",l.air},
    {"speedMmMin",l.speedMmMin},{"powerPercent",l.powerPercent},
-   {"passes",l.passes},{"powerMode",l.powerMode},{"optimizeTravel",l.optimizeTravel}});
+   {"passes",l.passes},{"powerMode",l.powerMode},{"optimizeTravel",l.optimizeTravel},
+   {"lineIntervalMm",l.lineIntervalMm}});
  m["layers"]=std::move(layers);array objects;
  for(auto&[id,o]:s.objects)objects.push_back(object{{"id",id},{"layer",o.layer},{"group",o.group}});
  m["objects"]=std::move(objects);
@@ -874,7 +882,8 @@ inline EditorState fromMetadata(Document d,const boost::json::value& v){
     x.if_contains("powerPercent")?x.at("powerPercent").to_number<double>():20.0,
     x.if_contains("passes")?int(x.at("passes").as_int64()):1,
     x.if_contains("powerMode")?std::string(x.at("powerMode").as_string()):"M4",
-    x.if_contains("optimizeTravel")?x.at("optimizeTravel").as_bool():true};}
+    x.if_contains("optimizeTravel")?x.at("optimizeTravel").as_bool():true,
+    x.if_contains("lineIntervalMm")?x.at("lineIntervalMm").to_number<double>():0.20};}
  for(const auto& item:m.at("objects").as_array()){const auto& x=item.as_object();int id=int(x.at("id").as_int64());if(s.objects.count(id))throw std::runtime_error("duplicate object meta");s.objects[id]={int(x.at("layer").as_int64()),int(x.at("group").as_int64())};}
  if(const auto* texts=m.if_contains("editableTexts")){
   for(const auto& item:texts->as_array()){
