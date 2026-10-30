@@ -56,7 +56,7 @@ inline std::optional<Raster> decode(const IntegratedProject& project){
  const QByteArray encoded(raw.data(),qsizetype(raw.size()));
  auto result=QByteArray::fromBase64Encoding(encoded,QByteArray::AbortOnBase64DecodingErrors);
  if(!result)throw std::runtime_error("PNG base64 inconsistente");
- const QByteArray png=*result;
+ const QByteArray png=result.decoded;
  if(std::size_t(png.size())>maxPngBytes)throw std::runtime_error("PNG fora do limite");
  const QByteArray actual=QCryptographicHash::hash(png,QCryptographicHash::Sha256).toHex();
  const auto& expected=v.at("sha256").as_string();
