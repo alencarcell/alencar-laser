@@ -185,6 +185,12 @@ class TracePreviewCanvas198 final:public QGraphicsView{
  QGraphicsScene scene_;
  QGraphicsPixmapItem* imageItem_=nullptr;
  QGraphicsPathItem* traceItem_=nullptr;
+ QGraphicsPathItem* nodesItem_=nullptr;
+ std::vector<std::vector<Pt>> cachedPaths_;
+ double lastScale_=1.0;
+ bool showNodes_=false;
+ bool imageFaded_=false;
+ int shownNodes_=0;
  double zoom_=1.0;
 public:
  explicit TracePreviewCanvas198(QWidget* parent=nullptr):QGraphicsView(parent){
@@ -196,6 +202,11 @@ public:
   QPen purple(QColor("#AF19E8"),1.4);purple.setCosmetic(true);
   traceItem_->setPen(purple);traceItem_->setBrush(Qt::NoBrush);
   traceItem_->setAcceptedMouseButtons(Qt::NoButton);
+  nodesItem_=scene_.addPath(QPainterPath());
+  nodesItem_->setBrush(QColor("#15A4EF"));
+  nodesItem_->setPen(Qt::NoPen);
+  nodesItem_->setAcceptedMouseButtons(Qt::NoButton);
+  nodesItem_->setVisible(false);
   setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
   setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
   setResizeAnchor(QGraphicsView::AnchorViewCenter);
@@ -209,6 +220,7 @@ public:
   if(binary.isNull()||widthMm<=0)return;
   imageItem_->setPixmap(QPixmap::fromImage(binary));
   const double scale=double(binary.width())/widthMm;
+  lastScale_=scale;cachedPaths_=paths;
   QPainterPath lines;
   for(const auto& contour:paths){
    if(contour.empty())continue;
@@ -219,6 +231,34 @@ public:
   }
   traceItem_->setPath(lines);
   scene_.setSceneRect(QRectF(0,0,binary.width(),binary.height()));
+  refreshNodeMarkers();
+ }
+ // Visibilidade alterada sem recalcular vetorizacao nem modificar projeto.
+ void setImageFaded(bool faded){
+  imageFaded_=faded;imageItem_->setOpacity(faded?.20:1.0);
+ }
+ bool imageFaded()const{return imageFaded_;}
+ void setNodesVisible(bool enabled){showNodes_=enabled;refreshNodeMarkers();}
+ bool nodesVisible()const{return showNodes_;}
+ int shownNodeCount()const{return shownNodes_;}
+ void refreshNodeMarkers(){
+  nodesItem_->setVisible(false);
+  shownNodes_=0;
+  if(!showNodes_){nodesItem_->setPath(QPainterPath());return;}
+  size_t total=0;
+  for(const auto& path:cachedPaths_)total+=path.size();
+  // Nos em desenhos enormes nao devem congelar a GUI.
+  const size_t stride=std::max<size_t>(1,(total+1999)/2000);
+  QPainterPath markers;
+  size_t index=0;
+  for(const auto& path:cachedPaths_)for(const Pt& node:path){
+   if(index++%stride!=0)continue;
+   const QPointF p(node.x*lastScale_,node.y*lastScale_);
+   markers.addEllipse(p,1.8,1.8);
+   ++shownNodes_;
+  }
+  nodesItem_->setPath(markers);
+  nodesItem_->setVisible(true);
  }
  void resetView(){
   if(scene_.sceneRect().isEmpty())return;
