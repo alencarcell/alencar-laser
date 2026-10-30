@@ -5644,14 +5644,15 @@ static QJsonObject layerRoute198Test(){
  edited.name="Linha laranja";
  edited.speedMmMin=5400.;edited.powerPercent=41.5;
  edited.passes=3;edited.powerMode="M3";edited.optimizeTravel=false;
+ edited.lineIntervalMm=0.075;
  model.configureLayer(0,edited);
  check(model.undoCount()==beforeUndo+1,
        "Configuracoes da camada nao geraram unica transacao undo");
  const auto& saved=model.state().layers.at(0);
  check(saved.name=="Linha laranja"&&saved.powerMode=="M3"&&
        saved.speedMmMin==5400.&&saved.passes==3&&saved.powerPercent==41.5&&
-       !saved.optimizeTravel,
-       "Parametros de simulacao nao aplicados");
+       !saved.optimizeTravel&&std::abs(saved.lineIntervalMm-0.075)<1e-9,
+       "Parametros de simulacao e intervalo da camada nao aplicados");
  const auto preserveRoute=sim198::route::nearestNeighborLines(model.state());
  check(std::abs(preserveRoute.travelMm-basic.travelMm)<1e-7,
        "Camada com otimizacao OFF mudou ordem da rota");
@@ -5671,30 +5672,38 @@ static QJsonObject layerRoute198Test(){
  const auto revived=fromMetadata(model.state().doc,json);
  check(revived.layers.at(0).powerMode=="M3"&&
        revived.layers.at(0).powerPercent==41.5&&revived.layers.at(0).passes==3&&
-       !revived.layers.at(0).optimizeTravel,
-       "Parametros M3, passes ou potencia perdidos no metadata roundtrip");
+       !revived.layers.at(0).optimizeTravel&&
+       std::abs(revived.layers.at(0).lineIntervalMm-0.075)<1e-9,
+       "Parametros M3, passes, potencia ou intervalo perdidos no metadata roundtrip");
  auto legacy=json;
  for(auto& item:legacy["layers"].as_array()){
   auto& l=item.as_object();
   l.erase("speedMmMin");l.erase("powerPercent");l.erase("passes");l.erase("powerMode");
   l.erase("optimizeTravel");
+  l.erase("lineIntervalMm");
  }
  const auto readLegacy=fromMetadata(model.state().doc,legacy);
  check(readLegacy.layers.at(0).powerMode=="M4"&&
        readLegacy.layers.at(0).speedMmMin==3000.&&
        readLegacy.layers.at(0).powerPercent==20.&&readLegacy.layers.at(0).passes==1&&
-       readLegacy.layers.at(0).optimizeTravel,
-       "Projetos antigos nao receberam defaults M4 compativeis");
+       readLegacy.layers.at(0).optimizeTravel&&
+       std::abs(readLegacy.layers.at(0).lineIntervalMm-0.20)<1e-9,
+       "Projetos antigos nao receberam defaults M4 e intervalo 0,20 compativeis");
  const auto undone=model.undo();
  check(undone&&model.state().layers.at(0).powerMode=="M4"&&
        model.state().layers.at(0).passes==1,
        "Undo nao restaurou configuracao antiga");
- check(model.redo()&&model.state().layers.at(0).powerMode=="M3",
-       "Redo nao reaplicou M3");
+ check(model.redo()&&model.state().layers.at(0).powerMode=="M3"&&
+       std::abs(model.state().layers.at(0).lineIntervalMm-0.075)<1e-9,
+       "Redo nao reaplicou M3 e intervalo Fill");
  bool denied=false;
  try{auto impossible=edited;impossible.powerPercent=101;model.configureLayer(0,impossible);}
  catch(const std::exception&){denied=true;}
  check(denied,"Potencia fora de 0-100 foi aceita");
+ denied=false;
+ try{auto impossible=edited;impossible.lineIntervalMm=0.01;model.configureLayer(0,impossible);}
+ catch(const std::exception&){denied=true;}
+ check(denied,"Intervalo Fill fora de 0,05-5mm foi aceito");
  model.addLayer(1001,"T1");
  denied=false;
  try{model.configureLayer(1001,edited);}catch(const std::exception&){denied=true;}
@@ -5704,7 +5713,8 @@ static QJsonObject layerRoute198Test(){
  check(toolSafe.cutMm<route.cutMm,"T1 nao foi excluida da rota");
  return {{"status","PASS"},{"nearest_neighbor_reduces_travel",true},
   {"route_is_non_destructive",true},{"layer_settings_one_undo",true},
-  {"m3_m4_metadata_roundtrip",true},{"legacy_m4_default",true},
+  {"m3_m4_metadata_roundtrip",true},{"fill_line_interval_roundtrip",true},
+  {"legacy_fill_interval_default",true},{"legacy_m4_default",true},
   {"per_layer_route_toggle",true},
   {"tool_layers_no_output",true},{"invalid_power_rejected",true},
   {"hardware_commands_sent",false}};
