@@ -350,6 +350,8 @@ class QtEditorLab final:public QGraphicsView{
  std::vector<int> transformIds_;
  std::vector<QGraphicsPathItem*> transformItems_;
  bool nativeContourPressing_=false;
+ bool nativeTransformDragging_=false;
+ Key nativeTransformKey_{};
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
  std::vector<Pt> pencilPoints_;
  bool bezierDrawing_=false,bezierPressed_=false;
@@ -657,6 +659,10 @@ class QtEditorLab final:public QGraphicsView{
    return shapePreviewBounds_->translated(shapePreviewDelta_);
   if(transformDragging_)
    return selectionPreviewTransform_.mapRect(transformBounds_);
+  if(nativeMode_&&!nativeEditHandles_&&nativeSession_&&nativeSession_->selected()){
+   const auto it=nativeItems_.find(*nativeSession_->selected());
+   if(it!=nativeItems_.end())return it->second->path().boundingRect();
+  }
   return selectedBounds();
  }
  std::array<QPointF,13> selectionHandles(const QRectF& bounds)const{
@@ -672,7 +678,8 @@ class QtEditorLab final:public QGraphicsView{
    QPointF(cx,cy)};
  }
  void paintSelectionHandles(QPainter* p)const{
-  if(tool!=Tool::Select||selected.empty()||nativeMode_)return;
+  if(tool!=Tool::Select||nativeEditHandles_)return;
+  if(selected.empty()&&!(nativeMode_&&nativeSession_&&nativeSession_->selected()))return;
   auto bounds=selectionDisplayBounds();if(!bounds)return;
   const QPointF topLeft=viewportTransform().map(bounds->topLeft());
   const QPointF bottomRight=viewportTransform().map(bounds->bottomRight());
@@ -698,13 +705,16 @@ class QtEditorLab final:public QGraphicsView{
   for(auto* item:transformItems_)item->setTransform(QTransform());
   transformItems_.clear();transformIds_.clear();
   transformDragging_=false;transformHandle_=-1;
+  nativeTransformDragging_=false;nativeTransformKey_={};
   transformSx_=transformSy_=1.;transformAngle_=0.;transformMoveDelta_={};
   selectionPreviewTransform_=QTransform();
   viewport()->update();
  }
  bool beginSelectionTransform(QPointF position){
-  if(tool!=Tool::Select||nativeMode_||selected.empty()||busy())return false;
-  const auto bounds=selectedBounds();if(!bounds)return false;
+  if(tool!=Tool::Select||busy()||nativeEditHandles_)return false;
+  const bool native=nativeMode_&&nativeSession_&&nativeSession_->selected();
+  if(!native&&(nativeMode_||selected.empty()))return false;
+  const auto bounds=selectionDisplayBounds();if(!bounds)return false;
   const auto handles=selectionHandles(*bounds);
   int h=-1;double distance=11.;
   // Preferir o ponto central quando a selecao e grande suficiente.
@@ -714,12 +724,20 @@ class QtEditorLab final:public QGraphicsView{
    if(d<distance){h=i;distance=d;}
   }
   if(h<0)return false;
+  if(native){
+   nativeTransformKey_=*nativeSession_->selected();
+   const auto it=nativeItems_.find(nativeTransformKey_);
+   if(it==nativeItems_.end())return false;
+   nativeTransformDragging_=true;
+   transformItems_.push_back(it->second);
+  }else{
   transformIds_=expandedSelection();
   for(int id:transformIds_){
    if(!editable(editor.state(),id)){cancelSelectionTransform();return false;}
    auto found=itemsByObject_.find(id);
    if(found!=itemsByObject_.end())
     transformItems_.insert(transformItems_.end(),found->second.begin(),found->second.end());
+  }
   }
   if(transformItems_.empty()){cancelSelectionTransform();return false;}
   transformDragging_=true;transformHandle_=h;transformBounds_=*bounds;
@@ -798,7 +816,20 @@ class QtEditorLab final:public QGraphicsView{
   const QPointF pivot=h>=8?transformBounds_.center():transformAnchor_;
   const double sx=transformSx_,sy=transformSy_,angle=transformAngle_;
   const QPointF move=transformMoveDelta_;
+  const bool native=nativeTransformDragging_;
+  const Key nativeKey=nativeTransformKey_;
   cancelSelectionTransform();
+  if(native){
+   if(!nativeSession_||!nativeSession_->selected()||*nativeSession_->selected()!=nativeKey)return;
+   const bool changed=nativeSession_->transformSelectedContour(fromQt(pivot),sx,sy,angle,fromQt(move));
+   if(changed){
+    lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
+    updateNativePaths(true);
+    if(diagnosticEvent)diagnosticEvent(h==12?"bezier_contour_moved":h>=8?"bezier_contour_rotated":"bezier_contour_scaled",1);
+    if(stateChanged)stateChanged();
+   }
+   return;
+  }
   if(h==12){
    if(QLineF(QPointF{},move).length()<1e-8)return;
    editor.moveObjects(ids,fromQt(move));
@@ -1468,6 +1499,8 @@ public:
   viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
  }
  void setTool(Tool t){
+  if(t!=tool&&nativeSession_&&(nativePressing_||nativeContourPressing_))
+   cancelCurrentGesture();
   if(polylineDrawing_&&t!=Tool::Line)finishPolyline(false);
   if(bezierDrawing_&&t!=Tool::DrawBezier)finishBezierDraft(false);
   if(!busy()){
@@ -1480,6 +1513,11 @@ public:
   const double dx=last.x()-first.x(),dy=last.y()-first.y();
   const double size=std::min(std::abs(dx),std::abs(dy));
   return {first.x()+std::copysign(size,dx),first.y()+std::copysign(size,dy)};
+ }
+ void prepareToolSwitch(){
+  if(polylineDrawing_)finishPolyline(false);
+  if(bezierDrawing_)finishBezierDraft(false);
+  if(busy())cancelCurrentGesture();
  }
  void cancelCurrentGesture(){
   if(rasterDragging_||rasterResizing_){
@@ -1714,6 +1752,7 @@ void mousePressEvent(QMouseEvent* e)override{
  if(e->button()!=Qt::LeftButton){QGraphicsView::mousePressEvent(e);return;}
   if(nativeMode_){
    if(tool==Tool::Select&&!nativeEditHandles_){
+    if(beginSelectionTransform(e->position())){e->accept();return;}
     // Normal Select must pick both native Bézier and regular polylines.
     if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),true)){
      e->accept();return;
@@ -2033,6 +2072,10 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   e->accept();return;
  }
  if(e->button()!=Qt::LeftButton){QGraphicsView::mouseReleaseEvent(e);return;}
+  if(nativeTransformDragging_&&transformDragging_){
+   updateSelectionTransform(e->position(),e->modifiers());
+   finishSelectionTransform();e->accept();return;
+  }
   if(nativeMode_){
    if(nativeContourPressing_&&nativeSession_){
     // O ponto inicial está preservado no CurveDragSession.
@@ -3037,6 +3080,7 @@ public:
      // Mudanca de ferramenta nao pode deixar campo de texto vazio sobre a mesa.
      if(inlineTextEntry_)
       finishInlineText(!inlineTextEntry_->text().trimmed().isEmpty());
+     view.prepareToolSwitch();
      run(action);
     });return b;
   };
