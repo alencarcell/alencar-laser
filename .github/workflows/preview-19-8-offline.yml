@@ -7,14 +7,20 @@ on:
       - fix/validacao-real-19-8-20261029
     paths:
       - "DESENVOLVIMENTO/FONTE/src/**"
+      - "DESENVOLVIMENTO/FONTE/qt/**"
       - "DESENVOLVIMENTO/FONTE/tests/**"
+      - "DESENVOLVIMENTO/FONTE/CMakeLists.txt"
+      - "SCRIPTS/TESTAR_19_8_WINDOWS.ps1"
       - ".github/workflows/preview-19-8-offline.yml"
   pull_request:
     branches:
       - feat/refino-curvas-rastreio-diagnosticos-19-8
     paths:
       - "DESENVOLVIMENTO/FONTE/src/**"
+      - "DESENVOLVIMENTO/FONTE/qt/**"
       - "DESENVOLVIMENTO/FONTE/tests/**"
+      - "DESENVOLVIMENTO/FONTE/CMakeLists.txt"
+      - "SCRIPTS/TESTAR_19_8_WINDOWS.ps1"
       - ".github/workflows/preview-19-8-offline.yml"
   workflow_dispatch:
 
