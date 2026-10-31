@@ -6359,6 +6359,27 @@ static QJsonObject refineCurvesTrace198Test(const QString& folder){
  auto traced=trace198::trace(bitmap,opts);
  check(traced.contours.size()>=2,"Tracer nao preservou contorno exterior e vazado");
  check(traced.discardedComponents>=1,"Ruido isolado nao foi removido");
+ // Conservative staircase filtering must preserve topology and holes.
+ trace198::Options filtered=opts;filtered.antiStaircase=true;
+ auto cleaner=trace198::trace(bitmap,filtered);
+ check(cleaner.contours.size()==traced.contours.size()&&
+       cleaner.blackPixels==traced.blackPixels,
+       "Anti-serrilhado alterou vazados ou pixels da mascara P&B");
+ const std::vector<Pt> staircase={{0,0},{1,0},{1,1},{2,1},{2,2},
+   {3,2},{3,3},{4,3},{4,5},{0,5}};
+ const auto smoothed=trace198::reducePixelStaircases(staircase);
+ check(smoothed.size()==staircase.size(),
+       "Anti-serrilhado alterou quantidade/topologia dos nos");
+ bool reduced=false;
+ for(size_t i=0;i<staircase.size();++i){
+  const double dx=dist(smoothed[i],staircase[i]);
+  check(dx<.75,"Anti-serrilhado deslocou borda demais");
+  reduced|=dx>1e-5;
+ }
+ check(reduced,"Anti-serrilhado nao corrigiu degraus curtos em diagonal");
+ const std::vector<Pt> corners={{0,0},{10,0},{10,5},{0,5}};
+ check(trace198::reducePixelStaircases(corners).size()==4,
+       "Anti-serrilhado corrompeu os quatro cantos de um retangulo");
  check(traced.blackPixels==50*50-18*18,"Binario P&B nao preservou pixels esperados");
  size_t nodes=0;
  for(const auto& ring:traced.contours)nodes+=ring.size();
