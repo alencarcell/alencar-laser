@@ -4688,6 +4688,25 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    return;
   }
   if(suffix!="lbrn2")throw std::runtime_error("Use .alaser ou .lbrn2");
+  // Read-only preflight. Many LightBurn Scan projects store thousands of
+  // disconnected strokes inside ONE Path. Converting them as a single line
+  // would invent cutting links or drop zero-length marks. Refuse atomically.
+  const auto inspection=reference::readLightBurn(path);
+  if(inspection.valid&&(inspection.disconnectedTransitions>0||
+                        inspection.zeroLengthPrimitives>0)){
+   QMessageBox::warning(this,"LightBurn: geometria ainda nao suportada",
+     QString("O projeto possui %1 transições entre traços desconectados e "
+             "%2 segmentos de comprimento zero.\n\n"
+             "O importador atual requer caminhos contínuos. "
+             "Nenhum desenho foi importado nem modificado. "
+             "Use a inspeção somente leitura para conferir os grupos e "
+             "aguarde um importador que preserve todos os subcaminhos, "
+             "sem unir trechos ou descartar pontos.")
+       .arg(inspection.disconnectedTransitions)
+       .arg(inspection.zeroLengthPrimitives));
+   status->setText("Importação LBRN2 bloqueada: múltiplos traços independentes.");
+   return;
+  }
   // Mensagem visivel quando um arquivo LBRN2 real contem formas ausentes
   // do importador. Nunca trocar o desenho atual numa importacao incompleta.
   lightburn::ImportResult imported=lightburn::ImportResult(fromDocument(Document{}),0);
