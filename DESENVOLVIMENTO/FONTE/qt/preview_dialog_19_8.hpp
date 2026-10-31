@@ -2,6 +2,7 @@
 // Alencar Laser 19.8 - read-only preview. No serial/TCP/G-code/machine calls.
 // Motion estimate is approximate: simplified axes + stop/start at angular runs.
 #include "preview_sim_19_8.hpp"
+#include "preview_native_19_8.hpp"
 #include "preview_motion_19_8.hpp"
 #include "preview_raster_19_8.hpp"
 #include "preview_route_19_8.hpp"
@@ -150,8 +151,11 @@ protected:
 inline void showPreviewDialog(QWidget* parent,const EditorState& source,
                                double drawingWidthMm,double drawingHeightMm,
                                const QImage& sourceImage=QImage(),
-                               const QRectF& imageBounds=QRectF()){
- const Plan sourcePlan=build(source);
+                               const QRectF& imageBounds=QRectF(),
+                               const CurveDocument* nativeCurves=nullptr){
+ const auto nativePreview=withNativeCurves(source,nativeCurves);
+ const EditorState& planningSource=nativePreview.state;
+ const Plan sourcePlan=build(planningSource);
  Plan shown=sourcePlan;
  motion::Settings settings;
  motion::Timeline timeline;
@@ -382,11 +386,11 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    scan.bidirectional=bidirectional->isChecked();
    nestedPairs=0;
    Plan combined=optimizeTravel->isChecked()?
-      route::nearestNeighborLines(source,300000,1500,innerFirst->isChecked(),&nestedPairs):
+      route::nearestNeighborLines(planningSource,300000,1500,innerFirst->isChecked(),&nestedPairs):
       sourcePlan;
    optimizedLineTravelMm=combined.travelMm;
    if(enableFill->isChecked()){
-    raster::appendFill(combined,source,scan,250000,useLayerIntervals->isChecked());
+    raster::appendFill(combined,planningSource,scan,250000,useLayerIntervals->isChecked());
     combined.ignoredFill=0; // Fill vetorial incluido; contornos abertos nao geram hatch.
    }
    if(enableImage->isChecked()&&imagePresent){
@@ -410,7 +414,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
     raster::appendMask(combined,mask,{imageBounds.x(),imageBounds.y(),
                        imageBounds.width(),imageBounds.height()},scan);
    }
-   const Plan repeated=repeatedByLayer(combined,source,passes->value());
+   const Plan repeated=repeatedByLayer(combined,planningSource,passes->value());
    // Diagnose ALWAYS, including when limiting the preview is unchecked.
    // Otherwise the operator loses the warning when inspecting full geometry.
    const Plan bounded=bed198::restrictToBed(repeated,drawingWidthMm,drawingHeightMm,&bedReport);
@@ -467,6 +471,12 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
   if(filename.isEmpty())return;
   QJsonObject data{
    {"schema","alencar-laser-simulation-report-19.8"},
+   {"native_bezier_contours",int(nativePreview.paths)},
+   {"native_bezier_closed",int(nativePreview.closed)},
+   {"native_bezier_open",int(nativePreview.open)},
+   {"native_bezier_virtual_segments",int(nativePreview.segments)},
+   {"native_bezier_missing_layer_fallbacks",int(nativePreview.missingLayers)},
+   {"native_bezier_source_unchanged",true},
    {"experimental",true},{"machine_commands_sent",false},
    {"model","kinematic-start-stop-angular-runs-12deg"},
    {"limited_to_bed",restrictBed->isChecked()},
