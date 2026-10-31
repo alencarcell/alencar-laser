@@ -782,3 +782,13 @@ Registrar mudanças, testes e pendências.
 - Para retomar: `git status --short`, `git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030`, `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteDesenho`, seguido de `-Abrir` somente se a suíte automática passar; testar coleta e Ctrl+Z/Y com laser fisicamente desconectado.
 
 - Ajuste de feedback visual adicional: após Undo/Redo Bézier, barra de status informa ação executada, quantidade de curvas e que a linha cinza é uma curva não selecionada (commit `c4fe237f`). Esse texto não substitui o teste de geometria; serve para evitar ambiguidade para o operador.
+
+
+## 31/10/2026 — Falha isolada do coletor na Tesoura Bézier (print real)
+
+- Operador executou `-SomenteDesenho` na branch experimental: compilação Qt completou, teste portátil de união de caminhos e teste de transformação Bézier passaram; a etapa `--draw-join-19-8-test` falhou com `Coletor nao contou Tesoura e historico nativos` (código 1). O print mostra que o teste avançou pelas verificações geométricas de corte/Undo/Redo antes de chegar à coleta.
+- **Causa comprovada no código:** `DiagnosticsCollector::record` só aceita eventos de uma lista explícita. `QtEditorLab::cutNativeAt` e `nativeHistory` enviavam `bezier_contour_scissor_cut`, `bezier_undo` e `bezier_redo`, mas os nomes não apareciam na lista de permissão de `src/diagnostics_collector.hpp`. `LabWindow::captureEvent` captura a exceção de evento desconhecido e não a propaga; por isso geometria funciona, mas o relatório fica sem contagens.
+- Correção na branch da PR #13: acrescentados nomes permitidos para edição Bézier nativa sem relaxar o filtro, sem coordenadas e sem coleta automática. Novo teste `tests/diagnostics_native_events_19_8_standalone.cpp` exige eventos de corte, Undo, Redo, rejeita nomes arbitrários e confirma que coleta OFF não registra. Integrado ao GitHub Actions C++ portátil, CMake e ao gate Windows `-SomenteDesenho`.
+- A regressão Qt existente continua exigindo coleta ativa, `cut_native` em `scissor_attempts`, contagens de corte/Undo/Redo e restauração idêntica da geometria. Nenhuma asserção foi desativada.
+- **Estado:** alteração publicada, aguarda os resultados automáticos e teste Windows com mouse real. Controle físico continua bloqueado; `main`, `APLICATIVO` e repositório privado preservados.
+- Próximo teste local após confirmar `git status --short` sem alterações conflitantes: `git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030`; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteDesenho`.
