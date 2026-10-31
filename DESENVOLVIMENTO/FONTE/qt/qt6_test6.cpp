@@ -6722,6 +6722,11 @@ static QJsonObject drawAndJoin198Test(){
        !ui.findChild<QPushButton*>("bezier")->isVisible(),
        "Ferramentas legadas ainda aparecem na barra");
  // Scissors removes the clicked mathematical edge (no flattening).
+ // Real user workflow: opt-in diagnostic collector ON, tool click, then
+ // keyboard Ctrl+Z/Y while the last native contour is GONE and nativeMode OFF.
+ auto* diagnosticCapture=ui.findChild<QCheckBox*>("diagnostics_enable");
+ check(diagnosticCapture!=nullptr,"Ativar coleta de diagnostico nao localizado");
+ diagnosticCapture->setChecked(true);
  clickButton(ui,"scissors");
  const QPoint scissorPt=ui.view.mapFromScene(
      ui.view.nativeItemPath(nativeKey).pointAtPercent(.35));
@@ -6729,10 +6734,38 @@ static QJsonObject drawAndJoin198Test(){
  QApplication::processEvents();
  check(ui.view.nativeItemCount()==0&&!ui.view.hasNativeDocument(),
        "Tesoura deve remover realmente a unica aresta Bezier da forma");
+ const auto cutDiagnostic=ui.captureDocument();
+ const auto attempts=cutDiagnostic.value("scissor_attempts").toArray();
+ check(attempts.size()>0&&
+       attempts.last().toObject().value("result").toString()=="cut_native"&&
+       attempts.last().toObject().value("object_id").toInt()==nativeKey.object,
+       "Coleta nao registrou Tesoura Bezier nativa sem coordenadas");
+ check(ui.view.shouldUseNativeHistory(false),
+       "Ultimo corte Bezier perdeu historico nativo ao remover a forma inteira");
+ pressKey(ui,Qt::Key_Z,Qt::ControlModifier);
+ check(ui.view.nativeItemCount()==1&&
+       ui.view.nativeItemPath(nativeKey)==initialCurve,
+       "Ctrl+Z apos Tesoura nao restaurou curva Bezier");
+ pressKey(ui,Qt::Key_Y,Qt::ControlModifier);
+ check(ui.view.nativeItemCount()==0&&!ui.view.hasNativeDocument(),
+       "Ctrl+Y nao refez o corte Bezier real");
  clickButton(ui,"undo");
  check(ui.view.nativeItemCount()==1&&
        ui.view.nativeItemPath(nativeKey)==initialCurve,
-       "Desfazer Tesoura nao restaurou geometria Bezier original exata");
+       "Botao Desfazer nao restaurou geometria Bezier apos corte");
+ clickButton(ui,"redo");
+ check(ui.view.nativeItemCount()==0&&!ui.view.hasNativeDocument(),
+       "Botao Refazer nao reaplicou o corte Bezier");
+ clickButton(ui,"undo");
+ check(ui.view.nativeItemCount()==1&&
+       ui.view.nativeItemPath(nativeKey)==initialCurve,
+       "Desfazer final nao recuperou Bezier original");
+ const auto events=ui.captureDocument().value("counts").toObject();
+ check(events.value("bezier_contour_scissor_cut").toInt()>=1&&
+       events.value("bezier_undo").toInt()>=2&&
+       events.value("bezier_redo").toInt()>=2,
+       "Coletor nao contou Tesoura e historico nativos");
+ diagnosticCapture->setChecked(false);
  clickButton(ui,"select");
  const QPoint hitAgain=ui.view.mapFromScene(
      ui.view.nativeItemPath(nativeKey).pointAtPercent(.25));
