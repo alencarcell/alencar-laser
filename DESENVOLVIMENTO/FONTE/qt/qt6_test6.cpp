@@ -1219,9 +1219,16 @@ public:
   if(diagnosticEvent)diagnosticEvent("bezier_contour_deleted",1);
   if(stateChanged)stateChanged();return true;
  }
+ // Bulk removal is deliberately distinct from localized node/side editing.
+ // The real operator report contains one 575-object deletion.
+ std::function<bool(int)> approveBulkDeletion;
  bool deleteSelectedShapes(){
   if(nativeMode_||busy()||selected.empty())return false;
   const int count=int(selected.size());
+  if(count>=25&&(!approveBulkDeletion||!approveBulkDeletion(count))){
+   if(toolWarning)toolWarning("Exclusão de muitas formas cancelada; nenhum objeto removido.");
+   return false;
+  }
   editor.deleteObjects({selected.begin(),selected.end()});
   selected.clear();active_.reset();rebuild();
   if(diagnosticEvent)diagnosticEvent("shapes_deleted",count);
@@ -3492,8 +3499,8 @@ public:
   addVertical(inspector,"delete_shapes","Excluir formas selecionadas",[this]{
    if(view.nativeModeActive()){
     check(view.nativeDeleteContour(),"Selecione uma curva Bézier para excluir.");
-   }else{
-    check(view.deleteSelectedShapes(),"Selecione uma ou mais formas editáveis.");
+   }else if(!view.deleteSelectedShapes()){
+    status->setText("Exclusão não realizada. Para remover só um nó/lado, clique com o botão direito nele.");
    }
   });
   addVertical(inspector,"delete_curve","Excluir curva Bézier selecionada",[this]{
@@ -4146,6 +4153,13 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    });
   view.stateChanged=[this]{if(uiPersistenceEnabled_)recoveryPolicy_.edited();refresh();};
   view.diagnosticEvent=[this](const QString& code,int count){captureEvent(code,count);};
+  view.approveBulkDeletion=[this](int count){
+   return QMessageBox::question(this,"Confirmar exclusão de várias formas",
+     QString("%1 objetos estão selecionados. Excluir TODOS eles?\n\n"
+             "Isso é diferente de remover apenas um nó ou lado da forma selecionada.\n"
+             "Se confirmar, Ctrl+Z desfaz a operação.")
+       .arg(count),QMessageBox::Yes|QMessageBox::No,QMessageBox::No)==QMessageBox::Yes;
+  };
   view.scissorDetail=[this](const QString& reason,int id,int segment){
    recordScissorAttempt(reason,id,segment);
   };
