@@ -135,6 +135,12 @@ try {
         Checar-Saida 'Compilacao do coletor Bezier nativo'
         & $diagExe
         Checar-Saida 'Coleta opt-in de Tesoura, Undo e Redo Bezier'
+        $localSource = Join-Path $fontes 'tests\selected_local_edit_19_8_standalone.cpp'
+        $localExe = Join-Path $build 'selected_local_edit_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $localSource -o $localExe
+        Checar-Saida 'Compilacao dos nos e lados selecionados'
+        & $localExe
+        Checar-Saida 'Edicao localizada de nos/lados preserva outras formas e Undo/Redo'
         Compilar-QtComDiagnostico
         $app = Join-Path $build 'alencar_test7_qt6.exe'
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
