@@ -129,6 +129,12 @@ try {
         Checar-Saida 'Compilacao isolada de escala e rotacao Bezier'
         & $nativeExe
         Checar-Saida 'Regressao Bezier nativa: escala, rotacao e Undo'
+        $diagSource = Join-Path $fontes 'tests\diagnostics_native_events_19_8_standalone.cpp'
+        $diagExe = Join-Path $build 'diagnostics_native_events_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $diagSource -o $diagExe
+        Checar-Saida 'Compilacao do coletor Bezier nativo'
+        & $diagExe
+        Checar-Saida 'Coleta opt-in de Tesoura, Undo e Redo Bezier'
         Compilar-QtComDiagnostico
         $app = Join-Path $build 'alencar_test7_qt6.exe'
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
