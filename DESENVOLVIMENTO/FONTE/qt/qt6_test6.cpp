@@ -6852,6 +6852,25 @@ static QJsonObject textFillAlign198Test(){
 }
 
 static QJsonObject drawAndJoin198Test(){
+ // 575-object deletion was observed in a user diagnostics report. Protect
+ // large selections while keeping single-side editing confirmation-free.
+ QtEditorLab bulkGuard(Document{});
+ for(int n=0;n<25;++n){
+  const int id=bulkGuard.editor.rectangle({double(n*3),0},2,2);
+  bulkGuard.selected.insert(id);
+ }
+ bulkGuard.rebuild();
+ int asked=0;
+ bulkGuard.approveBulkDeletion=[&](int count){++asked;return count!=25;};
+ check(!bulkGuard.deleteSelectedShapes()&&asked==1&&
+       bulkGuard.editor.state().doc.contours.size()==25,
+       "Cancelled mass deletion unexpectedly removed geometry");
+ bulkGuard.approveBulkDeletion=[&](int count){++asked;return count==25;};
+ check(bulkGuard.deleteSelectedShapes()&&asked==2&&
+       bulkGuard.editor.state().doc.contours.empty(),
+       "Confirmed mass deletion did not remove selected objects");
+ check(bulkGuard.editor.undo()&&bulkGuard.editor.state().doc.contours.size()==25,
+       "Undo did not recover confirmed mass deletion");
  // Model invariant: complete a rectangle by magnetically joining its
  // two open endpoints, maintaining the SAME contour/object and undo unit.
  Editor editor(Document{});
