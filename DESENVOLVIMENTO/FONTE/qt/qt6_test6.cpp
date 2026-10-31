@@ -2221,7 +2221,38 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   QGraphicsView::mouseReleaseEvent(e);
  }
  void contextMenuEvent(QContextMenuEvent* e)override{
-  if(tool==Tool::Line||nativeMode_||busy()){e->accept();return;}
+  if(tool==Tool::Line||busy()){e->accept();return;}
+  const Pt contextPoint=fromQt(mapToScene(e->pos()));
+  // Node/side editing is strictly scoped to the one already-selected native
+  // contour. Right-click never implicitly selects another overlapping shape.
+  if(nativeMode_){
+   if(nativeSession_&&nativeSession_->selected()){
+    const Key key=*nativeSession_->selected();
+    const auto node=pickCurveNode(nativeSession_->committed(),key,
+      contextPoint,nativePxPerMm(),viewport()->devicePixelRatioF(),8);
+    const auto hits=nativeSession_->pickEdges(contextPoint,
+      nativePxPerMm(),viewport()->devicePixelRatioF(),8);
+    const bool edgeHere=std::any_of(hits.begin(),hits.end(),
+       [&](const CurveHit& h){return h.key==key;});
+    QMenu local(this);
+    auto* removeNode=local.addAction("Remover somente este nó Bézier (ligar vizinhos)");
+    auto* removeSide=local.addAction("Remover somente este lado da Bézier");
+    auto* help=local.addAction("Outras formas selecionadas não serão alteradas");
+    help->setEnabled(false);
+    removeNode->setEnabled(node&&node->part==CurvePart::Anchor);
+    removeSide->setEnabled(edgeHere);
+    QAction* chosen=local.exec(e->globalPos());
+    if(chosen==removeNode&&node&&node->part==CurvePart::Anchor){
+     nativeSelectedPart_=node;
+     if(!nativeDeleteSelected()&&toolWarning)
+      toolWarning("Não foi possível excluir esse nó. Verifique a topologia mínima.");
+    }else if(chosen==removeSide&&edgeHere){
+     if(!cutNativeAt(contextPoint,key)&&toolWarning)
+      toolWarning("Não foi possível remover o lado da Bézier selecionada.");
+    }
+   }
+   e->accept();return;
+  }
   QMenu menu(this);
   QAction* all=menu.addAction("Selecionar tudo (Ctrl+A)");
   QAction* invert=menu.addAction("Inverter seleção (Ctrl+Shift+I)");
@@ -2232,6 +2263,34 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   QAction* ungroup=menu.addAction("Desagrupar seleção (Ctrl+U)");
   QAction* ungroupScissors=menu.addAction("Desagrupar e ativar Tesoura");
   QAction* remove=menu.addAction("Excluir selecionados (Delete)");
+  // Localized geometry commands, distinct from whole-object deletion.
+  // Require ONE selected object and the hit on its ACTIVE subpath.
+  std::optional<Key> editKey;
+  std::optional<int64_t> editNode;
+  std::optional<int> editSide;
+  if((tool==Tool::Select||tool==Tool::Nodes)&&selected.size()==1&&
+      active_&&selected.count(active_->object)&&editable(editor.state(),active_->object)){
+   editKey=*active_;
+   if(const auto* contour=get(editor.state().doc,*editKey)){
+    double bestPx=8.0;
+    for(const auto& n:contour->nodes){
+     const QPointF screen=viewportTransform().map(toQt(n.p));
+     const double pixel=QLineF(screen,e->pos()).length();
+     if(pixel<=bestPx){bestPx=pixel;editNode=n.id;}
+    }
+    const auto hits=clickHits(e->pos());
+    for(const auto& hit:hits)if(hit.key==*editKey&&hit.segment>=0){
+     editSide=hit.segment;break;
+    }
+   }
+  }
+  menu.addSeparator();
+  QAction* onlyNode=menu.addAction("Remover só este nó da forma selecionada");
+  QAction* onlySide=menu.addAction("Remover só este lado da forma selecionada");
+  onlyNode->setEnabled(editNode.has_value());
+  onlySide->setEnabled(editSide.has_value());
+  onlyNode->setToolTip("Exclui apenas o nó sob o mouse; os nós vizinhos continuam conectados. Ctrl+Z desfaz.");
+  onlySide->setToolTip("Remove apenas a aresta clicada e abre o contorno fechado, sem afetar outras formas. Ctrl+Z desfaz.");
   duplicate->setEnabled(selected.size()==1);
   group->setEnabled(selected.size()>=2);
   bool grouped=false;
@@ -2259,7 +2318,21 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   QAction* picked=menu.exec(e->globalPos());
   if(!picked){e->accept();return;}
   try{
-   if(picked==traceBitmap&&requestTraceImage)requestTraceImage();
+   if(picked==onlyNode&&editKey&&editNode){
+    const Key targeted=*editKey;
+    editor.erase(targeted,*editNode);selected.clear();active_.reset();rebuild();
+    if(get(editor.state().doc,targeted))activate(targeted);
+    if(diagnosticEvent)diagnosticEvent("polyline_node_deleted",1);
+    if(toolWarning)toolWarning("Somente o nó escolhido foi removido. Ctrl+Z restaura.");
+   }else if(picked==onlySide&&editKey&&editSide){
+    const Key targeted=*editKey;
+    const int result=editor.removePolylineEdge(targeted,*editSide);
+    selected.clear();active_.reset();rebuild();
+    if(get(editor.state().doc,targeted))activate(targeted);
+    else if(result>0)activate({result,0});
+    if(diagnosticEvent)diagnosticEvent("polyline_edge_deleted",1);
+    if(toolWarning)toolWarning("Somente o lado escolhido foi removido. Ctrl+Z restaura.");
+   }else if(picked==traceBitmap&&requestTraceImage)requestTraceImage();
    else if(picked==clearBitmap)clearRasterImage();
    else if(picked==all)selectAllVisible();
    else if(picked==invert)invertSelection();
