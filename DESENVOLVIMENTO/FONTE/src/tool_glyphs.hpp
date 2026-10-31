@@ -81,11 +81,21 @@ inline QIcon toolGlyph(const QString& id){
  }else if(id=="preview"){
   p.drawRect(4,7,24,17);p.drawLine(10,28,22,28);
   p.setBrush(QColor("#DE914C"));p.drawEllipse(QPointF(16,15),4,4);
- }else if(id=="save"){
+ }else if(id=="save"||id=="save_as"){
   p.drawRect(6,5,20,22);p.drawRect(10,6,12,7);p.drawRect(11,20,10,7);
- }else if(id=="open"){
+  if(id=="save_as"){
+   p.setPen(QPen(QColor("#FFFFFF"),1.8));
+   p.setBrush(QColor("#AD5B18"));p.drawEllipse(QPointF(25,25),6,6);
+   p.drawLine(22,25,28,25);p.drawLine(25,22,25,28);
+  }
+ }else if(id=="open"||id=="open_other"){
   p.drawPolyline(QPolygonF()<<QPointF(5,12)<<QPointF(5,7)<<QPointF(15,7)<<QPointF(19,11));
   p.drawPolyline(QPolygonF()<<QPointF(5,27)<<QPointF(10,14)<<QPointF(28,14)<<QPointF(23,27)<<QPointF(5,27));
+  if(id=="open_other"){
+   p.setPen(QPen(QColor("#FFFFFF"),1.8));
+   p.setBrush(QColor("#AD5B18"));p.drawEllipse(QPointF(25,8),6,6);
+   p.drawLine(22,8,28,8);p.drawLine(25,5,25,11);
+  }
  }else if(id=="undo"||id=="redo"){
   const bool redo=id=="redo";
   p.drawArc(QRectF(7,8,19,17),redo?(-10*16):(10*16),redo?(225*16):(-225*16));
