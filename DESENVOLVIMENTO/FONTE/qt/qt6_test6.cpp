@@ -3145,6 +3145,46 @@ public:
        status->setText("Desenhar Bézier: clique = canto/reta; clique+arraste = curva; direito conclui; Esc cancela.");
        captureEvent("tool_draw_bezier_activated");
      });
+  // Right-click on the unified Bezier tool opens real node operations.
+  // Left-click keeps the original fast one-tool drawing workflow intact.
+  auto* curveToolButton=buttons.at("new_bezier");
+  curveToolButton->setToolTip(curveToolButton->toolTip()+
+    "\nClique direito: editar / adicionar / excluir nós da Bézier selecionada.");
+  curveToolButton->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(curveToolButton,&QWidget::customContextMenuRequested,this,[this,curveToolButton](const QPoint& at){
+   QMenu menu(curveToolButton);
+   auto* edit=menu.addAction("Editar âncoras e alças da Bézier selecionada");
+   auto* insert=menu.addAction("Adicionar nó — clique na aresta desejada");
+   auto* remove=menu.addAction("Excluir nó selecionado (Delete)");
+   menu.addSeparator();
+   auto* instructions=menu.addAction("Dica: Shift+clique também insere; Esc cancela");
+   instructions->setEnabled(false);
+   connect(edit,&QAction::triggered,this,[this]{
+    view.prepareToolSwitch();
+    if(!view.nativeSelected()){status->setText("Bézier: selecione primeiro a curva.");return;}
+    view.enableNative(true);bezierToolActive_=true;
+    status->setText("Bézier: edite os pontos e alças na mesa; Esc cancela gestos.");
+   });
+   connect(insert,&QAction::triggered,this,[this]{
+    view.prepareToolSwitch();
+    if(!view.armNativeInsertNode()){
+     status->setText("Bézier: selecione a curva primeiro, depois use Adicionar nó.");
+     return;
+    }
+    bezierToolActive_=true;
+    status->setText("Adicionar nó: clique na aresta selecionada; Esc cancela. Ctrl+Z desfaz.");
+   });
+   connect(remove,&QAction::triggered,this,[this]{
+    view.prepareToolSwitch();
+    if(!view.nativeDeleteSelected()){
+     status->setText("Excluir nó: entre em Editar âncoras, clique no nó e tente novamente.");
+     return;
+    }
+    recoveryPolicy_.edited();
+    status->setText("Nó Bézier excluído. Ctrl+Z restaura.");
+   });
+   menu.exec(curveToolButton->mapToGlobal(at));
+  });
   // Preserve old commands for rollback/tests, but hide redundant icons.
   buttons.at("nodes")->hide();
   buttons.at("bezier")->hide();
