@@ -277,6 +277,11 @@ if(NOT MSVC)
  target_compile_options(alencar_test19_8_scissors_span PRIVATE -O2 -Wall -Wextra -Wpedantic)
 endif()
 
+# Native Bezier in OFFLINE preview, Fill and v5 layer metadata.
+add_executable(alencar_test19_8_native_preview tests/preview_native_bezier_19_8_standalone.cpp src/boost_json_impl.cpp)
+target_include_directories(alencar_test19_8_native_preview PRIVATE src ${BOOST_JSON_INCLUDE_DIR})
+target_link_libraries(alencar_test19_8_native_preview PRIVATE minizip z)
+
 # Native Bezier diagnostic events (strict opt-in allowlist; no hardware).
 add_executable(alencar_test19_8_native_diagnostics tests/diagnostics_native_events_19_8_standalone.cpp)
 target_include_directories(alencar_test19_8_native_diagnostics PRIVATE src)
