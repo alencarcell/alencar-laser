@@ -1125,6 +1125,12 @@ public:
   return true;
  }
  bool nativeInsertNodeArmed()const{return nativeInsertArmed_;}
+ void nativeLayerChanged(){
+  if(!nativeSession_)return;
+  lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
+  updateNativePaths(true);
+  if(stateChanged)stateChanged();
+ }
  bool nativeModeActive()const{return nativeMode_;}
  bool nativeHistoryAvailable(bool redo)const{
   return nativeSession_&&(redo?nativeSession_->redoCount():nativeSession_->undoCount())>0;
@@ -3381,7 +3387,7 @@ public:
    if(curves&&view.nativeSelected()){
     check(curves->setLayer(*view.nativeSelected(),destination),
           "Não foi possível transferir Bézier nativa");
-    view.attachNative(curves.get());
+    view.nativeLayerChanged(); // retain selection + native Undo/Redo history
     recoveryPolicy_.edited();captureEvent("objects_layer_changed");
     status->setText("Bézier transferida para a camada ativa, com Undo e metadados.");
     return;
