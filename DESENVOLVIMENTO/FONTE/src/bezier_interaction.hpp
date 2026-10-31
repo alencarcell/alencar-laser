@@ -171,8 +171,8 @@ public:
  bool dragging()const{return dragging_.has_value()||contourMoving_.has_value();}
  // Draw Lines interaction: corner nodes are clicks, smooth nodes derive
  // symmetric tangents from click-and-drag. One atomic history entry.
- Key addEditablePath(std::vector<CurveNode> points,bool closed,int objectId){
-  if(dragging()||objectId<=0||points.size()<2||points.size()>20000||
+ Key addEditablePath(std::vector<CurveNode> points,bool closed,int objectId,int layer=0){
+  if(dragging()||objectId<=0||layer<0||points.size()<2||points.size()>20000||
      (closed&&points.size()<3))
    throw std::runtime_error("invalid native path creation");
   for(const auto& n:points){
@@ -184,7 +184,7 @@ public:
   for(const auto& old:committed().contours)
    if(old.key==key)throw std::runtime_error("native path ID already used");
   history_.change([&](CurveDocument& d){
-   CurveContour contour;contour.key=key;contour.closed=closed;
+   CurveContour contour;contour.key=key;contour.closed=closed;contour.layer=layer;
    for(auto p:points){
     p.id=d.nextId++;
     contour.nodes.push_back(p);
@@ -203,14 +203,14 @@ public:
   return key;
  }
  // Nova curva cúbica nativa com âncoras/alças e Ctrl+Z na mesma sessão.
- Key addEditableCubic(Pt a,Pt out,Pt in,Pt b,int objectId){
-  if(dragging()||objectId<=0||dist(a,b)<1e-6)
+ Key addEditableCubic(Pt a,Pt out,Pt in,Pt b,int objectId,int layer=0){
+  if(dragging()||objectId<=0||layer<0||dist(a,b)<1e-6)
    throw std::runtime_error("invalid cubic creation");
   const Key key{objectId,0};
   history_.change([&](CurveDocument& d){
    for(const auto& c:d.contours)if(c.key==key)
     throw std::runtime_error("duplicate native curve object");
-   CurveContour c;c.key=key;c.closed=false;c.edgeKind={1};
+   CurveContour c;c.key=key;c.closed=false;c.layer=layer;c.edgeKind={1};
    c.nodes.push_back({d.nextId++,a,a,out});
    c.nodes.push_back({d.nextId++,b,in,b});
    d.contours.push_back(std::move(c));
@@ -300,7 +300,7 @@ public:
    CurveContour& c=d.contours[index];
    if(c.closed){
     // Remove i->i+1; rotate remaining edges into an OPEN path.
-    CurveContour open;open.key=c.key;open.closed=false;
+    CurveContour open;open.key=c.key;open.closed=false;open.layer=c.layer;
     for(std::size_t k=0;k<n;++k)
      open.nodes.push_back(c.nodes[(edge+1+k)%n]);
     for(std::size_t k=0;k<n-1;++k)
@@ -317,7 +317,7 @@ public:
     c.edgeKind.pop_back();
    }else{
     // Interior removal: preserve left and right without a connecting edge.
-    CurveContour right;right.key={newObjectId,0};right.closed=false;
+    CurveContour right;right.key={newObjectId,0};right.closed=false;right.layer=c.layer;
     right.nodes.assign(c.nodes.begin()+static_cast<std::ptrdiff_t>(edge+1),c.nodes.end());
     right.edgeKind.assign(c.edgeKind.begin()+static_cast<std::ptrdiff_t>(edge+1),c.edgeKind.end());
     c.nodes.erase(c.nodes.begin()+static_cast<std::ptrdiff_t>(edge+1),c.nodes.end());
