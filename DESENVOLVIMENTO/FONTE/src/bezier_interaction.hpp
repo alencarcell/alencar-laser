@@ -217,6 +217,18 @@ public:
   });
   selected_=key;index_.reset();return key;
  }
+ bool setLayer(Key key,int layer){
+  if(dragging()||layer<0)return false;
+  bool found=false;
+  for(const auto& contour:committed().contours)
+   if(contour.key==key){found=true;if(contour.layer==layer)return true;break;}
+  if(!found)return false;
+  history_.change([&](CurveDocument& d){
+   for(auto& contour:d.contours)
+    if(contour.key==key){contour.layer=layer;break;}
+  });
+  index_.reset();return true;
+ }
  void select(Key key){
   if(dragging())throw std::runtime_error("cannot select while dragging");
   for(auto& c:history_.document().contours)if(c.key==key){selected_=key;return;}
