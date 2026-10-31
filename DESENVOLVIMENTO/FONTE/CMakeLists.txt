@@ -277,6 +277,13 @@ if(NOT MSVC)
  target_compile_options(alencar_test19_8_scissors_span PRIVATE -O2 -Wall -Wextra -Wpedantic)
 endif()
 
+# Native Bezier diagnostic events (strict opt-in allowlist; no hardware).
+add_executable(alencar_test19_8_native_diagnostics tests/diagnostics_native_events_19_8_standalone.cpp)
+target_include_directories(alencar_test19_8_native_diagnostics PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_8_native_diagnostics PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
+
 # Native Bezier scissors removal contract; portable and machine-independent.
 add_executable(alencar_test19_8_native_scissors_realcut tests/native_scissors_realcut_19_8_standalone.cpp)
 target_include_directories(alencar_test19_8_native_scissors_realcut PRIVATE src)
