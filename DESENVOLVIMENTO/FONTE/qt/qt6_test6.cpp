@@ -1165,6 +1165,9 @@ public:
    // existing QGraphicsPathItem paths leaves orphaned ghost curves.
    createNativeItems();
    if(diagnosticEvent)diagnosticEvent(redo?"bezier_redo":"bezier_undo",1);
+   if(toolWarning)toolWarning(QString("Bézier: ação %1. %2 curva(s) no desenho; cinza indica curva não selecionada.")
+     .arg(redo?"refeita":"desfeita")
+     .arg(nativeSession_->committed().contours.size()));
    if(stateChanged)stateChanged();
   }
  }
