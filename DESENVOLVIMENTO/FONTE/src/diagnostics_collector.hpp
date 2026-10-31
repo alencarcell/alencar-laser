@@ -58,7 +58,8 @@ public:
    // Keep the allowlist strict: these names never include path coordinates.
    "bezier_contour_scissor_cut","bezier_undo","bezier_redo",
    "native_draw_lines_created","bezier_node_inserted",
-   "bezier_contour_scaled","bezier_contour_rotated"};
+   "bezier_contour_scaled","bezier_contour_rotated",
+   "polyline_node_deleted","polyline_edge_deleted"};
   if(std::find(allow.begin(),allow.end(),event)==allow.end())throw std::invalid_argument("unknown diagnostic event");
   if(objects<0)throw std::invalid_argument("negative item count");
   ++counters_[event];
