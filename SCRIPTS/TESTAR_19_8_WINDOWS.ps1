@@ -157,6 +157,12 @@ try {
         Checar-Saida 'Compilacao do intervalo Fill por camada'
         & $intervalExe
         Checar-Saida 'Regressao de Line Interval por camada e metadata'
+        $nativePreviewSource = Join-Path $fontes 'tests\preview_native_bezier_19_8_standalone.cpp'
+        $nativePreviewExe = Join-Path $build 'preview_native_bezier_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $nativePreviewSource (Join-Path $fontes 'src\boost_json_impl.cpp') -lminizip -lz -o $nativePreviewExe
+        Checar-Saida 'Compilacao standalone da previa Bezier'
+        & $nativePreviewExe
+        Checar-Saida 'Previa Bezier fechada em Fill, camada e compatibilidade v5'
         $bedSource = Join-Path $fontes 'tests\preview_workarea_19_8_standalone.cpp'
         $bedExe = Join-Path $build 'preview_workarea_19_8_standalone.exe'
         & $gpp -std=c++20 -O2 -Wall -Wextra -I (Join-Path $fontes 'src') $bedSource (Join-Path $fontes 'src\boost_json_impl.cpp') -lminizip -lz -o $bedExe
