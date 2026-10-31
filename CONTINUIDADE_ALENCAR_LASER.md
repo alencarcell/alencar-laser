@@ -833,3 +833,12 @@ Registrar mudanças, testes e pendências.
 - **Gate:** o projeto permanece exclusivamente na branch `fix/curvas-tesoura-preflight-19-8-20261030`, PR #13 não homologada; `main`, `APLICATIVO`, liberação pública e comandos físicos GRBL intocados. Testar offline com laser desconectado e cópia de `.alaser` após passar CI Qt Windows.
 
 - **Complemento de segurança nesta rodada:** quando a ação `Excluir formas selecionadas` receber **25 ou mais objetos**, o Qt solicita aprovação explícita, com `Não` como padrão. Se o usuário cancelar, nenhum objeto é apagado, nenhuma transação de Undo é consumida e o cancelamento não vira `command_error`. Essa confirmação nunca interfere na remoção localizada de um nó/segmento. O teste Qt `drawAndJoin198Test` cobre cancelamento, confirmação e recuperação dos 25 objetos por Undo. Status: modificação publicada, ainda sujeita à compilação e teste manual.
+
+
+## 31/10/2026 — Integração autorizada do pacote Work na branch experimental
+
+- Base conferida no GitHub: `2739b2b43d9147844e782d06139eb0e3e2d258da`, branch `fix/curvas-tesoura-preflight-19-8-20261030`. Os 83 blobs do ZIP de fontes originais coincidem com a árvore remota; não havia commits posteriores na branch no início da integração. Atualização protegida por expected_sha, sem force.
+- Integradas somente quatro diferenças funcionais do pacote: CMake (Qt6::Network nos testes 15/16/17 e alvo de estresse), qt6_test6.cpp (contagem de grupos na exclusão em massa, regressão de menus locais e versão de diagnóstico 19.8), qt6_test17_mission.cpp (contrato atual de clique vazio/Escape) e novo teste local_edit_stress_work.cpp. Diferenças de newline final em outros arquivos foram descartadas; nenhum fonte anterior foi substituído em bloco.
+- O workflow Qt Windows foi ampliado para compilar os alvos alterados e executar a suíte offline: desenho/menus, 20 modos adicionais de GUI, TESTE_17 interação/singleton em DPR 1/2, persistência em processos separados e estresse de 3.230 casos. Evidências em artifact windows-work-regression.
+- Estado neste commit: testes Windows aguardam execução no GitHub Actions. Resultados Linux do pacote são históricos e não são prova Windows. Registrar os links e conclusões reais em complemento após a execução.
+- Main permanece em `397341d139d974e0f3d90b79ed28604e697a81b1`. Sem merge em main, sem instalação em APLICATIVO e sem liberação física. Validação manual com mouse/DPI, projeto real e recuperação após queda de energia permanece pendente.

@@ -1224,7 +1224,17 @@ public:
  std::function<bool(int)> approveBulkDeletion;
  bool deleteSelectedShapes(){
   if(nativeMode_||busy()||selected.empty())return false;
-  const int count=int(selected.size());
+  // deleteObjects expands grouped selections. Confirm the actual number of
+  // affected objects, even if the UI currently holds only one group member.
+  std::set<int> affected=selected,groups;
+  for(int id:selected){
+   const auto it=editor.state().objects.find(id);
+   if(it!=editor.state().objects.end()&&it->second.group>0)
+    groups.insert(it->second.group);
+  }
+  for(const auto& [id,meta]:editor.state().objects)
+   if(meta.group>0&&groups.count(meta.group))affected.insert(id);
+  const int count=int(affected.size());
   if(count>=25&&(!approveBulkDeletion||!approveBulkDeletion(count))){
    if(toolWarning)toolWarning("Exclusão de muitas formas cancelada; nenhum objeto removido.");
    return false;
@@ -5171,7 +5181,7 @@ static QJsonObject shapeOperationsTest(const QString& directory){
  v.rebuild();v.centerOn(QPointF(110,107));QApplication::processEvents();
  // Diagnóstico fica desligado até o usuário ativá-lo.
  check(w.captureDocument()["events_retained"].toInt()==0,"collector started automatically");
- check(w.captureDocument()["version"].toString()=="TESTE_19.7","diagnostic schema version");
+ check(w.captureDocument()["version"].toString()=="TESTE_19.8","diagnostic schema version");
  check(w.findChild<QLineEdit*>("wifi_ip_196")!=nullptr,"manual wifi IP missing");
  check(w.findChild<QSpinBox*>("wifi_port_196")!=nullptr,"manual TCP port missing");
  check(w.findChild<QMenuBar*>("webInspiredMenu")!=nullptr,"Web-style native menu missing");
@@ -6852,6 +6862,44 @@ static QJsonObject textFillAlign198Test(){
 }
 
 static QJsonObject drawAndJoin198Test(){
+ // Exercise the actual context menu via Qt events on coincident contours.
+ // Activation is explicit here; selection gestures are tested below.
+ QtEditorLab localEdit(Document{});
+ const int localTarget=localEdit.editor.rectangle({0,0},20,10);
+ localEdit.editor.rectangle({0,0},20,10);
+ localEdit.rebuild();localEdit.resize(600,400);localEdit.show();
+ localEdit.setTool(QtEditorLab::Tool::Select);localEdit.activate({localTarget,0});
+ localEdit.setTransform(QTransform::fromScale(10,10));localEdit.centerOn(10,5);
+ QApplication::processEvents();
+ const auto localBefore=localEdit.editor.state().doc;
+ auto invokeLocalMenu=[&](Pt at,const QString& actionText){
+  bool clicked=false;
+  QTimer::singleShot(0,[&](){
+   auto* popup=qobject_cast<QMenu*>(QApplication::activePopupWidget());
+   if(!popup)return;
+   for(auto* action:popup->actions())if(action->text()==actionText&&action->isEnabled()){
+    clicked=true;QTest::mouseClick(popup,Qt::LeftButton,Qt::NoModifier,
+                                 popup->actionGeometry(action).center());return;
+   }
+   popup->close();
+  });
+  const QPoint pos=localEdit.mapFromScene(toQt(at));
+  QContextMenuEvent event(QContextMenuEvent::Mouse,pos,localEdit.viewport()->mapToGlobal(pos));
+  QApplication::sendEvent(localEdit.viewport(),&event);
+  check(clicked,"Local context menu command was not available");
+ };
+ invokeLocalMenu({20,0},"Remover só este nó da forma selecionada");
+ auto expectedLocal=localBefore;
+ eraseNode(expectedLocal,{localTarget,0},get(localBefore,{localTarget,0})->nodes.at(1).id);
+ check(sameDoc(localEdit.editor.state().doc,expectedLocal),"Context menu deleted wrong node/object");
+ check(localEdit.editor.undo()&&sameDoc(localEdit.editor.state().doc,localBefore),"Context node Undo failed");
+ localEdit.rebuild();localEdit.activate({localTarget,0});
+ invokeLocalMenu({10,0},"Remover só este lado da forma selecionada");
+ Editor oracle(Document{});oracle.rectangle({0,0},20,10);oracle.rectangle({0,0},20,10);
+ oracle.removePolylineEdge({localTarget,0},0);
+ check(sameDoc(localEdit.editor.state().doc,oracle.state().doc),"Context menu deleted wrong edge/object");
+ check(localEdit.editor.undo()&&sameDoc(localEdit.editor.state().doc,localBefore),"Context edge Undo failed");
+ localEdit.close();
  // 575-object deletion was observed in a user diagnostics report. Protect
  // large selections while keeping single-side editing confirmation-free.
  QtEditorLab bulkGuard(Document{});
@@ -6871,6 +6919,24 @@ static QJsonObject drawAndJoin198Test(){
        "Confirmed mass deletion did not remove selected objects");
  check(bulkGuard.editor.undo()&&bulkGuard.editor.state().doc.contours.size()==25,
        "Undo did not recover confirmed mass deletion");
+ // A partial group selection still deletes every member in the engine.
+ // The approval count must agree with that expansion, not the UI count.
+ std::vector<int> members;
+ for(const auto& [id,meta]:bulkGuard.editor.state().objects)members.push_back(id);
+ bulkGuard.editor.group(members);
+ bulkGuard.selected={members.front()};
+ const auto groupedBefore=bulkGuard.editor.state().doc;
+ const auto groupedUndo=bulkGuard.editor.undoCount();
+ bulkGuard.approveBulkDeletion=[&](int count){++asked;check(count==25,"Wrong expanded group count");return false;};
+ check(!bulkGuard.deleteSelectedShapes()&&asked==3&&
+       sameDoc(groupedBefore,bulkGuard.editor.state().doc)&&
+       bulkGuard.editor.undoCount()==groupedUndo,
+       "Group cancellation changed geometry or history");
+ bulkGuard.approveBulkDeletion=[](int count){return count==25;};
+ check(bulkGuard.deleteSelectedShapes()&&bulkGuard.editor.state().doc.contours.empty(),
+       "Confirmed grouped deletion failed");
+ check(bulkGuard.editor.undo()&&sameDoc(groupedBefore,bulkGuard.editor.state().doc),
+       "Grouped deletion Undo changed identities");
  // Model invariant: complete a rectangle by magnetically joining its
  // two open endpoints, maintaining the SAME contour/object and undo unit.
  Editor editor(Document{});
@@ -7443,3 +7509,4 @@ int main(int argc,char** argv){
  QFile f(out+(mode=="--workspace-test"?"/RESULTADO_TESTE_19_2.json":mode=="--navigation-test"?"/RESULTADO_TESTE_19_1.json":mode=="--reopen"?"/REABERTURA_TESTE_6.json":"/RESULTADO_TESTE_6.json"));if(!f.open(QIODevice::WriteOnly))return 2;f.write(QJsonDocument(report).toJson());
  qInfo().noquote()<<mode<<report["status"].toString()<<report["error"].toString();return success?0:1;
 }
+

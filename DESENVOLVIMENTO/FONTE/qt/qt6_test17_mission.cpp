@@ -42,8 +42,15 @@ static void interaction17(const QString& folder){
   clickScene(w,toQt(mid));check(v.nativeSelected()==std::optional<Key>{{900,1}},"edge click picked wrong subpath");
   clickScene(w,toQt(mid),Qt::AltModifier);check(v.nativeSelected()==std::optional<Key>{{900,2}},"Alt did not cycle subpath");
   auto outside=v.mapFromScene(toQt(mid))+QPoint(0,int(std::ceil(10./v.viewport()->devicePixelRatioF())));
+  const auto beforeOutside=serialize(encodeCurves(w.curves->committed()));
+  check(pickCurveEdges(w.curves->committed(),fromQt(v.mapToScene(outside)),zoom,
+       v.viewport()->devicePixelRatioF(),6).empty(),"outside fixture lies within curve tolerance");
   QTest::mouseClick(v.viewport(),Qt::LeftButton,Qt::NoModifier,outside);QApplication::processEvents();
-  check(v.nativeSelected()==std::optional<Key>{{900,2}},"pixel selection tolerance expanded with scene zoom");
+  // Current editor deliberately leaves node editing on an empty-space click.
+  check(!v.nativeSelected(),"outside click selected a curve beyond pixel tolerance");
+  check(serialize(encodeCurves(w.curves->committed()))==beforeOutside,"outside click changed geometry");
+  clickButton(w,"bezier");clickScene(w,toQt(mid));clickScene(w,toQt(mid),Qt::AltModifier);
+  check(v.nativeSelected()==std::optional<Key>{{900,2}},"cannot reselect intended subpath after empty click");
   check(w.grab().save(folder+"/ZOOM_"+QString::number(zoom)+".png"),"zoom screenshot failed");
   // Insert must target the explicitly selected overlapping subpath.
   clickScene(w,toQt(mid),Qt::ShiftModifier);
@@ -57,6 +64,7 @@ static void interaction17(const QString& folder){
  drag17(w,{40,5},{15,-12},false,CurvePart::HandleOut);drag17(w,{30,25},{-12,9},false,CurvePart::HandleIn);drag17(w,{35,15},{9,6});
  auto before=state17(w);auto key=*v.nativeSelected();auto* cc=curveContour(w.curves->committed(),key);
  auto node=cc->nodes[1];drag17(w,node.anchor,{15,-10},true);check(state17(w)==before,"Escape changed state");
+ clickButton(w,"bezier"); // Escape now returns to the Selection tool.
  clickScene(w,toQt(node.anchor));pressKey(w,Qt::Key_Delete);check(curveContour(w.curves->committed(),key)->nodes.size()==2,"delete did not remove selected node");
  pressKey(w,Qt::Key_Z,Qt::ControlModifier);check(state17(w)==before,"delete undo lost identity");
  // An empty-space click must not change the document.
@@ -111,3 +119,4 @@ int main(int argc,char**argv){QApplication app(argc,argv);try{
  Document d;d.nextId=2;d.contours.push_back(Contour{{1,0},{{1,{10,10}}},false});LabWindow w(d);w.show();QApplication::processEvents();checkRendered(w);w.view.setTransform(QTransform::fromScale(6,6));w.view.centerOn(10,10);QApplication::processEvents();clickScene(w,{10,10});check(w.view.active()==std::optional<Key>{{1,0}},"isolated node not selectable");checkRendered(w);std::cout<<"SINGLETON PASS\n";
  }else if(QString(argv[1])=="--interaction"){QDir().mkpath(argv[2]);interaction17(argv[2]);}else{check(argc==4,"missing file args");persistence17(argv[1],argv[2],argv[3]);}return 0;
 }catch(const std::exception& e){std::cerr<<"TESTE17 FAIL "<<e.what()<<"\n";return 1;}}
+
