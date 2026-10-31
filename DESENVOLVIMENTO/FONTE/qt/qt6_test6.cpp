@@ -1143,12 +1143,15 @@ public:
   for(const auto& [id,_]:editor.state().objects)next=std::max(next,id+1);
   for(const auto& c:nativeSession_->committed().contours)next=std::max(next,c.key.object+1);
   if(!nativeSession_->cutContourAtEdge(hits.front(),next))return false;
+  const Key cutKey=hits.front().key;
+  const int cutEdge=hits.front().edge;
   clearScissorHover(); // Remove orange preview together with actual edge.
   // Remain in Scissors tool, do not silently switch into selection.
   nativeMode_=false;nativeEditHandles_=false;
   createNativeItems();updateNativePaths(true);
-  lastNativeAction_=true;
+  lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
   if(diagnosticEvent)diagnosticEvent("bezier_contour_scissor_cut",1);
+  if(scissorDetail)scissorDetail("cut_native",cutKey.object,cutEdge);
   if(stateChanged)stateChanged();
   return true;
  }
@@ -1161,6 +1164,7 @@ public:
    // Undo/Redo can CREATE or REMOVE entire native paths. Updating only
    // existing QGraphicsPathItem paths leaves orphaned ghost curves.
    createNativeItems();
+   if(diagnosticEvent)diagnosticEvent(redo?"bezier_redo":"bezier_undo",1);
    if(stateChanged)stateChanged();
   }
  }
@@ -1534,9 +1538,18 @@ public:
   if(bezierDrawing_)clearBezierDraft();
   if(marqueeActive_)clearMarquee();
  }
- void history(bool redo){if(busy())return;if(redo?editor.redo():editor.undo()){
-  active_.reset();selected.clear();rebuild();if(diagnosticEvent)diagnosticEvent(redo?"redo":"undo",1);
- }}
+ // One dispatch point for toolbar, shortcuts, viewport keys and context menu.
+ // A scissors cut can remove the LAST native contour and leave nativeMode_ off;
+ // its Undo/Redo must still target the native history, not polylines.
+ void history(bool redo){
+  if(busy())return;
+  if(shouldUseNativeHistory(redo)){nativeHistory(redo);return;}
+  if(redo?editor.redo():editor.undo()){
+   lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
+   active_.reset();selected.clear();rebuild();
+   if(diagnosticEvent)diagnosticEvent(redo?"redo":"undo",1);
+  }
+ }
  void clearSelection(){bool hadActive=active_.has_value();active_.reset();selected.clear();applySelectionStyles();if(hadActive)viewport()->update();}
  void selectAllVisible(){
   if(nativeMode_||busy())return;
@@ -2265,7 +2278,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    }
    if(e->modifiers().testFlag(Qt::ControlModifier)&&!nativePressing_&&
       (e->key()==Qt::Key_Z||e->key()==Qt::Key_Y)){
-    nativeHistory(e->key()==Qt::Key_Y||e->modifiers().testFlag(Qt::ShiftModifier));
+    history(e->key()==Qt::Key_Y||e->modifiers().testFlag(Qt::ShiftModifier));
     e->accept();return;
    }
   }
@@ -2578,7 +2591,9 @@ public:
     {"polyline_nodes",double(countNodes(view.editor.state().doc))},
     {"bezier_contours",int(curves?curves->committed().contours.size():0)},
     {"selected_polyline_objects",int(view.selected.size())},
-    {"undo_available",int(view.editor.undoCount())},{"redo_available",int(view.editor.redoCount())}}},
+    {"undo_available",int(view.editor.undoCount())},{"redo_available",int(view.editor.redoCount())},
+    {"bezier_undo_available",int(curves?curves->undoCount():0)},
+    {"bezier_redo_available",int(curves?curves->redoCount():0)}}},
    {"performance",QJsonObject{{"paint_samples",int(view.paintMs.size())},
       {"paint_p50_ms",percentile(view.paintMs,.5)},
       {"paint_p95_ms",percentile(view.paintMs,.95)},
@@ -2905,14 +2920,8 @@ public:
   add(quickRow,"save","Salvar",[this]{save();});
   add(quickRow,"save_as","Salvar como...",[this]{saveAs();});
   quickRow->addSpacing(12);
-  add(quickRow,"undo","↶ Desfazer",[this]{
-   if(view.shouldUseNativeHistory(false)){if(curves&&curves->dragging())return;view.nativeHistory(false);status->setText("Bézier: desfeito");}
-   else view.history(false);
-  });
-  add(quickRow,"redo","↷ Refazer",[this]{
-   if(view.shouldUseNativeHistory(true)){if(curves&&curves->dragging())return;view.nativeHistory(true);status->setText("Bézier: refeito");}
-   else view.history(true);
-  });
+  add(quickRow,"undo","↶ Desfazer",[this]{view.history(false);});
+  add(quickRow,"redo","↷ Refazer",[this]{view.history(true);});
   add(quickRow,"preview_virtual","Prévia virtual",[this]{
    alaser::sim198::showPreviewDialog(this,view.editor.state(),
        workspaceCfg_.machineWidth,workspaceCfg_.machineHeight,
@@ -4007,9 +4016,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    };
   shortcut("Alt+J",[joinEndsAction]{joinEndsAction->trigger();});
   shortcut("Ctrl+Shift+C",[convertTextPaths]{convertTextPaths->click();});
-  shortcut("Ctrl+Z",[this]{if(view.shouldUseNativeHistory(false)){if(curves&&!curves->dragging())view.nativeHistory(false);}else view.history(false);});
-  shortcut("Ctrl+Y",[this]{if(view.shouldUseNativeHistory(true)){if(curves&&!curves->dragging())view.nativeHistory(true);}else view.history(true);});
-  shortcut("Ctrl+Shift+Z",[this]{if(view.shouldUseNativeHistory(true)){if(curves&&!curves->dragging())view.nativeHistory(true);}else view.history(true);});
+  shortcut("Ctrl+Z",[this]{view.history(false);});
+  shortcut("Ctrl+Y",[this]{view.history(true);});
+  shortcut("Ctrl+Shift+Z",[this]{view.history(true);});
   shortcut("Ctrl+S",[this]{save();});shortcut("Ctrl+O",[this]{open();});
   shortcut("Ctrl+Shift+S",[this]{saveAs();});shortcut("Ctrl+Shift+O",[this]{openOther();});
   shortcut("Delete",[this]{
