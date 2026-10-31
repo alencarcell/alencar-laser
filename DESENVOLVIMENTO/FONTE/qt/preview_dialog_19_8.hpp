@@ -172,8 +172,10 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  settingsColumn->setContentsMargins(5,4,5,4);
  settingsColumn->setSpacing(4);
  auto* note=new QLabel(
-   "PREVIA EXPERIMENTAL OFFLINE: contornos Line, Fill vetorial e bitmap P&B "
-   "com trajetorias de varredura simplificadas; overscan apenas visual. "
+   "PREVIA EXPERIMENTAL OFFLINE: Line, curvas Bézier v5 (abertas/fechadas), "
+   "Fill vetorial e bitmap P&B. Curvas nativas fechadas sao uma unica forma "
+   "editavel no projeto; apenas a previa cria segmentos temporarios. " 
+   "Varredura e overscan simplificados, somente visuais. "
    "Nao replica o planejador GRBL/LightBurn, nem calibra potencia ou movimento fisico. "
    "Sem envio de G-code, rede ou comandos ao laser.");
  note->setWordWrap(true);settingsColumn->addWidget(note);
