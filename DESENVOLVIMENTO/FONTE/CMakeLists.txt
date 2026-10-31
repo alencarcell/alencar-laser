@@ -282,6 +282,13 @@ add_executable(alencar_test19_8_native_preview tests/preview_native_bezier_19_8_
 target_include_directories(alencar_test19_8_native_preview PRIVATE src ${BOOST_JSON_INCLUDE_DIR})
 target_link_libraries(alencar_test19_8_native_preview PRIVATE ${MINIZIP_LIBRARY} ZLIB::ZLIB)
 
+# TESTE_19.8: delete only node/side of selected contour, Undo/Redo safety.
+add_executable(alencar_test19_8_selected_local_edit tests/selected_local_edit_19_8_standalone.cpp)
+target_include_directories(alencar_test19_8_selected_local_edit PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_8_selected_local_edit PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
+
 # Native Bezier diagnostic events (strict opt-in allowlist; no hardware).
 add_executable(alencar_test19_8_native_diagnostics tests/diagnostics_native_events_19_8_standalone.cpp)
 target_include_directories(alencar_test19_8_native_diagnostics PRIVATE src)
