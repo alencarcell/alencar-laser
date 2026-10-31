@@ -62,6 +62,15 @@ int main(){
          "redo of native layer failed");
   expect(sim198::withNativeCurves(editor.state(),nullptr).paths==0,
          "legacy no-native preview changed");
+  // Real-world diagnostic: a saved Bezier can point to a layer no longer
+  // present in the document. The preview must count the substitution and
+  // NEVER rewrite the original object's layer. Qt displays a warning.
+  CurveDragSession missing(CurveDocument{});
+  missing.addEditableCubic({65,65},{70,61},{75,70},{80,65},900,999);
+  const auto fallback=sim198::withNativeCurves(editor.state(),&missing.committed());
+  expect(fallback.missingLayers==1&&fallback.paths==1&&
+         missing.committed().contours.front().layer==999,
+         "missing-layer fallback not counted or corrupted native source");
   std::cout<<"PASS: Bezier v5 closed Fill/open Line offline, layer/codec, Undo/Redo and source untouched\n";
   return 0;
  }catch(const std::exception& e){
