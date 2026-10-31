@@ -309,6 +309,7 @@ class QtEditorLab final:public QGraphicsView{
  CurveDragSession* nativeSession_=nullptr;
  bool nativeMode_=false;
  bool nativeEditHandles_=false; // Select mode moves native contours; Bézier mode edits anchors/handles.
+ bool nativeInsertArmed_=false; // Single click on selected Bezier edge adds anchor, menu-only action.
  bool lastNativeAction_=false;
  uint64_t lastEditorGenerationSeen_=0;
  bool fillPreview_=false; // Editor LightBurn mostra linhas por padrao.
@@ -991,7 +992,7 @@ private:
   const QPointF pos=mapToScene(e->position().toPoint());Pt click=fromQt(pos);
   const double zoom=nativePxPerMm(),dpr=viewport()->devicePixelRatioF();
   const bool alt=e->modifiers().testFlag(Qt::AltModifier);
-  const bool insert=e->modifiers().testFlag(Qt::ShiftModifier);
+  const bool insert=e->modifiers().testFlag(Qt::ShiftModifier)||nativeInsertArmed_;
   // Ctrl+arraste: deslocar o contorno Bézier completo sem mexer em alças isoladas.
   if(e->modifiers().testFlag(Qt::ControlModifier)){
    const auto hits=nativeSession_->pickEdges(click,zoom,dpr,6);
@@ -1032,6 +1033,9 @@ private:
     // Evita criar pontos quase coincidentes com as ancoras de extremidade.
     if(hit.t>=0.015&&hit.t<=0.985){
      const int64_t node=nativeSession_->insertAnchor(hit,hit.t);
+     nativeInsertArmed_=false;
+     lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
+     if(diagnosticEvent)diagnosticEvent("bezier_node_inserted",1);
      nativeSelectedPart_=CurveHit{hit.key,-1,node,CurvePart::Anchor,0,0,hit.point};
     }
    }
@@ -1095,6 +1099,7 @@ public:
  QPainterPath nativeItemPath(Key key)const{return nativeItems_.at(key)->path();}
  // A sessao deve estar viva durante todo o periodo em que estiver anexada.
  void attachNative(CurveDragSession* session){
+  nativeInsertArmed_=false;
   if((nativePressing_||nativeContourPressing_)&&nativeSession_)nativeSession_->cancel();
   nativePressing_=false;nativeContourPressing_=false;nativeMode_=false;
   nativeEditHandles_=false;
@@ -1104,6 +1109,7 @@ public:
  }
  void enableNative(bool enabled){
   if(busy())return;
+  if(!enabled)nativeInsertArmed_=false;
   nativeMode_=enabled&&hasNativeDocument();
   nativeEditHandles_=nativeMode_;
   if(nativeMode_){tool=Tool::Select;viewport()->setCursor(Qt::ArrowCursor);}
@@ -1111,6 +1117,14 @@ public:
  }
  bool nativeSelectionMode()const{return nativeMode_&&!nativeEditHandles_;}
  bool nativeEditingMode()const{return nativeMode_&&nativeEditHandles_;}
+ bool armNativeInsertNode(){
+  if(busy()||!nativeSession_||!nativeSession_->selected())return false;
+  enableNative(true);
+  if(!nativeMode_)return false;
+  nativeInsertArmed_=true;
+  return true;
+ }
+ bool nativeInsertNodeArmed()const{return nativeInsertArmed_;}
  bool nativeModeActive()const{return nativeMode_;}
  bool nativeHistoryAvailable(bool redo)const{
   return nativeSession_&&(redo?nativeSession_->redoCount():nativeSession_->undoCount())>0;
@@ -1512,6 +1526,7 @@ public:
   if(polylineDrawing_&&t!=Tool::Line)finishPolyline(false);
   if(bezierDrawing_&&t!=Tool::DrawBezier)finishBezierDraft(false);
   if(!busy()){
+   nativeInsertArmed_=false;
    clearScissorHover();nativeMode_=false;tool=t;
    viewport()->setCursor(Qt::ArrowCursor);viewport()->update();
   }
@@ -1528,6 +1543,7 @@ public:
   if(busy())cancelCurrentGesture();
  }
  void cancelCurrentGesture(){
+  nativeInsertArmed_=false;
   if(rasterDragging_||rasterResizing_){
    rasterRect_=rasterStartRect_;
    rasterDragging_=rasterResizing_=false;updateRasterVisual();
@@ -2303,6 +2319,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    pendingPreview_->setPath(temporaryShape());viewport()->update();
   }
    if(e->key()==Qt::Key_Escape){
+    if(nativeInsertArmed_){nativeInsertArmed_=false;viewport()->update();e->accept();return;}
     if(transformDragging_){cancelSelectionTransform();e->accept();return;}
     if(bezierDrawing_){clearBezierDraft();e->accept();return;}
     if(polylineDrawing_){clearPolyline();e->accept();return;}
