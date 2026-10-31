@@ -6883,6 +6883,21 @@ static QJsonObject drawAndJoin198Test(){
  QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,hitAgain);
  check(ui.view.nativeSelectionMode()&&ui.view.nativeSelected(),
        "Selecao apos Tesoura/Undo nao reencontrou a curva");
+ check(ui.findChild<QPushButton*>("new_bezier")->contextMenuPolicy()==Qt::CustomContextMenu,
+       "Menu de clique direito para adicionar/excluir nos Bezier indisponivel");
+ const auto anchorsBefore=ui.committedCurves()->contours.front().nodes.size();
+ check(ui.view.armNativeInsertNode()&&ui.view.nativeInsertNodeArmed(),
+       "Menu Adicionar no nao armou clique nativo");
+ const QPoint insertHere=ui.view.mapFromScene(
+     ui.view.nativeItemPath(nativeKey).pointAtPercent(.63));
+ QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,insertHere);
+ QApplication::processEvents();
+ check(ui.committedCurves()->contours.front().nodes.size()==anchorsBefore+1&&
+       !ui.view.nativeInsertNodeArmed(),
+       "Adicionar no nao inseriu ancora na aresta ou permaneceu armado");
+ clickButton(ui,"undo");
+ check(ui.committedCurves()->contours.front().nodes.size()==anchorsBefore,
+       "Desfazer insercao nao restaurou quantidade original de nos");
  clickButton(ui,"delete_shapes");
  check(ui.view.nativeItemCount()==0,
        "Botao Excluir formas nao removeu curva Bézier selecionada");
