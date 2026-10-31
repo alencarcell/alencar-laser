@@ -1156,16 +1156,20 @@ public:
   if(stateChanged)stateChanged();
   return true;
  }
- bool cutNativeAt(Pt click){
+ // Optional object guard prevents the contextual "remove ONLY this side"
+ // command from cutting a coincident curve belonging to another object.
+ bool cutNativeAt(Pt click,std::optional<Key> onlySelected=std::nullopt){
   if(!nativeSession_||!hasNativeDocument())return false;
   const auto hits=nativeSession_->pickEdges(click,nativePxPerMm(),viewport()->devicePixelRatioF(),9);
-  if(hits.empty())return false;
+  const auto picked=std::find_if(hits.begin(),hits.end(),
+    [&](const CurveHit& hit){return !onlySelected||hit.key==*onlySelected;});
+  if(picked==hits.end())return false;
   int next=1;
   for(const auto& [id,_]:editor.state().objects)next=std::max(next,id+1);
   for(const auto& c:nativeSession_->committed().contours)next=std::max(next,c.key.object+1);
-  if(!nativeSession_->cutContourAtEdge(hits.front(),next))return false;
-  const Key cutKey=hits.front().key;
-  const int cutEdge=hits.front().edge;
+  if(!nativeSession_->cutContourAtEdge(*picked,next))return false;
+  const Key cutKey=picked->key;
+  const int cutEdge=picked->edge;
   clearScissorHover(); // Remove orange preview together with actual edge.
   // Remain in Scissors tool, do not silently switch into selection.
   nativeMode_=false;nativeEditHandles_=false;
