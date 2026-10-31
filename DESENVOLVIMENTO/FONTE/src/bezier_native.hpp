@@ -22,6 +22,7 @@ struct CurveContour {
  std::vector<CurveNode> nodes;
  std::vector<uint8_t> edgeKind; // 0=reta, 1=cubica; tamanho n-1 (aberto) ou n (fechado)
  bool closed=false;
+ int layer=0; // layer of this native object, persisted in bezier-1 (legacy default 0)
 };
 struct CurveDocument {std::vector<CurveContour> contours;int64_t nextId=1;};
 struct Cubic {Pt p0,p1,p2,p3;};
@@ -39,7 +40,8 @@ inline void validateCurve(const CurveDocument& d){
  for(auto& c:d.contours){
   if(seen[c.key])throw std::runtime_error("duplicate curve key");
   seen[c.key]=true;
-  if(c.nodes.size()<2||(c.closed&&c.nodes.size()<3)||c.edgeKind.size()!=edgeCount(c))throw std::runtime_error("invalid curve topology");
+  if(c.nodes.size()<2||(c.closed&&c.nodes.size()<3)||c.edgeKind.size()!=edgeCount(c)||c.layer<0)
+    throw std::runtime_error("invalid curve topology/layer");
   for(auto e:c.edgeKind)if(e>1)throw std::runtime_error("unsupported curve edge");
   for(auto& n:c.nodes){
    if(n.id<=0||ids[n.id])throw std::runtime_error("duplicate curve node ID");
