@@ -17,6 +17,7 @@
 #include <QTextEdit>
 #include <QVBoxLayout>
 #include <QXmlStreamReader>
+#include <algorithm>
 #include <stdexcept>
 #include <vector>
 
@@ -70,7 +71,7 @@ inline LightBurnSummary readLightBurn(const QString& path){
  bool inProject=false,inSetting=false;
  struct ShapeFrame {QString type;bool hasPrims=false;};
  std::vector<ShapeFrame> shapeStack;
- static const QRegularExpression primitivePattern(R"(([LB])(\\d+)\\s+(\\d+))");
+ static const QRegularExpression primitivePattern(R"(([LB])(\d+)\s+(\d+))");
  LightBurnSummary::Setting current;
  static const QRegularExpression anchorPattern(R"(V(?=\s*[-+]?\d))");
  static const QRegularExpression bezierPattern(R"(B\s*\d+\s+\d+)");
