@@ -4543,6 +4543,11 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* minPixels=new QSpinBox;minPixels->setRange(1,500);minPixels->setValue(5);
   auto* optimize=new QDoubleSpinBox;optimize->setRange(0,2);optimize->setDecimals(2);optimize->setSingleStep(.1);optimize->setValue(.45);
   auto* smooth=new QCheckBox("Arredondamento leve (pode deformar cantos)");
+   auto* antiStaircase=new QCheckBox("Reduzir serrilhado de pixels (preserva cantos)");
+   antiStaircase->setObjectName("trace_anti_staircase_19_8");
+   antiStaircase->setChecked(true);
+   antiStaircase->setToolTip("Suavização conservadora de microdegraus no raster, sem achatar as curvas Bézier. "
+      "Revise vazados e texto pequeno; pode ser desativada.");
   auto* width=new QDoubleSpinBox;width->setRange(1,400);width->setSuffix(" mm");width->setValue(view.rasterBounds().width());
   auto* traceProfile=new QComboBox;
   traceProfile->addItem("Automático (Otsu)");
@@ -4551,7 +4556,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   traceProfile->setToolTip("Pré-ajustes; nenhum reconhece magicamente o conteúdo. Confira o resultado.");
   form->addRow("Perfil de limpeza",traceProfile);
   form->addRow("Limiar P&B",threshold);form->addRow("Ignorar ilhas menores",minPixels);
-  form->addRow("Otimizar (px)",optimize);form->addRow("Suavizar",smooth);
+  form->addRow("Otimizar (px)",optimize);
+   form->addRow("Anti-serrilhado",antiStaircase);
+   form->addRow("Arredondar cantos (opcional)",smooth);
   form->addRow("Largura física",width);
   auto* preview=new TracePreviewCanvas198(&dlg);
   preview->setMinimumHeight(280);
@@ -4599,15 +4606,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   connect(optimize,QOverload<double>::of(&QDoubleSpinBox::valueChanged),&dlg,[&](double){stale();});
   connect(width,QOverload<double>::of(&QDoubleSpinBox::valueChanged),&dlg,[&](double){stale();});
   connect(smooth,&QCheckBox::toggled,&dlg,[&](bool){stale();});
+   connect(antiStaircase,&QCheckBox::toggled,&dlg,[&](bool){stale();});
   connect(traceProfile,QOverload<int>::of(&QComboBox::currentIndexChanged),&dlg,[&](int profile){
    if(profile==0){
     threshold->setValue(std::clamp(trace198::otsuThreshold(trace198::grayscale(
       view.rasterImage().scaled(960,960,Qt::KeepAspectRatio,Qt::SmoothTransformation))),1,254));
-    minPixels->setValue(5);optimize->setValue(.45);smooth->setChecked(false);
+    minPixels->setValue(5);optimize->setValue(.45);
+    smooth->setChecked(false);antiStaircase->setChecked(true);
    }else if(profile==1){
-    minPixels->setValue(12);optimize->setValue(.65);smooth->setChecked(false);
+    minPixels->setValue(12);optimize->setValue(.65);
+    smooth->setChecked(false);antiStaircase->setChecked(true);
    }else{
-    minPixels->setValue(2);optimize->setValue(.15);smooth->setChecked(false);
+    minPixels->setValue(2);optimize->setValue(.15);
+    smooth->setChecked(false);antiStaircase->setChecked(false);
    }
    stale();
   });
@@ -4616,7 +4627,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    try{
     trace198::Options opts;opts.threshold=threshold->value();
     opts.minPixels=minPixels->value();opts.optimizePx=optimize->value();
-    opts.smooth=smooth->isChecked();opts.widthMm=width->value();
+    opts.smooth=smooth->isChecked();opts.antiStaircase=antiStaircase->isChecked();
+    opts.widthMm=width->value();
     prepared=trace198::trace(view.rasterImage(),opts);
     // Nao perder o zoom escolhido quando o usuario muda limiar/otimizacao.
     preview->showResult(view.rasterImage(),prepared->binary,opts.widthMm,prepared->contours);
