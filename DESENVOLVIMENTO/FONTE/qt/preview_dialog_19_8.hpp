@@ -278,6 +278,20 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  boundsWarning->setMinimumHeight(36);
  settingsColumn->addWidget(restrictBed);
  column->addWidget(boundsWarning);
+ // Missing source layers are a project-consistency warning, NOT a bed warning.
+ // A fallback preview can have the wrong Fill interval, speed or visibility.
+ auto* nativeLayerWarning=new QLabel;
+ nativeLayerWarning->setObjectName("preview_native_layer_warning_19_8");
+ nativeLayerWarning->setWordWrap(true);
+ nativeLayerWarning->setStyleSheet("color:#FFD48A; background:#3A2919; padding:7px; border:1px solid #CE8235;");
+ nativeLayerWarning->setText(QString(
+   "ATENÇÃO — %1 curva(s) Bézier associadas a camadas que não existem neste projeto. "
+   "A prévia usa uma camada substituta; modo Fill, velocidade e intervalo podem estar incorretos. "
+   "Volte ao editor, selecione a Bézier e use 'Enviar seleção para camada ativa'. "
+   "A arte original foi preservada e os comandos físicos continuam bloqueados.")
+   .arg(qulonglong(nativePreview.missingLayers)));
+ nativeLayerWarning->setVisible(nativePreview.missingLayers>0);
+ column->addWidget(nativeLayerWarning);
  auto* useLayerFeeds=new QCheckBox("Utilizar velocidades virtuais salvas por camada");
  useLayerFeeds->setChecked(true);
  useLayerFeeds->setToolTip("Velocidade e passes de cada camada influenciam a simulacao. Potencia/M3/M4 continuam apenas registrados.");
@@ -478,6 +492,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"native_bezier_open",int(nativePreview.open)},
    {"native_bezier_virtual_segments",int(nativePreview.segments)},
    {"native_bezier_missing_layer_fallbacks",int(nativePreview.missingLayers)},
+   {"native_bezier_layer_mapping_requires_review",nativePreview.missingLayers>0},
    {"native_bezier_source_unchanged",true},
    {"experimental",true},{"machine_commands_sent",false},
    {"model","kinematic-start-stop-angular-runs-12deg"},
