@@ -498,7 +498,8 @@ class QtEditorLab final:public QGraphicsView{
    for(const auto& [id,_]:editor.state().objects)obj=std::max(obj,id+1);
    for(const auto& c:nativeSession_->committed().contours)
     obj=std::max(obj,c.key.object+1);
-   const Key key=nativeSession_->addEditablePath(std::move(points),closed,obj);
+   const Key key=nativeSession_->addEditablePath(std::move(points),closed,obj,
+      drawingLayer?drawingLayer():0);
    lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
    createNativeItems();
    ++toolCreates;
@@ -2928,7 +2929,7 @@ public:
   add(quickRow,"preview_virtual","Prévia virtual",[this]{
    alaser::sim198::showPreviewDialog(this,view.editor.state(),
        workspaceCfg_.machineWidth,workspaceCfg_.machineHeight,
-       view.rasterImage(),view.rasterBounds());
+       view.rasterImage(),view.rasterBounds(),curves?&curves->committed():nullptr);
   })->setToolTip("Simular caminhos Line e tempo nominal. Nenhum envio físico.");
   // Substituir textos repetitivos por glifos com dica e nomes acessiveis.
   const std::vector<std::tuple<QString,QString,QString>> quickIcons={
@@ -3316,9 +3317,18 @@ public:
     refresh();layers->setCurrentIndex(layers->findData(id));
   });inspector->addLayout(layerActions);
   addVertical(inspector,"move_layer","→ Enviar seleção para camada ativa",[this]{
-   check(!bezierToolActive_,"Transferencia de camada: selecione polilinhas.");
+   const int destination=layers->currentData().toInt();
+   check(view.editor.state().layers.count(destination)>0,"Camada de destino ausente");
+   if(curves&&view.nativeSelected()){
+    check(curves->setLayer(*view.nativeSelected(),destination),
+          "Não foi possível transferir Bézier nativa");
+    view.attachNative(curves.get());
+    recoveryPolicy_.edited();captureEvent("objects_layer_changed");
+    status->setText("Bézier transferida para a camada ativa, com Undo e metadados.");
+    return;
+   }
    const auto ids=selection();check(!ids.empty(),"Selecione formas e depois a camada de destino.");
-   view.editor.moveSelectionToLayer(ids,layers->currentData().toInt());view.rebuild();
+   view.editor.moveSelectionToLayer(ids,destination);view.rebuild();
    captureEvent("objects_layer_changed",int(ids.size()));
   });
   inspector->addSpacing(12);inspector->addWidget(titleLabel("ORGANIZAÇÃO"));
@@ -4442,7 +4452,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const Pt in{b.x-span/3.,b.y-span*.5};
   view.attachNative(nullptr);
   if(!curves)curves=std::make_unique<CurveDragSession>(CurveDocument{});
-  const Key key=curves->addEditableCubic(a,out,in,b,nextObject);
+  const Key key=curves->addEditableCubic(a,out,in,b,nextObject,layers->currentData().toInt());
   view.attachNative(curves.get());
   bezierToolActive_=true;view.enableNative(true);
   recoveryPolicy_.edited();captureEvent("bezier_curve_created");
