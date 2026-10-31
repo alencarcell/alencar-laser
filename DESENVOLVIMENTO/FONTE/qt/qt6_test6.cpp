@@ -2951,9 +2951,9 @@ public:
   // Substituir textos repetitivos por glifos com dica e nomes acessiveis.
   const std::vector<std::tuple<QString,QString,QString>> quickIcons={
    {"open","open","Abrir projeto"},
-   {"open_other","open","Abrir outro projeto"},
+   {"open_other","open_other","Abrir outro projeto"},
    {"save","save","Salvar"},
-   {"save_as","save","Salvar como"},
+   {"save_as","save_as","Salvar como"},
    {"undo","undo","Desfazer (Ctrl+Z)"},
    {"redo","redo","Refazer (Ctrl+Y)"},
    {"preview_virtual","preview","Prévia virtual — simulação offline"}
@@ -2961,19 +2961,20 @@ public:
   for(const auto& [id,glyph,tip]:quickIcons){
    auto* button=buttons.at(id);
    button->setText("");button->setIcon(alaser::toolGlyph(glyph));
-   button->setIconSize(QSize(20,20));button->setFixedSize(35,32);
+   button->setIconSize(QSize(20,20));button->setFixedSize(33,32);
    button->setToolTip(tip);button->setAccessibleName(tip);
   }
   auto* editIcons=new QFrame;
   editIcons->setObjectName("quickEditIcons_19_8");
   auto* iconRow=new QHBoxLayout(editIcons);
   iconRow->setContentsMargins(0,0,0,0);iconRow->setSpacing(2);
+  iconRow->setAlignment(Qt::AlignVCenter);
   const auto iconButton=[this,iconRow](const QString& object,
                                      const QString& glyph,const QString& help,
                                      std::function<void()> click){
     auto* item=new QToolButton(this);
     item->setObjectName(object);item->setIcon(alaser::toolGlyph(glyph));
-    item->setIconSize(QSize(19,19));item->setFixedSize(29,29);
+    item->setIconSize(QSize(20,20));item->setFixedSize(32,32);
     item->setToolTip(help);item->setAccessibleName(help);
     item->setFocusPolicy(Qt::NoFocus);
     connect(item,&QToolButton::clicked,this,[this,click]{run(click);});
@@ -2997,6 +2998,7 @@ public:
        check(action!=nullptr,"Comando de alinhamento indisponível.");
        action->trigger();
       });
+   if(mode==1)iconRow->addSpacing(7); // bordas X | bordas Y
   }
   // LightBurn-like distinction: six directional alignments, both centers,
   // then positioning the WHOLE selection on the configured machine bed.
