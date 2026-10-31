@@ -6954,7 +6954,37 @@ static QJsonObject drawAndJoin198Test(){
        "Interrupted native contour drag blocked changing tools");
  QTest::mouseRelease(recoveryViewport,Qt::LeftButton,Qt::NoModifier,pressAt);
  recoveryUi.close();
+ // Synthetic LBRN2 only: NEVER check in user projects, support data or logs.
+ QTemporaryDir fixtureDir;
+ check(fixtureDir.isValid(),"LightBurn inspector test temporary directory failed");
+ const QString fixtureName=fixtureDir.filePath("nested_strokes_test.lbrn2");
+ QFile fixtureFile(fixtureName);
+ check(fixtureFile.open(QIODevice::WriteOnly),"LightBurn test file not writable");
+ const QByteArray nestedXml=R"LB(<?xml version="1.0" encoding="UTF-8"?>
+<LightBurnProject AppVersion="2.1.00" DeviceName="GRBL" FormatVersion="1">
+ <Shape Type="Group"><XForm>1 0 0 1 10 20</XForm><Children>
+  <Shape Type="Group"><XForm>1 0 0 1 2 3</XForm><Children>
+   <Shape Type="Path" CutIndex="0"><XForm>1 0 0 1 0 0</XForm>
+    <VertList>V0 0V10 0V10 10</VertList><PrimList>L0 1L1 2L2 0</PrimList></Shape>
+  </Children></Shape>
+  <Shape Type="Path" CutIndex="0"><XForm>1 0 0 1 0 0</XForm>
+   <VertList>V0 0V1 1V2 2</VertList><PrimList>L0 0L1 2L2 2</PrimList></Shape>
+ </Children></Shape>
+</LightBurnProject>)LB";
+ fixtureFile.write(nestedXml);fixtureFile.close();
+ const auto inspected=reference::readLightBurn(fixtureName);
+ check(inspected.valid&&inspected.count==4&&inspected.groups==2&&
+       inspected.maxShapeDepth==3&&inspected.types.value("Path")==2&&
+       inspected.disconnectedTransitions==1&&inspected.zeroLengthPrimitives==2,
+       "Nested LightBurn scan-stroke inventory lost groups, breaks or degenerate lines");
+ bool rejectedUnsafeImport=false;
+ try{const auto attempted=lightburn::readGeometry(fixtureName);(void)attempted;}
+ catch(const std::exception&){rejectedUnsafeImport=true;}
+ check(rejectedUnsafeImport,
+       "Importer must reject disconnected scan strokes until a lossless model exists");
  return {{"status","PASS"},{"rectangle_join_atomic",true},
+  {"nested_lightburn_inspection",true},
+  {"disconnected_lbrn2_import_safely_rejected",true},
   {"snap_endpoint",true},{"bezier_native_handles",true},
   {"bezier_viewport_drag",true},{"bezier_select_after_finish",true},
   {"bezier_undo_redo_no_ghosts",true},{"bezier_scissor_split",true},
