@@ -7,6 +7,8 @@
 #include <QFormLayout>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
+#include <QSignalBlocker>
+#include <QCheckBox>
 #include <QDialogButtonBox>
 #include <QLabel>
 #include <QPainter>
@@ -64,7 +66,8 @@ protected:
 
 class GearDialog final:public QDialog{
  QSpinBox* teeth_=nullptr;
- QDoubleSpinBox *module_=nullptr,*pressure_=nullptr,*bore_=nullptr,*centerX_=nullptr,*centerY_=nullptr;
+ QDoubleSpinBox *module_=nullptr,*circularPitch_=nullptr,*pressure_=nullptr,*bore_=nullptr,*centerX_=nullptr,*centerY_=nullptr;
+ QCheckBox* previewEnabled_=nullptr;
  QLabel* info_=nullptr;
  GearPreview* preview_=nullptr;
  Parameters current()const{
@@ -77,8 +80,10 @@ class GearDialog final:public QDialog{
   preview_->setGear(p);
   try{
    const auto shape=generate(p);
-   QString message=QString("Diâmetro externo %1 mm  ·  diâmetro primitivo %2 mm  ·  raiz %3 mm\n"
-     "Contorno: %4 nós  ·  Furo: %5 nós")
+   QString message=QString("Módulo %1 mm  ·  Passo circular %2 mm\n"
+     "Diâmetro externo %3 mm  ·  diâmetro primitivo %4 mm  ·  raiz %5 mm\n"
+     "Contorno: %6 nós  ·  Furo: %7 nós")
+     .arg(p.moduleMm,0,'f',4).arg(circularPitchFromModule(p.moduleMm),0,'f',4)
      .arg(2*shape.outerRadius,0,'f',2).arg(2*shape.pitchRadius,0,'f',2)
      .arg(2*shape.rootRadius,0,'f',2).arg(shape.outer.size()).arg(shape.bore.size());
    if(shape.undercutWarning)message+="\nAviso: poucas dentes podem gerar interferência/undercut.";
@@ -95,7 +100,7 @@ public:
   bedW_(bedW),bedH_(bedH){
   setObjectName("gear_generator_dialog_19_9");
   setWindowTitle("Gerador de Engrenagens — Alencar Laser");
-  setMinimumSize(520,585);resize(580,645);
+  setMinimumSize(540,630);resize(590,690);
   auto* column=new QVBoxLayout(this);
   auto* hint=new QLabel("GERAÇÃO VETORIAL OFFLINE • sem motor, movimento ou emissão de laser.",this);
   hint->setWordWrap(true);column->addWidget(hint);
@@ -104,12 +109,16 @@ public:
   teeth_->setRange(12,120);teeth_->setValue(24);
   form->addRow("Quantidade de dentes:",teeth_);
   auto metric=[&](const char* key,double min,double max,double value,int decimals,const QString& suffix){
-   auto* f=new QDoubleSpinBox(this);f->setObjectName(key);f->setRange(min,max);
-   f->setDecimals(decimals);f->setSingleStep(.5);f->setValue(value);f->setSuffix(suffix);return f;
+   auto* f=new QDoubleSpinBox(this);f->setObjectName(key);f->setDecimals(decimals);
+   f->setRange(min,max);f->setSingleStep(.5);f->setValue(value);f->setSuffix(suffix);return f;
   };
-  module_=metric("gear_module_19_9",.5,20.,3.,2," mm");
+  module_=metric("gear_module_19_9",.5,20.,3.,6," mm");
   module_->setToolTip("Módulo métrico: diâmetro primitivo = módulo × número de dentes.");
   form->addRow("Módulo:",module_);
+  circularPitch_=metric("gear_circular_pitch_19_9",
+     std::numbers::pi*0.5,std::numbers::pi*20.,3.*std::numbers::pi,6," mm");
+  circularPitch_->setToolTip("Passo circular: distância no círculo primitivo entre dentes, p = pi × módulo. Alterar um campo atualiza o outro.");
+  form->addRow("Passo circular:",circularPitch_);
   pressure_=metric("gear_pressure_19_9",14.,30.,20.,1,"°");
   pressure_->setToolTip("Ângulo de pressão do perfil evolvente aproximado.");
   form->addRow("Ângulo de pressão:",pressure_);
@@ -119,9 +128,14 @@ public:
   centerY_=metric("gear_center_y_19_9",0.,10000.,bedH/2.,1," mm");
   form->addRow("Centro X:",centerX_);form->addRow("Centro Y:",centerY_);
   column->addLayout(form);
+  previewEnabled_=new QCheckBox("Pré-visualizar",this);
+  previewEnabled_->setObjectName("gear_preview_enabled_19_9");
+  previewEnabled_->setChecked(true);
+  column->addWidget(previewEnabled_);
   preview_=new GearPreview(this);column->addWidget(preview_);
+  connect(previewEnabled_,&QCheckBox::toggled,preview_,&QWidget::setVisible);
   info_=new QLabel(this);info_->setObjectName("gear_summary_19_9");
-  info_->setWordWrap(true);info_->setMinimumHeight(80);column->addWidget(info_);
+  info_->setWordWrap(true);info_->setMinimumHeight(95);column->addWidget(info_);
   auto* buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel,this);
   buttons->button(QDialogButtonBox::Ok)->setText("Criar contornos no desenho");
   buttons->button(QDialogButtonBox::Cancel)->setText("Cancelar");
@@ -129,7 +143,19 @@ public:
   connect(buttons,&QDialogButtonBox::accepted,this,&GearDialog::accept);
   connect(buttons,&QDialogButtonBox::rejected,this,&GearDialog::reject);
   connect(teeth_,QOverload<int>::of(&QSpinBox::valueChanged),this,[this](int){refresh();});
-  for(auto* f:{module_,pressure_,bore_,centerX_,centerY_})
+  connect(module_,QOverload<double>::of(&QDoubleSpinBox::valueChanged),this,
+          [this](double m){
+            const QSignalBlocker guard(circularPitch_);
+            circularPitch_->setValue(circularPitchFromModule(m));
+            refresh();
+          });
+  connect(circularPitch_,QOverload<double>::of(&QDoubleSpinBox::valueChanged),this,
+          [this](double pitch){
+            const QSignalBlocker guard(module_);
+            module_->setValue(moduleFromCircularPitch(pitch));
+            refresh();
+          });
+  for(auto* f:{pressure_,bore_,centerX_,centerY_})
    connect(f,QOverload<double>::of(&QDoubleSpinBox::valueChanged),this,
            [this](double){refresh();});
   refresh();
