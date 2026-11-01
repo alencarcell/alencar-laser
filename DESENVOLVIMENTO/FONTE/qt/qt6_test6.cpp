@@ -1852,7 +1852,15 @@ void mousePressEvent(QMouseEvent* e)override{
    }
    else {Key chosen=hits.front().key;
     if(e->modifiers().testFlag(Qt::AltModifier)&&active_){auto it=std::find_if(hits.begin(),hits.end(),[&](const auto& h){return h.key==*active_;});if(it!=hits.end())chosen=hits[(size_t(it-hits.begin())+1)%hits.size()].key;}
-    if(e->modifiers().testFlag(Qt::ShiftModifier)){if(selected.count(chosen.object))selected.erase(chosen.object);else selected.insert(chosen.object);activate(chosen,false);}
+    if(e->modifiers().testFlag(Qt::ControlModifier)){
+     // Ctrl alterna: segundo clique remove; o alvo removido nao fica ativo.
+     if(selected.erase(chosen.object)){
+      active_.reset();applySelectionStyles();viewport()->update();
+     }else {selected.insert(chosen.object);activate(chosen,false);}
+    }else if(e->modifiers().testFlag(Qt::ShiftModifier)){
+     // Shift SEMPRE adiciona; nunca desmarca objeto ja selecionado.
+     selected.insert(chosen.object);activate(chosen,false);
+    }
     else {
      // Não colapsar seleção múltipla ao arrastar um dos objetos selecionados.
      if(!selected.count(chosen.object)||selected.size()<2)activate(chosen);
@@ -2575,6 +2583,13 @@ public:
  QCheckBox* textItalicControl_=nullptr;
  QDoubleSpinBox* textSpacingControl_=nullptr;
  QComboBox* textAlignControl_=nullptr;
+ // LightBurn-inspired contextual selection: read-only measurements in phase 1.
+ QFrame* selectionContextBar_=nullptr;
+ QLabel* selectionContextSummary_=nullptr;
+ QPushButton* selectionContextGroup_=nullptr;
+ QPushButton* selectionContextUngroup_=nullptr;
+ QPushButton* selectionContextDuplicate_=nullptr;
+ QPushButton* selectionContextDelete_=nullptr;
  double inlineTextLetterSpacing_=100.;
  QTabWidget* textInspectorTabs_=nullptr;
  QWidget* textOptionsTab_=nullptr;
@@ -3179,6 +3194,40 @@ public:
    QSettings("AlencarLaser","DesktopBeta").setValue("workspace/darkTheme",darkTheme_);
    applyTheme();view.setFocus();});
   layout->addWidget(quick);
+
+  // Selected-object ribbon, deliberately separate from physical CAM controls.
+  // Hidden when there is no selection; visible fields are informational only.
+  selectionContextBar_=new QFrame(this);
+  selectionContextBar_->setObjectName("selection_context_19_8");
+  auto* contextRow=new QHBoxLayout(selectionContextBar_);
+  contextRow->setContentsMargins(9,2,9,2);contextRow->setSpacing(7);
+  selectionContextSummary_=new QLabel(selectionContextBar_);
+  selectionContextSummary_->setObjectName("selection_context_summary_19_8");
+  selectionContextSummary_->setAccessibleName("Medidas da seleção, somente leitura");
+  selectionContextSummary_->setToolTip("Caixa envolvente em mm. Campos numéricos editáveis e referência de 9 pontos ainda pendentes.");
+  contextRow->addWidget(selectionContextSummary_,1);
+  auto contextButton=[this,contextRow](const QString& id,const QString& title,
+                                        const QString& tip,const QString& target){
+   auto* button=new QPushButton(title,selectionContextBar_);
+   button->setObjectName(id);button->setToolTip(tip);
+   button->setAccessibleName(tip);button->setFocusPolicy(Qt::NoFocus);
+   button->setProperty("compact",true);
+   contextRow->addWidget(button);
+   connect(button,&QPushButton::clicked,this,[this,target]{
+    if(buttons.count(target))buttons.at(target)->click();
+   });
+   return button;
+  };
+  selectionContextGroup_=contextButton("selection_context_group_19_8","Agrupar",
+    "Agrupar apenas objetos poligonais editáveis (Ctrl+G)","group");
+  selectionContextUngroup_=contextButton("selection_context_ungroup_19_8","Desagrupar",
+    "Desagrupar a seleção com grupo (Ctrl+U)","ungroup");
+  selectionContextDuplicate_=contextButton("selection_context_duplicate_19_8","Duplicar",
+    "Duplicar uma forma poligonal independente","duplicate_obj");
+  selectionContextDelete_=contextButton("selection_context_delete_19_8","Excluir",
+    "Excluir seleção. Para 25+ objetos, exige confirmação; Ctrl+Z restaura.","delete_shapes");
+  layout->addWidget(selectionContextBar_);
+  selectionContextBar_->hide();
 
   auto* splitter=new QSplitter(Qt::Horizontal);splitter->setObjectName("workspaceSplitter");
   persistentSplitter_=splitter;
@@ -4407,6 +4456,40 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
   status->setText("Camada atualizada para a simulacao; M3/M4 e potencia NAO enviados ao laser.");
  }
+ void updateSelectionContext(){
+  if(!selectionContextBar_)return;
+  const bool nativeSelected=view.nativeSelected().has_value()&&view.nativeModeActive();
+  const bool polyline=view.tool==QtEditorLab::Tool::Select&&!view.nativeModeActive()&&!view.selected.empty();
+  const bool show=nativeSelected||polyline;
+  selectionContextBar_->setVisible(show);
+  if(!show)return;
+  const auto bounds=view.selectionPreviewRect();
+  std::set<int> groupIds;
+  bool editableSelection=polyline;
+  bool groupedObject=false;
+  if(polyline)for(int id:view.selected){
+   auto it=view.editor.state().objects.find(id);
+   if(it==view.editor.state().objects.end()||!editable(view.editor.state(),id)){
+    editableSelection=false;continue;
+   }
+   groupIds.insert(it->second.group>0?-it->second.group:id);
+   groupedObject|=it->second.group>0;
+  }
+  const QString prefix=nativeSelected?QString("Curva Bézier selecionada"):
+     QString("%1 forma(s)%2").arg(view.selected.size()).arg(
+       groupedObject?" · grupo":"");
+  if(bounds){
+   const QRectF rect=bounds->normalized();
+   selectionContextSummary_->setText(
+    QString("%1  |  X %2  Y %3  |  L %4  A %5 mm  ·  leitura")
+     .arg(prefix).arg(rect.left(),0,'f',2).arg(rect.top(),0,'f',2)
+     .arg(rect.width(),0,'f',2).arg(rect.height(),0,'f',2));
+  }else selectionContextSummary_->setText(prefix+"  |  medidas indisponíveis");
+  selectionContextGroup_->setEnabled(editableSelection&&groupIds.size()>=2);
+  selectionContextUngroup_->setEnabled(editableSelection&&groupedObject);
+  selectionContextDuplicate_->setEnabled(editableSelection&&view.selected.size()==1&&!groupedObject);
+  selectionContextDelete_->setEnabled(nativeSelected||editableSelection);
+ }
  void refresh(){
   int current=layers->currentData().toInt();refreshing=true;layers->clear();for(const auto& [id,l]:view.editor.state().layers)layers->addItem(QString::fromStdString(l.name),id);
   int ix=layers->findData(current);layers->setCurrentIndex(ix<0?0:ix);refreshing=false;refreshFlags();
@@ -4484,6 +4567,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }
   const int curveCount=curves?int(curves->committed().contours.size()):0;
   const bool nativeSelected=view.nativeModeActive()&&view.nativeSelected().has_value();
+  updateSelectionContext();
   status->setText(QString("%1 contornos | %2 nós | %3 selecionados | curvas v5: %4 | %5 | %6")
     .arg(view.editor.state().doc.contours.size()).arg(countNodes(view.editor.state().doc))
     .arg(view.selected.size()+(nativeSelected?1u:0u))
@@ -7274,6 +7358,42 @@ static QJsonObject drawAndJoin198Test(){
 
 static QJsonObject layoutIcons198Test(){
  LabWindow w(Document{});w.resize(1280,760);w.show();QApplication::processEvents();
+ auto* selectionRibbon=w.findChild<QFrame*>("selection_context_19_8");
+ auto* selectionLabel=w.findChild<QLabel*>("selection_context_summary_19_8");
+ auto* contextGroup=w.findChild<QPushButton*>("selection_context_group_19_8");
+ auto* contextUngroup=w.findChild<QPushButton*>("selection_context_ungroup_19_8");
+ check(selectionRibbon&&selectionLabel&&contextGroup&&contextUngroup,
+       "Barra contextual de selecao ausente");
+ check(!selectionRibbon->isVisible(),"Barra contextual exibida sem objeto selecionado");
+ const int contextA=w.view.editor.rectangle({10,10},10,10);
+ const int contextB=w.view.editor.rectangle({35,10},10,10);
+ w.view.rebuild();w.view.activate({contextA,0});w.refresh();
+ check(selectionRibbon->isVisible()&&selectionLabel->text().contains("L 10.00")&&
+       !contextGroup->isEnabled()&&!contextUngroup->isEnabled(),
+       "Barra contextual nao mostrou medidas/acoes de uma forma");
+ w.view.selected.insert(contextB);w.view.applySelectionStyles();w.refresh();
+ check(contextGroup->isEnabled()&&selectionLabel->text().contains("2 forma"),
+       "Grupo nao habilitou com duas formas");
+ w.view.clearSelection();w.refresh();
+ check(!selectionRibbon->isVisible(),"Barra contextual nao ocultou ao limpar selecao");
+ // Real viewport mouse modifiers must match the reference editing model.
+ w.view.setTransform(QTransform::fromScale(6,6));w.view.centerOn(28,15);
+ QApplication::processEvents();
+ const QPoint hitA=w.view.mapFromScene(QPointF(10,15));
+ const QPoint hitB=w.view.mapFromScene(QPointF(35,15));
+ QTest::mouseClick(w.view.viewport(),Qt::LeftButton,Qt::NoModifier,hitA);
+ QTest::mouseClick(w.view.viewport(),Qt::LeftButton,Qt::ShiftModifier,hitB);
+ check(w.view.selected.count(contextA)==1&&w.view.selected.count(contextB)==1,
+       "Shift nao adicionou forma");
+ QTest::mouseClick(w.view.viewport(),Qt::LeftButton,Qt::ShiftModifier,hitB);
+ check(w.view.selected.count(contextB)==1,
+       "Shift repetido desmarcou indevidamente a forma");
+ QTest::mouseClick(w.view.viewport(),Qt::LeftButton,Qt::ControlModifier,hitB);
+ check(w.view.selected.count(contextA)==1&&w.view.selected.count(contextB)==0,
+       "Ctrl nao removeu forma da selecao");
+ QTest::mouseClick(w.view.viewport(),Qt::LeftButton,Qt::ControlModifier,hitB);
+ check(w.view.selected.count(contextB)==1,"Ctrl nao readicionou a forma");
+ w.view.clearSelection();w.refresh();
  auto* header=w.findChild<QFrame*>("topHeader");
  check(header&&header->maximumHeight()<=48,"Cabecalho ultrapassou altura compacta");
  for(const QString& name:{"quick_align_0","quick_align_4","quick_align_1",
