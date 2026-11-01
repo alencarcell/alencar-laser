@@ -16,6 +16,9 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QMessageBox>
+#include <QPushButton>
+#include <QPaintEvent>
+#include <utility>
 #include <QString>
 #include <algorithm>
 #include <cmath>
