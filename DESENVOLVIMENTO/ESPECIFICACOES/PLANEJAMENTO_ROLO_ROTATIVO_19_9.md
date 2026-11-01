@@ -41,3 +41,8 @@ A etapa só começa após estabilização e homologação manual do editor TESTE
 - O cronograma tem dependências, **não prazos datados**.
 - Rolo rotativo incluído como FUTURO MÓDULO, não como função pronta em 19.8.
 - `main`, `APLICATIVO`, backups, hardware e controle GRBL não alterados neste registro.
+ 
+## Avanço R1 — Código experimental, 01/11/2026
+- O planejamento anterior continua válido. R1 parcialmente implementado para operação **offline** em `src/rotary_geometry_19_9.hpp`, `qt/rotary_dialog_19_9.hpp` e teste C++ portátil, com seleção Rolo/Mandril e configurações de circunferência/diâmetro/rolete, eixo ainda não verificado, espelho apenas de prévia e salvamento QSettings. Este é um recurso experimental, ainda não homologado para uso final.
+- A prévia na janela calcula circunferência e mostra proporção da altura de uma seleção em mm; **não é simulação raster/cinemática física**. A simulação cilíndrica completa R2 continua pendente.
+- A opção de testar a rotação continua **desativada**; eixo, motor e ligação elétrica são hipóteses até obter manual e inspeção do Ortur real. Não aplicar ajustes do LightBurn ou do software à controladora.
