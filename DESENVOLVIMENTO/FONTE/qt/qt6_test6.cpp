@@ -8165,6 +8165,44 @@ static QJsonObject layoutIcons198Test(){
          {"vertical_mirror",true},{"header_compact",true},
          {"physical_operation_disabled",true}};
 }
+static QJsonObject gearGenerator199Test(){
+ // No device, connection, G-code or physical action is involved.
+ alaser::gear::GearDialog dialog(400.,400.);
+ auto* teeth=dialog.findChild<QSpinBox*>("gear_teeth_19_9");
+ auto* module=dialog.findChild<QDoubleSpinBox*>("gear_module_19_9");
+ auto* pressure=dialog.findChild<QDoubleSpinBox*>("gear_pressure_19_9");
+ auto* bore=dialog.findChild<QDoubleSpinBox*>("gear_bore_19_9");
+ auto* preview=dialog.findChild<alaser::gear::GearPreview*>("gear_preview_19_9");
+ check(teeth&&module&&pressure&&bore&&preview,"Controles do gerador ausentes");
+ check(teeth->value()==24&&std::abs(module->value()-3.)<1e-8&&
+       std::abs(pressure->value()-20.)<1e-8,"Defaults do gerador mudaram");
+ teeth->setValue(32);module->setValue(2.);bore->setValue(8.);
+ auto info=dialog.findChild<QLabel*>("gear_summary_19_9");
+ check(info&&info->text().contains("68.00")&&info->text().contains("64.00"),
+       "Previa nao atualizou diametro primitivo/externo");
+ const auto shape=alaser::gear::generate(dialog.parameters());
+ check(!shape.outer.empty()&&shape.bore.size()==96,"Geometria de engrenagem incorreta");
+ LabWindow w(Document{});w.resize(1100,750);w.show();QApplication::processEvents();
+ check(w.findChild<QAction*>("generate_gear_offline_19_9")!=nullptr,
+       "Menu Gerar > Engrenagem ausente");
+ const int prior=w.view.editor.rectangle({10,10},12,10);
+ const auto before=w.view.editor.state().doc;
+ const auto undo=w.view.editor.undoCount();
+ w.insertGeneratedGear(dialog.parameters(),{200.,200.});
+ check(w.view.editor.undoCount()==undo+1,"Geracao nao foi atomica");
+ check(w.view.editor.state().doc.contours.size()==before.contours.size()+2,
+       "Engrenagem e furo nao formaram dois contornos");
+ check(w.view.editor.state().objects.size()==3,
+       "Geracao removeu outros objetos");
+ for(const auto& c:w.view.editor.state().doc.contours)
+  if(c.key.object!=prior)
+   check(c.closed&&c.nodes.size()>=90,"Contorno de engrenagem/furo aberto");
+ check(w.view.editor.undo()&&sameDoc(before,w.view.editor.state().doc),
+       "Undo nao restaurou projeto apos engrenagem");
+ return {{"status","PASS"},{"gear_preview",true},{"editable_contours",true},
+         {"single_undo",true},{"old_objects_preserved",true},
+         {"hardware_commands_sent",false}};
+}
 static QJsonObject rasterObject198Test(){
  QTemporaryDir temporary;
  check(temporary.isValid(),"Nao criou diretorio temporario");
@@ -8200,6 +8238,14 @@ static QJsonObject rasterObject198Test(){
 }
 int main(int argc,char** argv){
  QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";
+ if(mode=="--gear-generator-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=gearGenerator199Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile file(out+"/RESULTADO_ENGRENAGENS_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
  if(mode=="--layout-icons-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=layoutIcons198Test();}

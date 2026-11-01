@@ -14,6 +14,9 @@
 #include <QMessageBox>
 #include <QPaintEvent>
 #include <QPainterPath>
+#include <QPolygonF>
+#include <QPushButton>
+#include <QPen>
 #include <cmath>
 
 namespace alaser::gear {
