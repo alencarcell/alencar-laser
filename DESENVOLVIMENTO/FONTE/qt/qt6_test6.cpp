@@ -3315,19 +3315,50 @@ public:
     b->setEnabled(false);b->setToolTip(tip+" — em desenvolvimento; função desativada");
     b->setFocusPolicy(Qt::NoFocus);return b;
   };
-  tools->addSpacing(6); // Ferramentas futuras desativadas
+  // Atalhos offline reais: não prometer offset/boolean/DXF/SVG sem motor correspondente.
+  auto offlineShortcut=[&](QGridLayout* grid,const QString& id,const QString& glyph,
+                           const QString& name,const QString& tooltip){
+   auto* b=new QPushButton(glyph);b->setObjectName(id);b->setProperty("compact",true);
+   b->setFixedSize(QSize(38,32));b->setFocusPolicy(Qt::NoFocus);
+   b->setAccessibleName(name);b->setToolTip(tooltip);
+   grid->addWidget(b,grid->count(),0);return b;
+  };
+  tools->addSpacing(6);
   auto* vectorGrid=newGrid();
   for(const auto& data:std::vector<std::tuple<QString,QString>>{
    {"◎ Offset","Contorno interno/externo"},
-   {"⊕ União","Soldar vetores"},{"⊖ Subtr.","Subtrair formas"},
-   {"⊞ Alinhar","Alinhamento e distribuição"},{"⌗ Medir","Ferramenta de medição"}}){
-    const int index=vectorGrid->count();vectorGrid->addWidget(future(std::get<0>(data),std::get<1>(data)),index,0);
+   {"⊕ União","Soldar vetores"},{"⊖ Subtr.","Subtrair formas"}}){
+   vectorGrid->addWidget(future(std::get<0>(data),std::get<1>(data)),vectorGrid->count(),0);
   }
-  tools->addSpacing(5); // Importadores futuros desativados
+  auto* alignShortcut=offlineShortcut(vectorGrid,"align_shortcut_19_8","⊞",
+   "Alinhar formas selecionadas", "Alinhar por bordas/centros ou centralizar na mesa; não distribui objetos");
+  auto* measureShortcut=offlineShortcut(vectorGrid,"measure_selection_19_8","⌗",
+   "Medir seleção", "Largura, altura e posição da caixa envolvente em mm (somente leitura)");
+  connect(measureShortcut,&QPushButton::clicked,this,[this]{
+   run([this]{
+    const auto bounds=view.selectionPreviewRect();
+    if(!bounds){status->setText("Medir: selecione uma forma editável no modo Seleção.");return;}
+    const QRectF r=bounds->normalized();
+    status->setText(QString("Medida da seleção (caixa envolvente): %1 x %2 mm | X %3 / Y %4 mm — não altera a arte")
+      .arg(r.width(),0,'f',2).arg(r.height(),0,'f',2)
+      .arg(r.left(),0,'f',2).arg(r.top(),0,'f',2));
+   });
+  });
+  tools->addSpacing(5);
   auto* fileGrid=newGrid();
-  for(const auto& data:std::vector<QString>{"SVG", "DXF", "LightBurn"}){
-   const int index=fileGrid->count();fileGrid->addWidget(future(data,"Importação de "+data),index,0);
+  for(const auto& data:std::vector<QString>{"SVG", "DXF"}){
+   fileGrid->addWidget(future(data,"Importação de "+data),fileGrid->count(),0);
   }
+  auto* lightburnShortcut=offlineShortcut(fileGrid,"open_lbrn2_partial_19_8","L",
+   "Abrir LightBurn LBRN2 (parcial)",
+   "Importador geométrico experimental: recusa projetos incompatíveis sem modificar a arte; nunca importa parâmetros da máquina");
+  connect(lightburnShortcut,&QPushButton::clicked,this,[this]{
+   run([this]{
+    const QString file=QFileDialog::getOpenFileName(this,"Abrir LightBurn — importação parcial",{},
+      "Projeto LightBurn (*.lbrn2)");
+    if(!file.isEmpty())openFilePath(file);
+   });
+  });
   // Texto longo alargava o grid e deslocava os icones para fora do painel.
   auto* importImageButton=new QPushButton;
   importImageButton->setObjectName("open_image_for_trace");
@@ -3953,8 +3984,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   camLayout->addWidget(titleLabel("CAM / OPERAÇÕES  ·  FUTURO"));
   for(const QString name:{"Corte de linha","Gravação de linha","Preenchimento raster", "Potência (%)",
          "Velocidade (mm/min)","Número de passes","Biblioteca de materiais","Pré-visualizar percurso","Enviar trabalho ao laser"}){
-   auto* b=new QPushButton(name);b->setEnabled(false);
-   b->setToolTip("Aguardando desenvolvimento e homologação; não executa operações");camLayout->addWidget(b);
+   auto* b=new QPushButton(name);camLayout->addWidget(b);
+   if(name=="Pré-visualizar percurso"){
+    b->setObjectName("cam_preview_virtual_19_8");
+    b->setToolTip("Abre APENAS a prévia virtual offline; não gera G-code, não envia comandos ou opera o laser.");
+    connect(b,&QPushButton::clicked,this,[this]{
+     auto* existing=findChild<QPushButton*>("preview_virtual");
+     check(existing!=nullptr,"Prévia virtual indisponível.");
+     existing->click();
+    });
+   }else{
+    b->setEnabled(false);
+    b->setToolTip("Aguardando desenvolvimento e homologação; não executa operações");
+   }
   }
   camLayout->addStretch();inspectorTabs->addTab(camTab,"CAM");
   refreshWorkspaceLabels();
@@ -4041,6 +4083,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    check(control!=nullptr,"Comando centralizar na mesa indisponível.");
    control->click();
   });
+  // O atalho lateral reutiliza as MESMAS ações testadas de Organizar.
+  // Assim não cria uma implementação paralela com regras divergentes.
+  auto* sideAlignMenu=new QMenu(alignShortcut);
+  for(int mode=0;mode<=6;++mode){
+   QAction* source=findChild<QAction*>(QString("align_action_%1_19_8").arg(mode));
+   check(source!=nullptr,"Alinhamento interno ausente.");
+   QAction* shortcut=sideAlignMenu->addAction(source->text());
+   connect(shortcut,&QAction::triggered,source,&QAction::trigger);
+  }
+  sideAlignMenu->addSeparator();
+  auto* centerShortcut=sideAlignMenu->addAction(centerBedAction->text());
+  connect(centerShortcut,&QAction::triggered,centerBedAction,&QAction::trigger);
+  alignShortcut->setMenu(sideAlignMenu);
   auto* laserMenu=mainMenu->addMenu("Laser");
   auto* wifiEntry=laserMenu->addAction("USB / Wi-Fi — Diagnóstico apenas");
   connect(wifiEntry,&QAction::triggered,this,[wifiLauncher]{wifiLauncher->click();});
@@ -7206,9 +7261,32 @@ static QJsonObject layoutIcons198Test(){
   auto* b=w.findChild<QToolButton*>(name);
   check(b&&!b->isEnabled(),"Comando fisico foi habilitado indevidamente");
  }
+ for(const QString& id:{"align_shortcut_19_8","measure_selection_19_8",
+                         "open_lbrn2_partial_19_8","cam_preview_virtual_19_8"}){
+  auto* b=w.findChild<QPushButton*>(id);
+  check(b&&b->isEnabled()&&!b->toolTip().isEmpty(),
+        "Atalho offline existente ausente/inacessivel");
+ }
+ auto* alignmentShortcut=w.findChild<QPushButton*>("align_shortcut_19_8");
+ check(alignmentShortcut->menu()&&alignmentShortcut->menu()->actions().size()>=9,
+       "Atalho de alinhamento nao reutiliza os sete comandos e mesa");
+ auto* measurement=w.findChild<QPushButton*>("measure_selection_19_8");
+ const auto beforeEmpty=fingerprint(w.view.editor.state());
+ measurement->click();
+ check(w.status->text().contains("selecione")&&
+       fingerprint(w.view.editor.state())==beforeEmpty,
+       "Medir sem selecao alterou documento ou nao instruiu usuario");
  const int one=w.view.editor.addContour({{10,10},{20,10},{18,25}},true);
  const int two=w.view.editor.addContour({{80,30},{110,30},{95,40}},true);
  w.view.rebuild();w.view.activate({one,0});w.view.selected.insert(two);
+ const auto beforeMeasure=fingerprint(w.view.editor.state());
+ const auto selectedBox=w.view.selectionPreviewRect();
+ check(selectedBox.has_value(),"Selecao nao gera limites para medir");
+ measurement->click();
+ check(w.status->text().contains(QString::number(selectedBox->width(),'f',2))&&
+       w.status->text().contains(QString::number(selectedBox->height(),'f',2))&&
+       fingerprint(w.view.editor.state())==beforeMeasure,
+       "Medida da selecao nao informa largura/altura ou alterou arte");
  w.findChild<QToolButton*>("quick_align_0")->click();
  const auto boundsOne=boundsOf(w.view.editor.state().doc,{one});
  const auto boundsTwo=boundsOf(w.view.editor.state().doc,{two});

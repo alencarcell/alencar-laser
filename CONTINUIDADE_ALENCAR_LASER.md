@@ -842,3 +842,14 @@ Registrar mudanças, testes e pendências.
 - O workflow Qt Windows foi ampliado para compilar os alvos alterados e executar a suíte offline: desenho/menus, 20 modos adicionais de GUI, TESTE_17 interação/singleton em DPR 1/2, persistência em processos separados e estresse de 3.230 casos. Evidências em artifact windows-work-regression.
 - Estado neste commit: testes Windows aguardam execução no GitHub Actions. Resultados Linux do pacote são históricos e não são prova Windows. Registrar os links e conclusões reais em complemento após a execução.
 - Main permanece em `397341d139d974e0f3d90b79ed28604e697a81b1`. Sem merge em main, sem instalação em APLICATIVO e sem liberação física. Validação manual com mouse/DPI, projeto real e recuperação após queda de energia permanece pendente.
+
+## 31/10/2026 — Bloco experimental de atalhos offline (pendências da barra lateral)
+
+- Captura Windows do operador: a interface TESTE_19.8 abriu com 575 contornos, 13.415 nós, diagnóstico opt-in ativo e banner `MÁQUINA DESCONECTADA | EMISSÃO BLOQUEADA`; a imagem indica funcionamento visual, NÃO certifica ferramenta, desempenho ou persistência.
+- A barra lateral tinha entradas cinza para funcionalidades **já existentes em outros menus**. Esta revisão liga `⊞ Alinhar` às mesmas sete ações de Organizar (esquerda/direita/topo/base/centros X/Y/ambos) e ao centralizador da mesa; não promete distribuição automática.
+- A nova ação `⌗ Medir seleção` consulta a caixa envolvente do selecionado (inclusive grupos expandidos e prévia de curva nativa quando disponível), informando largura/altura e origem em milímetros na barra de status. É somente leitura: não calcula área real, comprimento do contorno, folga ou percurso laser.
+- O atalho `L` reutiliza o importador conservador `.lbrn2`: exige confirmação antes de substituir arte e recusa qualquer projeto incompatível integralmente, sem importação parcial silenciosa e sem importar parâmetros físicos. Não é suporte completo ao LightBurn.
+- O botão `Pré-visualizar percurso` no painel CAM passa a abrir a **mesma prévia virtual** já existente, SEM geração de G-code, disparo ou transmissão. Os outros controles CAM continuam bloqueados.
+- **Continuam propositalmente desativados:** Offset, operações booleanas (União/Subtração), SVG, DXF, potência, velocidade, passes de trabalho e qualquer comando físico; implementar só com motor próprio, rollback e regressões.
+- Teste Qt existente `--layout-icons-19-8-test` ampliado: verifica presença/estado dos quatro atalhos, submenu de alinhamentos, medição vazia e com seleção, e invariância da geometria após medir. **Pendente comprovar PASS Qt Windows desta alteração no Actions**, inspeção manual do botão, teclado, zoom/DPI e arquivos reais.
+- Rollback: apenas `DESENVOLVIMENTO/FONTE/qt/qt6_test6.cpp` e este documento modificados. `main`, `APLICATIVO`, backups, Wi-Fi/TCP e operações físicas permanecem intactos. PR #13 em rascunho.
