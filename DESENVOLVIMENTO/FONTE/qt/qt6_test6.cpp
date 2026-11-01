@@ -4534,7 +4534,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    alaser::gear::CompoundGearDialog dialog(alaser::gear::CompoundKind::Pair,
        workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight,this);
    if(dialog.exec()!=QDialog::Accepted){view.setFocus();return;}
-   const auto p=dialog.pairParameters(),origin=dialog.origin();
+   const auto p=dialog.pairParameters();
+   const auto origin=dialog.origin();
    run([this,p,origin]{insertGeneratedPair(p,origin);});view.setFocus();
   });
   auto* rackAction=gearsMenu->addAction("Cremalheira (nominal / offline)...");
@@ -4544,7 +4545,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    alaser::gear::CompoundGearDialog dialog(alaser::gear::CompoundKind::Rack,
        workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight,this);
    if(dialog.exec()!=QDialog::Accepted){view.setFocus();return;}
-   const auto p=dialog.rackParameters(),origin=dialog.origin();
+   const auto p=dialog.rackParameters();
+   const auto origin=dialog.origin();
    run([this,p,origin]{insertGeneratedRack(p,origin);});view.setFocus();
   });
   auto* laserMenu=mainMenu->addMenu("Laser");
