@@ -8019,8 +8019,10 @@ static QJsonObject layoutIcons198Test(){
  check(contextGroup->isEnabled()&&selectionLabel->text().contains("2 forma"),
        "Agrupar nao habilitou com duas formas");
  w.view.clearSelection();w.refresh();
- check(selectionRibbon->isVisible()&&selectionLabel->text().contains("Selecione")&&
-       !contextGroup->isEnabled(),"Painel nao foi mantido em selecao vazia");
+ check(selectionRibbon->isVisible()&&
+       selectionLabel->text().startsWith("Nenhuma forma selecionada")&&
+       !contextGroup->isEnabled()&&!contextUngroup->isEnabled(),
+       "Painel vazio deve manter estado sem selecao e botoes desativados");
  tabs->setCurrentIndex(0);QApplication::processEvents();
  check(!selectionRibbon->isVisible()&&!openProperties->isChecked(),
        "Painel de seleção nao fechou ao trocar aba");
