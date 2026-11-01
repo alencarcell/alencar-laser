@@ -700,8 +700,13 @@ class QtEditorLab final:public QGraphicsView{
     p->drawRect(QRectF(point-QPointF(5.,5.),QSizeF(10.,10.)));
     p->drawLine(point+QPointF(-3,0),point+QPointF(3,0));
     p->drawLine(point+QPointF(0,-3),point+QPointF(0,3));
-   }else if(h>=8)p->drawEllipse(point,4.,4.);
-   else p->drawRect(QRectF(point-QPointF(4.,4.),QSizeF(8.,8.)));
+   }else if(h>=8){
+    // Sinal de rotacao curva como nos editores vetoriais, sem alterar hit-test.
+    p->setBrush(Qt::NoBrush);p->setPen(QPen(QColor("#55C8F4"),2));
+    p->drawArc(QRectF(point.x()-6,point.y()-6,12,12),35*16,260*16);
+    p->drawLine(point+QPointF(5,-4),point+QPointF(8,-3));
+    p->drawLine(point+QPointF(5,-4),point+QPointF(6,-7));
+   }else p->drawRect(QRectF(point-QPointF(4.,4.),QSizeF(8.,8.)));
   }
   p->restore();
  }
