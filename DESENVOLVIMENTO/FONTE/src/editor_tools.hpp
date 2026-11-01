@@ -714,6 +714,64 @@ public:
    }
   });
  }
+ // Equally spaced margins between complete editable objects/groups (offline).
+ // Keeps the first and last selected units fixed; changes intermediate nodes
+ // in ONE transaction. No topology, layer, native Bezier or hardware changes.
+ void distributeObjects(const std::vector<int>& selectedIds,bool horizontal){
+  if(selectedIds.size()<3||selectedIds.size()>1000)
+   throw std::runtime_error("distribution requires 3 to 1000 selected objects");
+  change([&](EditorState& st){
+   std::set<int> wanted;
+   for(int id:selectedIds){
+    auto it=st.objects.find(id);
+    if(it==st.objects.end()||!editable(st,id))
+     throw std::runtime_error("distribution requires editable visible objects");
+    wanted.insert(it->second.group>0?-it->second.group:id);
+   }
+   std::map<int,std::set<int>> units;
+   for(const auto& [id,meta]:st.objects){
+    const int key=meta.group>0?-meta.group:id;
+    if(!wanted.count(key))continue;
+    if(!editable(st,id))throw std::runtime_error("distribution group is locked/hidden");
+    units[key].insert(id);
+   }
+   if(units.size()<3)throw std::runtime_error("choose 3 independent shapes/groups");
+   struct Item {int key;double lo,hi;};
+   std::vector<Item> order;
+   order.reserve(units.size());
+   for(const auto& [key,members]:units){
+    auto bounds=boundsOf(st.doc,std::vector<int>(members.begin(),members.end()));
+    double a=horizontal?bounds.first.x:bounds.first.y;
+    double b=horizontal?bounds.second.x:bounds.second.y;
+    if(!std::isfinite(a)||!std::isfinite(b)||b<a)
+     throw std::runtime_error("invalid distribution bounds");
+    order.push_back({key,a,b});
+   }
+   std::sort(order.begin(),order.end(),[](const Item& a,const Item& b){
+    if(a.lo!=b.lo)return a.lo<b.lo;
+    return a.key<b.key;
+   });
+   const double range=order.back().hi-order.front().lo;
+   double widths=0;
+   for(const auto& item:order)widths+=item.hi-item.lo;
+   const double available=range-widths;
+   if(!std::isfinite(available)||available<-1e-7)
+    throw std::runtime_error("selection has insufficient space for non-overlapping distribution");
+   const double gap=std::max(0.0,available)/double(order.size()-1);
+   double position=order.front().hi+gap;
+   for(size_t i=1;i+1<order.size();++i){
+    const Item& item=order[i];
+    const double shift=position-item.lo;
+    if(!std::isfinite(shift))throw std::runtime_error("non-finite distribution shift");
+    const auto& members=units.at(item.key);
+    for(auto& contour:st.doc.contours)if(members.count(contour.key.object))
+     for(auto& node:contour.nodes){
+      if(horizontal)node.p.x+=shift;else node.p.y+=shift;
+     }
+    position+=item.hi-item.lo+gap;
+   }
+  });
+ }
  void alignLeft(std::vector<int> ids){
   if(ids.size()<2)throw std::runtime_error("align requires 2 objects");
   auto [lo,hi]=boundsOf(current.doc,ids);(void)hi;

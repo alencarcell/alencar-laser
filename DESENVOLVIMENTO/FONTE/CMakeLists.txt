@@ -306,3 +306,10 @@ if(NOT MSVC)
  target_compile_options(alencar_test19_8_native_scissors_realcut PRIVATE -O2 -Wall -Wextra -Wpedantic)
 endif()
 
+
+# TESTE_19.8: equal-gap distribution; closed/open polylines, groups, no laser.
+add_executable(alencar_test19_8_distribute_offline tests/distribution_19_8_standalone.cpp src/boost_json_impl.cpp)
+target_include_directories(alencar_test19_8_distribute_offline PRIVATE src ${BOOST_JSON_INCLUDE_DIR})
+if(NOT MSVC)
+ target_compile_options(alencar_test19_8_distribute_offline PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()

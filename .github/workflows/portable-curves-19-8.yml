@@ -48,4 +48,6 @@ jobs:
           ./build_ci_native_19_8/preview_bed
           g++ -std=c++20 -O2 -Wall -Wextra tests/preview_native_bezier_19_8_standalone.cpp src/boost_json_impl.cpp -lminizip -lz -o build_ci_native_19_8/native_preview
           ./build_ci_native_19_8/native_preview
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic tests/distribution_19_8_standalone.cpp src/boost_json_impl.cpp -o build_ci_native_19_8/distribution
+          ./build_ci_native_19_8/distribution
           echo 'PASS portable core only; Qt GUI and physical machine not validated.'

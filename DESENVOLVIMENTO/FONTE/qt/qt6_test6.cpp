@@ -3331,18 +3331,33 @@ public:
    vectorGrid->addWidget(future(std::get<0>(data),std::get<1>(data)),vectorGrid->count(),0);
   }
   auto* alignShortcut=offlineShortcut(vectorGrid,"align_shortcut_19_8","⊞",
-   "Alinhar formas selecionadas", "Alinhar por bordas/centros ou centralizar na mesa; não distribui objetos");
+   "Alinhar formas selecionadas", "Alinhar por bordas/centros ou centralizar na mesa");
+  auto* distributeHorizontal=offlineShortcut(vectorGrid,"distribute_horizontal_19_8","↔",
+   "Distribuir horizontalmente", "Três ou mais objetos/grupos; espaçamento igual, extremos fixos; offline");
+  auto* distributeVertical=offlineShortcut(vectorGrid,"distribute_vertical_19_8","↕",
+   "Distribuir verticalmente", "Três ou mais objetos/grupos; espaçamento igual, extremos fixos; offline");
+  connect(distributeHorizontal,&QPushButton::clicked,this,[this]{
+   auto* command=findChild<QAction*>("distribute_horizontal_action_19_8");
+   check(command!=nullptr,"Comando distribuir horizontal indisponível.");command->trigger();
+  });
+  connect(distributeVertical,&QPushButton::clicked,this,[this]{
+   auto* command=findChild<QAction*>("distribute_vertical_action_19_8");
+   check(command!=nullptr,"Comando distribuir vertical indisponível.");command->trigger();
+  });
   auto* measureShortcut=offlineShortcut(vectorGrid,"measure_selection_19_8","⌗",
    "Medir seleção", "Largura, altura e posição da caixa envolvente em mm (somente leitura)");
   connect(measureShortcut,&QPushButton::clicked,this,[this]{
-   run([this]{
-    const auto bounds=view.selectionPreviewRect();
-    if(!bounds){status->setText("Medir: selecione uma forma editável no modo Seleção.");return;}
-    const QRectF r=bounds->normalized();
-    status->setText(QString("Medida da seleção (caixa envolvente): %1 x %2 mm | X %3 / Y %4 mm — não altera a arte")
+   // Medição somente leitura: run() repintava o status com contagens depois
+   // de medir, ocultando imediatamente o resultado.
+   if(view.busy()||(curves&&curves->dragging())){
+    status->setText("Conclua ou cancele o arraste para medir.");return;
+   }
+   const auto bounds=view.selectionPreviewRect();
+   if(!bounds){status->setText("Medir: selecione uma forma editável no modo Seleção.");return;}
+   const QRectF r=bounds->normalized();
+   status->setText(QString("Medida da seleção (caixa envolvente): %1 x %2 mm | X %3 / Y %4 mm — não altera a arte")
       .arg(r.width(),0,'f',2).arg(r.height(),0,'f',2)
       .arg(r.left(),0,'f',2).arg(r.top(),0,'f',2));
-   });
   });
   tools->addSpacing(5);
   auto* fileGrid=newGrid();
@@ -4073,6 +4088,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
                    (ids.empty()?0:ids.back());
      view.editor.alignObjects(ids,mode,ref);view.rebuild();
      captureEvent("objects_aligned");
+    });
+   });
+  }
+  auto* distributeMenu=arrangeMenu->addMenu("Distribuir formas (espaçamento igual)");
+  for(bool horizontal:{true,false}){
+   QAction* action=distributeMenu->addAction(horizontal?
+        "Distribuir horizontalmente":"Distribuir verticalmente");
+   action->setObjectName(horizontal?"distribute_horizontal_action_19_8":
+                                     "distribute_vertical_action_19_8");
+   connect(action,&QAction::triggered,this,[this,horizontal]{
+    run([this,horizontal]{
+     view.editor.distributeObjects(selection(),horizontal);
+     view.rebuild();
     });
    });
   }
@@ -7262,6 +7290,7 @@ static QJsonObject layoutIcons198Test(){
   check(b&&!b->isEnabled(),"Comando fisico foi habilitado indevidamente");
  }
  for(const QString& id:{"align_shortcut_19_8","measure_selection_19_8",
+                         "distribute_horizontal_19_8","distribute_vertical_19_8",
                          "open_lbrn2_partial_19_8","cam_preview_virtual_19_8"}){
   auto* b=w.findChild<QPushButton*>(id);
   check(b&&b->isEnabled()&&!b->toolTip().isEmpty(),
@@ -7341,8 +7370,24 @@ static QJsonObject layoutIcons198Test(){
  for(std::size_t i=0;i<originalNodes.size();++i)
   check(dist(undone->nodes[i].p,originalNodes[i])<1e-7,
         "Undo do espelhamento nao restaurou a geometria");
+ // Click through the ACTUAL side button with three selected polygons.
+ LabWindow distributed(Document{});distributed.resize(980,620);
+ distributed.show();QApplication::processEvents();
+ const int da=distributed.view.editor.rectangle({0,0},10,10);
+ const int db=distributed.view.editor.rectangle({30,0},20,10);
+ const int dc=distributed.view.editor.rectangle({100,0},10,10);
+ distributed.view.rebuild();distributed.view.activate({da,0});
+ distributed.view.selected.insert(db);distributed.view.selected.insert(dc);
+ const auto distribBefore=distributed.view.editor.state().doc;
+ distributed.findChild<QPushButton*>("distribute_horizontal_19_8")->click();
+ const auto distributedBox=boundsOf(distributed.view.editor.state().doc,{db});
+ check(std::abs(distributedBox.first.x-45.0)<1e-7,
+       "Botao distribuir horizontal nao aplicou espacamento igual");
+ check(distributed.view.editor.undo()&&sameDoc(distribBefore,distributed.view.editor.state().doc),
+       "Distribuicao horizontal nao foi reversivel em um Undo");
+ distributed.close();
  w.close();
- return {{"status","PASS"},{"icon_actions_working",true},
+ return {{"status","PASS"},{"icon_actions_working",true},{"distribution_button_offline",true},
          {"align_both_centers",true},{"center_selection_on_bed",true},
          {"spare_art_untouched",true},
          {"vertical_mirror",true},{"header_compact",true},
