@@ -4471,6 +4471,48 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   elapsed->setObjectName("operation_elapsed_19_8");
   elapsed->setToolTip("Relógio físico indisponível sem operação homologada.");
   operationRow->addWidget(elapsed);
+  auto* visualDivider=new QFrame(operationStrip);
+  visualDivider->setFrameShape(QFrame::VLine);
+  operationRow->addWidget(visualDivider);
+  auto* mmLabel=new QLabel("mm",operationStrip);
+  mmLabel->setToolTip("Campos de posição e tamanho em milímetros.");
+  operationRow->addWidget(mmLabel);
+  const QStringList names={"X","Y","L","A"};
+  for(int k=0;k<4;++k){
+   auto* field=selectionNumeric_[size_t(k)];
+   check(field!=nullptr,"Campos de selecao nao inicializados");
+   field->setParent(operationStrip);
+   field->setSuffix("");
+   field->setMinimumWidth(68);field->setMaximumWidth(92);
+   field->setFixedHeight(27);
+   auto* label=new QLabel(names.at(k),operationStrip);
+   operationRow->addWidget(label);
+   operationRow->addWidget(field);
+  }
+  selectionAspectLock_->setParent(operationStrip);
+  selectionAspectLock_->setText("Proporção");
+  selectionAspectLock_->setToolTip("Travar proporções ao redimensionar");
+  operationRow->addWidget(selectionAspectLock_);
+  auto* anchorChoice=new QComboBox(operationStrip);
+  anchorChoice->setObjectName("bottom_selection_anchor_19_9");
+  anchorChoice->setFixedWidth(62);
+  anchorChoice->setToolTip("Referência de nove pontos para X/Y e redimensionamento");
+  anchorChoice->addItems({"↖","↑","↗","←","●","→","↙","↓","↘"});
+  anchorChoice->setCurrentIndex(selectionAnchor_);
+  connect(anchorChoice,QOverload<int>::of(&QComboBox::currentIndexChanged),this,
+          [this](int index){
+   if(index>=0&&index<9&&selectionAnchorButtons_[size_t(index)])
+    selectionAnchorButtons_[size_t(index)]->click();
+  });
+  operationRow->addWidget(anchorChoice);
+  auto* pagePosition=new QToolButton(operationStrip);
+  pagePosition->setObjectName("bottom_position_on_page_19_9");
+  pagePosition->setText("Posicionar");
+  pagePosition->setToolTip("Mover a seleção na página, nunca a máquina");
+  pagePosition->setPopupMode(QToolButton::InstantPopup);
+  pagePosition->setMenu(pageMenu);
+  operationRow->addWidget(pagePosition);
+  if(selectionNumericContainer_)selectionNumericContainer_->hide();
   operationRow->addStretch();
   layout->insertWidget(layout->count()-1,operationStrip);
   connect(layers,&QComboBox::currentIndexChanged,this,[this]{if(!refreshing)refreshFlags();});
@@ -4729,7 +4771,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    return;
   }
   if(selectionActionsContainer_)selectionActionsContainer_->show();
-  if(selectionNumericContainer_)selectionNumericContainer_->show();
+  // Campos numéricos passam a viver exclusivamente na faixa inferior.
+  if(selectionNumericContainer_)selectionNumericContainer_->hide();
   const auto bounds=rasterSelected?std::optional<QRectF>(view.rasterBounds()):
                                     view.selectionPreviewRect();
   std::set<int> groupIds,textRoots;
@@ -7815,8 +7858,10 @@ static QJsonObject layoutIcons198Test(){
  const int textId=sizes.view.editor.addEditableText(
    {{{10,10},{20,10},{20,20},{10,20}}},textMeta,0);
  sizes.view.rebuild();sizes.view.activate({textId,0});sizes.refresh();
- check(!numericContainer->isHidden()&&!actionContainer->isHidden(),
-       "Nova selecao nao reabriu as medidas contextuais");
+ check(numericContainer->isHidden()&&!actionContainer->isHidden()&&sw->isVisible()&&
+       sizes.findChild<QComboBox*>("bottom_selection_anchor_19_9")!=nullptr&&
+       sizes.findChild<QToolButton*>("bottom_position_on_page_19_9")!=nullptr,
+       "Selecao nao mostrou os campos inferiores ou duplicou medidas");
  auto* editText=sizes.findChild<QPushButton*>("selection_context_edit_text_19_8");
  auto* summary=sizes.findChild<QLabel*>("selection_context_summary_19_8");
  sizes.findChild<QPushButton*>("open_selection_properties_19_8")->click();
