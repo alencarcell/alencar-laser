@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -103,6 +103,22 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteEngrenagens) {
+        Write-Host 'ENGRENAGENS 19.9: geometria C++ e formulario Qt offline.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test19_9_gear_offline alencar_test7_qt6
+        Checar-Saida 'Compilacao focada do gerador'
+        $core = Join-Path $build 'alencar_test19_9_gear_offline.exe'
+        & $core
+        Checar-Saida 'Regressoes de passo, par e cremalheira nominais'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\engrenagens'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --gear-generator-19-9-test $fixture $destino
+        Checar-ResultadoQt 'Formulario Inkscape e criacao atomica' (Join-Path $destino 'RESULTADO_ENGRENAGENS_19_9.json')
+        Write-Host 'ENGRENAGENS PASS nos testes sinteticos. Mecanica, kerf e maquina NAO homologados.' -ForegroundColor Green
+        return
+    }
     if ($SomenteMarca) {
         Write-Host 'IDENTIDADE PEGASO_V1: compila Qt e testa o carregamento opcional, sem hardware.' -ForegroundColor Cyan
         Compilar-QtComDiagnostico
