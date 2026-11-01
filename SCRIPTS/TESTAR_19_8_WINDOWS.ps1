@@ -352,6 +352,7 @@ try {
         'alencar_test19_8_scissors_span',
         'alencar_test19_8_native_scissors_realcut',
         'alencar_test19_8_recovery_policy',
+        'alencar_test19_9_rotary_offline',
         'alencar_test_v5_codec_regression'
     )
     & $cmake --build $build --parallel 2 --target $alvos
