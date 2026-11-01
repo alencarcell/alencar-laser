@@ -2590,6 +2590,11 @@ public:
  QPushButton* selectionContextUngroup_=nullptr;
  QPushButton* selectionContextDuplicate_=nullptr;
  QPushButton* selectionContextDelete_=nullptr;
+ std::array<QDoubleSpinBox*,4> selectionNumeric_{}; // X/Y/W/H
+ QCheckBox* selectionAspectLock_=nullptr;
+ std::array<QToolButton*,9> selectionAnchorButtons_{};
+ int selectionAnchor_=0;
+ bool selectionNumericUpdating_=false;
  double inlineTextLetterSpacing_=100.;
  QTabWidget* textInspectorTabs_=nullptr;
  QWidget* textOptionsTab_=nullptr;
@@ -3199,8 +3204,10 @@ public:
   // Hidden when there is no selection; visible fields are informational only.
   selectionContextBar_=new QFrame(this);
   selectionContextBar_->setObjectName("selection_context_19_8");
-  auto* contextRow=new QHBoxLayout(selectionContextBar_);
-  contextRow->setContentsMargins(9,2,9,2);contextRow->setSpacing(7);
+  auto* contextColumn=new QVBoxLayout(selectionContextBar_);
+  contextColumn->setContentsMargins(8,3,8,3);contextColumn->setSpacing(3);
+  auto* contextRow=new QHBoxLayout;
+  contextRow->setSpacing(7);contextColumn->addLayout(contextRow);
   selectionContextSummary_=new QLabel(selectionContextBar_);
   selectionContextSummary_->setObjectName("selection_context_summary_19_8");
   selectionContextSummary_->setAccessibleName("Medidas da seleção, somente leitura");
@@ -3226,6 +3233,58 @@ public:
     "Duplicar uma forma poligonal independente","duplicate_obj");
   selectionContextDelete_=contextButton("selection_context_delete_19_8","Excluir",
     "Excluir seleção. Para 25+ objetos, exige confirmação; Ctrl+Z restaura.","delete_shapes");
+  // Numeric row: four mm fields, proportion lock, actual 3x3 anchor grid.
+  auto* numericRow=new QHBoxLayout;
+  numericRow->setSpacing(4);
+  const std::array<QString,4> fieldNames={"X","Y","L","A"};
+  const std::array<QString,4> fieldIds={"selection_num_x_19_8","selection_num_y_19_8",
+                                         "selection_num_w_19_8","selection_num_h_19_8"};
+  for(int field=0;field<4;++field){
+   numericRow->addWidget(new QLabel(fieldNames[size_t(field)],selectionContextBar_));
+   auto* spin=new QDoubleSpinBox(selectionContextBar_);
+   spin->setObjectName(fieldIds[size_t(field)]);
+   spin->setDecimals(2);spin->setSingleStep(1);
+   spin->setRange(field>=2?0.01:-1000000.,1000000.);
+   spin->setSuffix(" mm");spin->setMinimumWidth(75);spin->setMaximumWidth(105);
+   spin->setKeyboardTracking(false);spin->setEnabled(false);
+   spin->setAccessibleName(QString("Seleção: %1 em milímetros").arg(fieldNames[size_t(field)]));
+   spin->setToolTip(field<2?"Coordenada do ponto de referência (Enter confirma).":
+      "Dimensão da caixa envolvente (Enter confirma, Ctrl+Z desfaz).");
+   selectionNumeric_[size_t(field)]=spin;
+   numericRow->addWidget(spin);
+   connect(spin,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+           this,[this,field](double value){applySelectionNumeric(field,value);});
+  }
+  selectionAspectLock_=new QCheckBox("🔒 Proporção",selectionContextBar_);
+  selectionAspectLock_->setObjectName("selection_num_aspect_lock_19_8");
+  selectionAspectLock_->setChecked(true);
+  selectionAspectLock_->setToolTip("Manter a proporção original da seleção ao alterar L ou A.");
+  numericRow->addWidget(selectionAspectLock_);
+  auto* gridBox=new QWidget(selectionContextBar_);
+  gridBox->setObjectName("selection_num_anchor_grid_19_8");
+  gridBox->setToolTip("Grade de referência 3×3: posição X/Y e ponto fixo da escala.");
+  auto* grid=new QGridLayout(gridBox);
+  grid->setContentsMargins(0,0,0,0);grid->setSpacing(1);
+  auto* exclusive=new QButtonGroup(gridBox);exclusive->setExclusive(true);
+  const std::array<QString,9> names={"superior esquerdo","superior central","superior direito",
+    "meio esquerdo","centro","meio direito","inferior esquerdo","inferior central","inferior direito"};
+  for(int index=0;index<9;++index){
+   auto* spot=new QToolButton(gridBox);
+   spot->setObjectName(QString("selection_anchor_%1_19_8").arg(index));
+   spot->setText("·");spot->setFixedSize(19,19);spot->setCheckable(true);
+   spot->setChecked(index==0);spot->setFocusPolicy(Qt::NoFocus);
+   spot->setAccessibleName("Referência "+names[size_t(index)]);
+   spot->setToolTip("Fixar "+names[size_t(index)]);
+   spot->setStyleSheet("QToolButton{border:1px solid #697784;border-radius:3px;padding:0px;}"
+     "QToolButton:checked{background:#F18A2C;color:#181818;border:1px solid #FFC16A;}");
+   exclusive->addButton(spot);grid->addWidget(spot,index/3,index%3);
+   selectionAnchorButtons_[size_t(index)]=spot;
+   connect(spot,&QToolButton::clicked,this,[this,index]{
+    selectionAnchor_=index;updateSelectionContext();
+   });
+  }
+  numericRow->addWidget(gridBox);numericRow->addStretch();
+  contextColumn->addLayout(numericRow);
   layout->addWidget(selectionContextBar_);
   selectionContextBar_->hide();
 
@@ -4456,6 +4515,61 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
   status->setText("Camada atualizada para a simulacao; M3/M4 e potencia NAO enviados ao laser.");
  }
+ std::vector<int> numericSelectionIds()const{
+  check(view.tool==QtEditorLab::Tool::Select&&!view.nativeModeActive()&&
+        !view.selected.empty(),"Selecione formas vetoriais editaveis.");
+  const auto& st=view.editor.state();
+  std::set<int> ids(view.selected.begin(),view.selected.end()),groups;
+  for(int id:ids){
+   auto it=st.objects.find(id);
+   check(it!=st.objects.end(),"Objeto da selecao nao encontrado.");
+   if(it->second.group>0)groups.insert(it->second.group);
+  }
+  for(const auto& [id,meta]:st.objects)
+   if(meta.group>0&&groups.count(meta.group))ids.insert(id);
+  for(int id:ids)check(editable(st,id),"Selecao bloqueada ou oculta.");
+  for(const auto& [root,text]:st.editableTexts)
+   for(int id:text.members)check(!ids.count(id),
+     "Texto editavel exige transformacao de metadados: use o painel Texto.");
+  return {ids.begin(),ids.end()};
+ }
+ void applySelectionNumeric(int field,double target){
+  if(selectionNumericUpdating_||field<0||field>=4||
+    !selectionNumeric_[size_t(field)]||
+    !selectionNumeric_[size_t(field)]->isEnabled())return;
+  run([this,field,target]{
+   check(std::isfinite(target),"Valor numerico invalido.");
+   const auto ids=numericSelectionIds();
+   const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
+   const double width=hi.x-lo.x,height=hi.y-lo.y;
+   check(std::isfinite(width)&&std::isfinite(height)&&width>=0&&height>=0,
+      "Limites geometricos invalidos.");
+   const double ax=double(selectionAnchor_%3)*0.5;
+   const double ay=double(selectionAnchor_/3)*0.5;
+   const Pt pivot{lo.x+ax*width,lo.y+ay*height};
+   if(field==0||field==1){
+    const Pt delta=field==0?Pt{target-pivot.x,0.}:Pt{0.,target-pivot.y};
+    check(std::isfinite(delta.x)&&std::isfinite(delta.y),"Deslocamento invalido.");
+    if(std::hypot(delta.x,delta.y)<1e-8)return;
+    view.editor.moveObjects(ids,delta);
+   }else{
+    check(width>1e-8&&height>1e-8,
+       "Selecao sem largura/altura: nao redimensionar linhas degeneradas.");
+    check(target>=0.01&&target<=1000000.,"Dimensao fora do limite.");
+    const double factor=target/(field==2?width:height);
+    check(std::isfinite(factor)&&factor>0.,"Fator de escala invalido.");
+    const bool lock=selectionAspectLock_&&selectionAspectLock_->isChecked();
+    const double sx=field==2||lock?factor:1.;
+    const double sy=field==3||lock?factor:1.;
+    if(std::abs(sx-1.)<1e-9&&std::abs(sy-1.)<1e-9)return;
+    check(std::isfinite(width*sx)&&std::isfinite(height*sy)&&
+      width*sx<=1000000.&&height*sy<=1000000.,"Tamanho final excedeu limite.");
+    view.editor.scaleObjects(ids,pivot,sx,sy);
+   }
+   view.rebuild(); // persistent geometry only, no physical command
+  });
+  updateSelectionContext(); // also reset control after rejected input
+ }
  void updateSelectionContext(){
   if(!selectionContextBar_)return;
   const bool nativeSelected=view.nativeSelected().has_value()&&view.nativeModeActive();
@@ -4489,6 +4603,33 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   selectionContextUngroup_->setEnabled(editableSelection&&groupedObject);
   selectionContextDuplicate_->setEnabled(editableSelection&&view.selected.size()==1&&!groupedObject);
   selectionContextDelete_->setEnabled(nativeSelected||editableSelection);
+  bool numericEnabled=editableSelection&&!view.busy()&&
+       !(curves&&curves->dragging())&&bounds.has_value();
+  std::vector<int> ids;
+  if(numericEnabled)try{ids=numericSelectionIds();}
+  catch(const std::exception&){numericEnabled=false;}
+  QRectF r;
+  if(numericEnabled){
+   const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
+   r=QRectF(QPointF(lo.x,lo.y),QPointF(hi.x,hi.y)).normalized();
+  }else if(bounds)r=bounds->normalized();
+  const double ax=double(selectionAnchor_%3)*0.5,ay=double(selectionAnchor_/3)*0.5;
+  const std::array<double,4> values={r.left()+ax*r.width(),
+    r.top()+ay*r.height(),r.width(),r.height()};
+  selectionNumericUpdating_=true;
+  for(int k=0;k<4;++k){
+   auto* spin=selectionNumeric_[size_t(k)];
+   if(!spin)continue;
+   const QSignalBlocker guard(spin);
+   spin->setEnabled(numericEnabled&&(k<2||(r.width()>1e-8&&r.height()>1e-8)));
+   spin->setValue(std::clamp(values[size_t(k)],spin->minimum(),spin->maximum()));
+  }
+  selectionNumericUpdating_=false;
+  if(selectionAspectLock_)selectionAspectLock_->setEnabled(numericEnabled&&
+     r.width()>1e-8&&r.height()>1e-8);
+  selectionContextSummary_->setToolTip(numericEnabled?
+    "Grade laranja define referencia para X/Y e dimensoes. Enter confirma, Ctrl+Z desfaz.":
+    "Somente leitura para texto editavel, Bezier nativa, imagens, camadas bloqueadas.");
  }
  void refresh(){
   int current=layers->currentData().toInt();refreshing=true;layers->clear();for(const auto& [id,l]:view.editor.state().layers)layers->addItem(QString::fromStdString(l.name),id);
@@ -7376,6 +7517,47 @@ static QJsonObject layoutIcons198Test(){
        "Grupo nao habilitou com duas formas");
  w.view.clearSelection();w.refresh();
  check(!selectionRibbon->isVisible(),"Barra contextual nao ocultou ao limpar selecao");
+ // Numeric editing from the same visible contextual ribbon, independent of hardware.
+ LabWindow sizes(Document{});sizes.resize(1240,760);sizes.show();
+ QApplication::processEvents();
+ const int targetId=sizes.view.editor.rectangle({10,20},20,10);
+ sizes.view.rebuild();sizes.view.activate({targetId,0});sizes.refresh();
+ auto* sw=sizes.findChild<QDoubleSpinBox*>("selection_num_w_19_8");
+ auto* sh=sizes.findChild<QDoubleSpinBox*>("selection_num_h_19_8");
+ auto* sx=sizes.findChild<QDoubleSpinBox*>("selection_num_x_19_8");
+ auto* sy=sizes.findChild<QDoubleSpinBox*>("selection_num_y_19_8");
+ auto* lock=sizes.findChild<QCheckBox*>("selection_num_aspect_lock_19_8");
+ auto* corner=sizes.findChild<QToolButton*>("selection_anchor_8_19_8");
+ check(sw&&sh&&sx&&sy&&lock&&corner&&sw->isEnabled()&&lock->isChecked(),
+       "Campos numericos, proporcao ou grade 3x3 ausentes");
+ const auto original=sizes.view.editor.state().doc;
+ const size_t prev=sizes.view.editor.undoCount();
+ sw->setValue(40.);
+ auto b=boundsOf(sizes.view.editor.state().doc,{targetId});
+ check(std::abs(b.first.x-10.)<1e-7&&std::abs(b.first.y-20.)<1e-7&&
+       std::abs(b.second.x-50.)<1e-7&&std::abs(b.second.y-40.)<1e-7&&
+       sizes.view.editor.undoCount()==prev+1,"Proporcao da selecao e Undo nao foram atomicos");
+ check(sizes.view.editor.undo()&&sameDoc(sizes.view.editor.state().doc,original)&&
+       sizes.view.editor.redo(),"Undo/Redo da proporcao falhou");
+ corner->click();
+ check(std::abs(sx->value()-50.)<1e-7&&std::abs(sy->value()-40.)<1e-7,
+       "Ponto de referencia inferior direito nao foi aplicado");
+ sx->setValue(100.);sy->setValue(90.);
+ b=boundsOf(sizes.view.editor.state().doc,{targetId});
+ check(std::abs(b.first.x-60.)<1e-7&&std::abs(b.first.y-70.)<1e-7&&
+       std::abs(b.second.x-100.)<1e-7&&std::abs(b.second.y-90.)<1e-7,
+       "Posicao numerica X/Y pelo ponto inferior direito falhou");
+ lock->setChecked(false);sw->setValue(60.);
+ b=boundsOf(sizes.view.editor.state().doc,{targetId});
+ check(std::abs(b.first.x-40.)<1e-7&&std::abs(b.first.y-70.)<1e-7&&
+       std::abs(b.second.x-100.)<1e-7&&std::abs(b.second.y-90.)<1e-7,
+       "Escala sem trava alterou a altura ou deslocou a ancora");
+ const size_t noop=sizes.view.editor.undoCount();
+ sw->setValue(60.);
+ check(sizes.view.editor.undoCount()==noop,"Valor repetido criou Undo desnecessario");
+ sizes.view.clearSelection();sizes.refresh();
+ check(!sw->isEnabled(),"Campo continuou editavel sem selecao");
+ sizes.close();
  // Real viewport mouse modifiers must match the reference editing model.
  w.view.setTransform(QTransform::fromScale(6,6));w.view.centerOn(28,15);
  QApplication::processEvents();
