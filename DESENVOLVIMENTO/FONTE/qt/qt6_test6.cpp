@@ -4563,7 +4563,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* mmLabel=new QLabel("mm",operationStrip);
   mmLabel->setToolTip("Campos de posição e tamanho em milímetros.");
   operationRow->addWidget(mmLabel);
-  const QStringList names={"X","Y","L","A"};
+  const QStringList footerFieldLabels={"X","Y","L","A"};
   for(int k=0;k<4;++k){
    auto* field=selectionNumeric_[size_t(k)];
    check(field!=nullptr,"Campos de selecao nao inicializados");
@@ -4571,7 +4571,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    field->setSuffix("");
    field->setMinimumWidth(68);field->setMaximumWidth(92);
    field->setFixedHeight(27);
-   auto* label=new QLabel(names.at(k),operationStrip);
+   auto* label=new QLabel(footerFieldLabels.at(k),operationStrip);
    operationRow->addWidget(label);
    operationRow->addWidget(field);
   }
