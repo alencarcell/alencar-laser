@@ -3196,6 +3196,11 @@ public:
   hideTools->setToolTip("Recolher ou mostrar barra de ferramentas");quickRow->addWidget(hideTools);
   auto* hidePanels=new QPushButton("Painéis ›");hidePanels->setFocusPolicy(Qt::NoFocus);
   hidePanels->setToolTip("Recolher ou mostrar os painéis à direita");quickRow->addWidget(hidePanels);
+  auto* showSelectionProperties=new QPushButton("Propriedades");
+  showSelectionProperties->setObjectName("open_selection_properties_19_8");
+  showSelectionProperties->setToolTip("Mostrar o inspetor de seleção somente quando solicitado");
+  showSelectionProperties->setFocusPolicy(Qt::NoFocus);
+  quickRow->addWidget(showSelectionProperties);
   auto* themeButton=new QPushButton("☼ Tema");themeButton->setObjectName("theme_toggle");
   themeButton->setToolTip("Alternar tema escuro ou claro");themeButton->setFocusPolicy(Qt::NoFocus);quickRow->addWidget(themeButton);
   connect(themeButton,&QPushButton::clicked,this,[this]{darkTheme_=!darkTheme_;
@@ -3215,14 +3220,17 @@ public:
   selectionContextSummary_->setObjectName("selection_context_summary_19_8");
   selectionContextSummary_->setAccessibleName("Medidas da seleção, somente leitura");
   selectionContextSummary_->setToolTip("Caixa envolvente em mm. Campos numéricos editáveis e referência de 9 pontos ainda pendentes.");
+  selectionContextSummary_->setWordWrap(true);
   contextRow->addWidget(selectionContextSummary_,1);
-  auto contextButton=[this,contextRow](const QString& id,const QString& title,
+  auto* actionGrid=new QGridLayout;actionGrid->setSpacing(3);
+  contextColumn->addLayout(actionGrid);
+  auto contextButton=[this,actionGrid](const QString& id,const QString& title,
                                         const QString& tip,const QString& target){
    auto* button=new QPushButton(title,selectionContextBar_);
    button->setObjectName(id);button->setToolTip(tip);
    button->setAccessibleName(tip);button->setFocusPolicy(Qt::NoFocus);
    button->setProperty("compact",true);
-   contextRow->addWidget(button);
+   const int n=actionGrid->count();actionGrid->addWidget(button,n/2,n%2);
    connect(button,&QPushButton::clicked,this,[this,target]{
     if(buttons.count(target))buttons.at(target)->click();
    });
@@ -3241,7 +3249,7 @@ public:
   selectionContextTextEdit_->setToolTip("Editar fonte, conteúdo e estilo do texto vetorial original.");
   selectionContextTextEdit_->setFocusPolicy(Qt::NoFocus);
   selectionContextTextEdit_->setProperty("compact",true);
-  contextRow->addWidget(selectionContextTextEdit_);
+  actionGrid->addWidget(selectionContextTextEdit_,2,0,1,2);
   selectionContextTextEdit_->hide();
   connect(selectionContextTextEdit_,&QPushButton::clicked,this,[this]{
    if(view.busy()||view.nativeModeActive())return;
@@ -3251,13 +3259,13 @@ public:
    if(roots.size()==1)editVectorTextObject(*roots.begin());
   });
   // Numeric row: four mm fields, proportion lock, actual 3x3 anchor grid.
-  auto* numericRow=new QHBoxLayout;
-  numericRow->setSpacing(4);
+  auto* numericRow=new QGridLayout;
+  numericRow->setHorizontalSpacing(3);numericRow->setVerticalSpacing(5);
   const std::array<QString,4> fieldNames={"X","Y","L","A"};
   const std::array<QString,4> fieldIds={"selection_num_x_19_8","selection_num_y_19_8",
                                          "selection_num_w_19_8","selection_num_h_19_8"};
   for(int field=0;field<4;++field){
-   numericRow->addWidget(new QLabel(fieldNames[size_t(field)],selectionContextBar_));
+   numericRow->addWidget(new QLabel(fieldNames[size_t(field)],selectionContextBar_),field/2,(field%2)*2);
    auto* spin=new QDoubleSpinBox(selectionContextBar_);
    spin->setObjectName(fieldIds[size_t(field)]);
    spin->setDecimals(2);spin->setSingleStep(1);
@@ -3268,7 +3276,7 @@ public:
    spin->setToolTip(field<2?"Coordenada do ponto de referência (Enter confirma).":
       "Dimensão da caixa envolvente (Enter confirma, Ctrl+Z desfaz).");
    selectionNumeric_[size_t(field)]=spin;
-   numericRow->addWidget(spin);
+   numericRow->addWidget(spin,field/2,(field%2)*2+1);
    connect(spin,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
            this,[this,field](double value){applySelectionNumeric(field,value);});
   }
@@ -3276,7 +3284,7 @@ public:
   selectionAspectLock_->setObjectName("selection_num_aspect_lock_19_8");
   selectionAspectLock_->setChecked(true);
   selectionAspectLock_->setToolTip("Manter a proporção original da seleção ao alterar L ou A.");
-  numericRow->addWidget(selectionAspectLock_);
+  numericRow->addWidget(selectionAspectLock_,2,0,1,2);
   auto* gridBox=new QWidget(selectionContextBar_);
   gridBox->setObjectName("selection_num_anchor_grid_19_8");
   gridBox->setToolTip("Grade de referência 3×3: posição X/Y e ponto fixo da escala.");
@@ -3300,10 +3308,11 @@ public:
     selectionAnchor_=index;updateSelectionContext();
    });
   }
-  numericRow->addWidget(gridBox);numericRow->addStretch();
+  numericRow->addWidget(gridBox,2,2,1,2,Qt::AlignCenter);
   contextColumn->addLayout(numericRow);
-  layout->addWidget(selectionContextBar_);
-  selectionContextBar_->hide();
+  contextColumn->addStretch(1);
+  // Insert into inspectorTabs later; never change the central canvas height.
+
 
   auto* splitter=new QSplitter(Qt::Horizontal);splitter->setObjectName("workspaceSplitter");
   persistentSplitter_=splitter;
@@ -3448,8 +3457,13 @@ public:
    b->setAccessibleName(name);b->setToolTip(tooltip);
    grid->addWidget(b,grid->count(),0);return b;
   };
-  tools->addSpacing(6);
-  auto* vectorGrid=newGrid();
+  // Secondary and not-yet-ready actions are no longer visible on the drawing rail.
+  auto* secondaryTools=new QWidget(leftContent);
+  secondaryTools->setObjectName("secondary_tools_hidden_19_8");
+  auto* secondaryLayout=new QVBoxLayout(secondaryTools);
+  secondaryLayout->setContentsMargins(0,0,0,0);
+  auto* vectorGrid=new QGridLayout;
+  secondaryLayout->addLayout(vectorGrid);
   for(const auto& data:std::vector<std::tuple<QString,QString>>{
    {"◎ Offset","Contorno interno/externo"},
    {"⊕ União","Soldar vetores"},{"⊖ Subtr.","Subtrair formas"}}){
@@ -3484,8 +3498,8 @@ public:
       .arg(r.width(),0,'f',2).arg(r.height(),0,'f',2)
       .arg(r.left(),0,'f',2).arg(r.top(),0,'f',2));
   });
-  tools->addSpacing(5);
-  auto* fileGrid=newGrid();
+  auto* fileGrid=new QGridLayout;
+  secondaryLayout->addLayout(fileGrid);
   for(const auto& data:std::vector<QString>{"SVG", "DXF"}){
    fileGrid->addWidget(future(data,"Importação de "+data),fileGrid->count(),0);
   }
@@ -3499,6 +3513,8 @@ public:
     if(!file.isEmpty())openFilePath(file);
    });
   });
+  tools->addWidget(secondaryTools);
+  secondaryTools->hide();
   // Texto longo alargava o grid e deslocava os icones para fora do painel.
   auto* importImageButton=new QPushButton;
   importImageButton->setObjectName("open_image_for_trace");
@@ -3719,6 +3735,18 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   lockedNote->setObjectName("brandSub");lockedNote->setWordWrap(true);inspector->addWidget(lockedNote);
   auto* layersScroll=new QScrollArea;layersScroll->setWidgetResizable(true);
   layersScroll->setWidget(layersTab);inspectorTabs->addTab(layersScroll,"Camadas");
+  auto* selectionScroll=new QScrollArea;
+  selectionScroll->setObjectName("selection_inspector_scroll_19_8");
+  selectionScroll->setWidgetResizable(true);
+  selectionScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  selectionScroll->setWidget(selectionContextBar_);
+  inspectorTabs->addTab(selectionScroll,"Seleção");
+  inspectorTabs->setCurrentWidget(layersScroll);
+  connect(showSelectionProperties,&QPushButton::clicked,this,
+          [this,inspectorTabs,selectionScroll,right]{
+   if(!right->isVisible())right->setVisible(true);
+   inspectorTabs->setCurrentWidget(selectionScroll);
+  });
 
   auto* propsTab=new QWidget;auto* properties=new QVBoxLayout(propsTab);
   properties->setContentsMargins(9,9,9,9);properties->setSpacing(8);
@@ -4199,6 +4227,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   command(arrangeMenu,"Girar 90°","rotate_90");
   command(arrangeMenu,"Espelhar horizontalmente","mirror_horiz");
   command(arrangeMenu,"Espelhar verticalmente","mirror_vertical");
+  auto* measureAction=arrangeMenu->addAction("Medir seleção (somente leitura)");
+  connect(measureAction,&QAction::triggered,measureShortcut,&QPushButton::click);
   auto* alignMenu=arrangeMenu->addMenu("Alinhar formas");
   for(const auto& [label,mode]:std::vector<std::pair<QString,int>>{
        {"Esquerda",0},{"Direita",1},{"Topo",2},{"Base",3},
@@ -4594,10 +4624,13 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const bool polyline=view.tool==QtEditorLab::Tool::Select&&!view.nativeModeActive()&&
        !rasterSelected&&!view.selected.empty();
   const bool show=nativeSelected||polyline||rasterSelected;
-  selectionContextBar_->setVisible(show);
+  // Selection updates the model only; it does not open tabs or reflow the canvas.
   if(!show){
+   selectionContextSummary_->setText("Selecione uma forma para ver as propriedades.");
    if(selectionContextTextEdit_)selectionContextTextEdit_->hide();
-   // Do not leave active numeric controls when selection is cleared.
+   for(auto* b:{selectionContextGroup_,selectionContextUngroup_,
+                selectionContextDuplicate_,selectionContextDelete_})
+    if(b)b->setEnabled(false);
    for(auto* spin:selectionNumeric_)if(spin)spin->setEnabled(false);
    if(selectionAspectLock_)selectionAspectLock_->setEnabled(false);
    return;
@@ -4626,11 +4659,11 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
        groupedObject?" · grupo":"");
   if(bounds){
    const QRectF rect=bounds->normalized();
-   selectionContextSummary_->setText(
-    QString("%1  |  X %2  Y %3  |  L %4  A %5 mm  ·  leitura")
-     .arg(prefix).arg(rect.left(),0,'f',2).arg(rect.top(),0,'f',2)
-     .arg(rect.width(),0,'f',2).arg(rect.height(),0,'f',2));
-  }else selectionContextSummary_->setText(prefix+"  |  medidas indisponíveis");
+   selectionContextSummary_->setText(prefix);
+   selectionContextSummary_->setToolTip(QString("Caixa envolvente: X %1 · Y %2 · L %3 · A %4 mm")
+    .arg(rect.left(),0,'f',2).arg(rect.top(),0,'f',2)
+    .arg(rect.width(),0,'f',2).arg(rect.height(),0,'f',2));
+  }else selectionContextSummary_->setText(prefix+" · medidas indisponíveis");
   selectionContextGroup_->setEnabled(editableSelection&&groupIds.size()>=2);
   selectionContextUngroup_->setEnabled(editableSelection&&groupedObject);
   selectionContextDuplicate_->setEnabled(editableSelection&&!textOnly&&
@@ -7542,18 +7575,31 @@ static QJsonObject layoutIcons198Test(){
  auto* contextUngroup=w.findChild<QPushButton*>("selection_context_ungroup_19_8");
  check(selectionRibbon&&selectionLabel&&contextGroup&&contextUngroup,
        "Barra contextual de selecao ausente");
- check(!selectionRibbon->isVisible(),"Barra contextual exibida sem objeto selecionado");
+ auto* tabs=w.findChild<QTabWidget*>("inspectorTabs");
+ auto* openProperties=w.findChild<QPushButton*>("open_selection_properties_19_8");
+ auto* hiddenTools=w.findChild<QWidget*>("secondary_tools_hidden_19_8");
+ check(tabs&&openProperties&&hiddenTools&&!hiddenTools->isVisible(),
+       "Atalhos repetidos continuam na barra de desenho");
+ check(tabs->tabText(tabs->currentIndex())=="Camadas"&&!selectionRibbon->isVisible(),
+       "Painel de seleção aberto sem pedido");
+ const int canvasHeight=w.view.height();
  const int contextA=w.view.editor.rectangle({10,10},10,10);
  const int contextB=w.view.editor.rectangle({35,10},10,10);
  w.view.rebuild();w.view.activate({contextA,0});w.refresh();
- check(selectionRibbon->isVisible()&&selectionLabel->text().contains("L 10.00")&&
+ check(!selectionRibbon->isVisible()&&w.view.height()==canvasHeight,
+       "Selecionar forma alterou a altura do canvas ou abriu propriedades");
+ openProperties->click();QApplication::processEvents();
+ check(selectionRibbon->isVisible()&&selectionLabel->text().contains("1 forma")&&
        !contextGroup->isEnabled()&&!contextUngroup->isEnabled(),
-       "Barra contextual nao mostrou medidas/acoes de uma forma");
+       "Painel solicitado nao apresenta estado de uma forma");
  w.view.selected.insert(contextB);w.view.applySelectionStyles();w.refresh();
  check(contextGroup->isEnabled()&&selectionLabel->text().contains("2 forma"),
-       "Grupo nao habilitou com duas formas");
+       "Agrupar nao habilitou com duas formas");
  w.view.clearSelection();w.refresh();
- check(!selectionRibbon->isVisible(),"Barra contextual nao ocultou ao limpar selecao");
+ check(selectionRibbon->isVisible()&&selectionLabel->text().contains("Selecione")&&
+       !contextGroup->isEnabled(),"Painel nao foi mantido em selecao vazia");
+ tabs->setCurrentIndex(0);QApplication::processEvents();
+ check(!selectionRibbon->isVisible(),"Painel de seleção nao fechou ao trocar aba");
  // Numeric editing from the same visible contextual ribbon, independent of hardware.
  LabWindow sizes(Document{});sizes.resize(1240,760);sizes.show();
  QApplication::processEvents();
@@ -7602,6 +7648,8 @@ static QJsonObject layoutIcons198Test(){
  sizes.view.rebuild();sizes.view.activate({textId,0});sizes.refresh();
  auto* editText=sizes.findChild<QPushButton*>("selection_context_edit_text_19_8");
  auto* summary=sizes.findChild<QLabel*>("selection_context_summary_19_8");
+ sizes.findChild<QPushButton*>("open_selection_properties_19_8")->click();
+ QApplication::processEvents();
  check(editText&&editText->isVisible()&&editText->isEnabled()&&
     summary->text().contains("Texto editável")&&!sw->isEnabled(),
     "Texto editable exposto como poligono numerico ou sem edicao contextual");
