@@ -29,7 +29,50 @@ int main(){
   p.boreMm=4;p.moduleMm=0;require(rejects([&]{generate(p);}),"bad module accepted");
   p.moduleMm=3;p.pressureDeg=40;require(rejects([&]{generate(p);}),"bad pressure accepted");
   p.pressureDeg=20;p.flankSamples=100;require(rejects([&]{generate(p);}),"bad complexity accepted");
-  std::cout<<"GEAR_OFFLINE_19_9 PASS: geometry, bore, bounds, winding, invalid inputs\n";
+
+  // Referência visual Inkscape: 19 dentes, passo circular 10 mm, pressão 30°, furo 10 mm.
+  require(std::abs(circularPitchFromModule(3.)-3.*std::numbers::pi)<1e-12,
+          "circular pitch calculation failed");
+  for(double m:{0.5,1.,3.,7.25,20.}){
+   require(std::abs(moduleFromCircularPitch(circularPitchFromModule(m))-m)<1e-10,
+           "module/circular pitch roundtrip failed");
+  }
+  require(rejects([]{(void)moduleFromCircularPitch(0.);}),"zero pitch accepted");
+  require(rejects([]{(void)circularPitchFromModule(25.);}),"oversize module accepted");
+  Parameters ink;
+  ink.teeth=19;ink.moduleMm=moduleFromCircularPitch(10.);
+  ink.pressureDeg=30.;ink.boreMm=10.;
+  const auto example=generate(ink);
+  require(std::abs(2.*example.pitchRadius-190./std::numbers::pi)<1e-9,
+          "Inkscape reference pitch diameter failed");
+  require(std::abs(2.*example.outerRadius-210./std::numbers::pi)<1e-9,
+          "Inkscape reference outside diameter failed");
+  require(example.bore.size()==96,"Inkscape bore size incorrect");
+
+  PairParameters pair;
+  pair.driver=ink;pair.drivenTeeth=38;pair.drivenBoreMm=10.;
+  const auto pairResult=generatePairNominal(pair);
+  require(std::abs(pairResult.ratio-2.)<1e-12,"gear pair ratio incorrect");
+  require(std::abs(pairResult.centerDistanceMm-285./std::numbers::pi)<1e-9,
+          "gear pair center spacing incorrect");
+  require(pairResult.drivenCenter.x==pairResult.centerDistanceMm &&
+          !pairResult.meshingValidated,"nominal pair incorrectly certified");
+  pair.drivenTeeth=5;
+  require(rejects([&]{(void)generatePairNominal(pair);}),"unsafe follower accepted");
+
+  RackParameters rack;
+  rack.teeth=10;rack.moduleMm=ink.moduleMm;
+  rack.pressureDeg=ink.pressureDeg;rack.baseThicknessMm=10.;
+  const auto rail=generateRackNominal(rack);
+  require(rail.outline.size()>40u,"rack contour incomplete");
+  require(std::abs(rail.widthMm-100.)<1e-9,"rack pitch or width incorrect");
+  require(std::abs(rail.heightMm-(10.+2.25*ink.moduleMm))<1e-9,
+          "rack height incorrect");
+  require(signedArea(rail.outline)>0.,"rack outer contour winding incorrect");
+  require(!rail.meshingValidated,"rack incorrectly certified");
+  rack.baseThicknessMm=0.;
+  require(rejects([&]{(void)generateRackNominal(rack);}),"unsafe rack base accepted");
+  std::cout<<"GEAR_OFFLINE_19_9 PASS: geometry, bore, bounds, winding, invalid inputs, circular pitch, nominal pair/rack\n";
   return 0;
  }catch(const std::exception&e){std::cerr<<"GEAR_OFFLINE_19_9 FAIL: "<<e.what()<<"\n";return 1;}
 }
