@@ -4467,7 +4467,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   connect(centerShortcut,&QAction::triggered,centerBedAction,&QAction::trigger);
   alignShortcut->setMenu(sideAlignMenu);
   auto* generateMenu=mainMenu->addMenu("Gerar");
-  auto* gearAction=generateMenu->addAction("Engrenagem paramétrica (mm)...");
+  auto* gearsMenu=generateMenu->addMenu("Engrenagens");
+   auto* gearAction=gearsMenu->addAction("Engrenagem simples (mm)...");
   gearAction->setObjectName("generate_gear_offline_19_9");
   connect(gearAction,&QAction::triggered,this,[this]{
    if(view.busy()){status->setText("Conclua o gesto atual antes de gerar uma engrenagem.");return;}
@@ -8173,14 +8174,29 @@ static QJsonObject gearGenerator199Test(){
  auto* module=dialog.findChild<QDoubleSpinBox*>("gear_module_19_9");
  auto* pressure=dialog.findChild<QDoubleSpinBox*>("gear_pressure_19_9");
  auto* bore=dialog.findChild<QDoubleSpinBox*>("gear_bore_19_9");
+ auto* pitch=dialog.findChild<QDoubleSpinBox*>("gear_circular_pitch_19_9");
+ auto* previewEnabled=dialog.findChild<QCheckBox*>("gear_preview_enabled_19_9");
  auto* preview=dialog.findChild<QWidget*>("gear_preview_19_9");
- check(teeth&&module&&pressure&&bore&&preview,"Controles do gerador ausentes");
+ check(teeth&&module&&pressure&&bore&&pitch&&previewEnabled&&preview,
+       "Controles do gerador ausentes");
  check(teeth->value()==24&&std::abs(module->value()-3.)<1e-8&&
        std::abs(pressure->value()-20.)<1e-8,"Defaults do gerador mudaram");
  teeth->setValue(32);module->setValue(2.);bore->setValue(8.);
+ check(std::abs(pitch->value()-2.*std::numbers::pi)<2e-6,
+       "Passo circular nao acompanhou modulo");
  auto info=dialog.findChild<QLabel*>("gear_summary_19_9");
  check(info&&info->text().contains("68.00")&&info->text().contains("64.00"),
        "Previa nao atualizou diametro primitivo/externo");
+ teeth->setValue(19);pressure->setValue(30.);bore->setValue(10.);
+ pitch->setValue(10.);
+ check(std::abs(module->value()-10./std::numbers::pi)<2e-6,
+       "Passo circular nao atualizou modulo");
+ check(info->text().contains("60.48")&&info->text().contains("66.85"),
+       "Previa nao corresponde a referencia Inkscape");
+ previewEnabled->setChecked(false);
+ check(preview->isHidden(),"Desativar previa nao ocultou componente");
+ previewEnabled->setChecked(true);
+ check(!preview->isHidden(),"Reativar previa nao restaurou componente");
  const auto shape=alaser::gear::generate(dialog.parameters());
  check(!shape.outer.empty()&&shape.bore.size()==96,"Geometria de engrenagem incorreta");
  LabWindow w(Document{});w.resize(1100,750);w.show();QApplication::processEvents();
