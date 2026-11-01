@@ -4474,7 +4474,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    alaser::gear::GearDialog dialog(workspaceCfg_.drawingWidth,
                                     workspaceCfg_.drawingHeight,this);
    if(dialog.exec()!=QDialog::Accepted){view.setFocus();return;}
-   const auto settings=dialog.parameters(),center=dialog.centerMm();
+   const auto settings=dialog.parameters();
+   const auto center=dialog.centerMm();
    run([this,settings,center]{insertGeneratedGear(settings,center);});
    view.setFocus();
   });
@@ -8172,7 +8173,7 @@ static QJsonObject gearGenerator199Test(){
  auto* module=dialog.findChild<QDoubleSpinBox*>("gear_module_19_9");
  auto* pressure=dialog.findChild<QDoubleSpinBox*>("gear_pressure_19_9");
  auto* bore=dialog.findChild<QDoubleSpinBox*>("gear_bore_19_9");
- auto* preview=dialog.findChild<alaser::gear::GearPreview*>("gear_preview_19_9");
+ auto* preview=dialog.findChild<QWidget*>("gear_preview_19_9");
  check(teeth&&module&&pressure&&bore&&preview,"Controles do gerador ausentes");
  check(teeth->value()==24&&std::abs(module->value()-3.)<1e-8&&
        std::abs(pressure->value()-20.)<1e-8,"Defaults do gerador mudaram");
