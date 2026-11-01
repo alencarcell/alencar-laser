@@ -32,6 +32,7 @@
 #include <QSlider>
 #include <QContextMenuEvent>
 #include <array>
+#include <tuple>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPainterPathStroker>
@@ -4264,6 +4265,33 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   command(arrangeMenu,"Espelhar verticalmente","mirror_vertical");
   auto* measureAction=arrangeMenu->addAction("Medir seleção (somente leitura)");
   connect(measureAction,&QAction::triggered,measureShortcut,&QPushButton::click);
+  // Posicionamento da ARTE na pagina. Não lê nem movimenta o laser.
+  auto* pageMenu=arrangeMenu->addMenu("Mover seleção para...");
+  const std::array<std::tuple<QString,int,int>,9> positions{{
+   {"Centro da página",1,1},{"Canto superior esquerdo",0,0},
+   {"Topo central",1,0},{"Canto superior direito",2,0},
+   {"Meio esquerdo",0,1},{"Meio direito",2,1},
+   {"Canto inferior esquerdo",0,2},{"Base central",1,2},
+   {"Canto inferior direito",2,2}
+  }};
+  for(const auto& [title,x,y]:positions){
+   auto* action=pageMenu->addAction(title);
+   action->setObjectName(QString("move_selection_page_%1_%2_19_9").arg(x).arg(y));
+   connect(action,&QAction::triggered,this,[this,x,y]{
+    run([this,x,y]{
+     const auto ids=numericSelectionIds();
+     const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
+     const double fx=double(x)/2.,fy=double(y)/2.;
+     const Pt origin{lo.x+(hi.x-lo.x)*fx,lo.y+(hi.y-lo.y)*fy};
+     const Pt target{workspaceCfg_.drawingWidth*fx,workspaceCfg_.drawingHeight*fy};
+     const Pt delta{target.x-origin.x,target.y-origin.y};
+     check(std::isfinite(delta.x)&&std::isfinite(delta.y),"Posição fora do limite");
+     if(std::hypot(delta.x,delta.y)<1e-9)return;
+     view.editor.moveObjects(ids,delta);
+     view.rebuild(); // um Undo, expandindo grupos
+    });
+   });
+  }
   auto* alignMenu=arrangeMenu->addMenu("Alinhar formas");
   for(const auto& [label,mode]:std::vector<std::pair<QString,int>>{
        {"Esquerda",0},{"Direita",1},{"Topo",2},{"Base",3},
