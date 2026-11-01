@@ -313,3 +313,10 @@ target_include_directories(alencar_test19_8_distribute_offline PRIVATE src ${BOO
 if(NOT MSVC)
  target_compile_options(alencar_test19_8_distribute_offline PRIVATE -O2 -Wall -Wextra -Wpedantic)
 endif()
+
+# TESTE 19.9: matemáticas e perfis de rolo/mandril, sem Qt/hardware.
+add_executable(alencar_test19_9_rotary_offline tests/rotary_offline_19_9_standalone.cpp)
+target_include_directories(alencar_test19_9_rotary_offline PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_9_rotary_offline PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
