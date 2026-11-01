@@ -14,7 +14,7 @@ static double signedArea(const std::vector<Point>& poly){
 int main(){
  try{
   Parameters p;const auto a=generate(p);
-  require(a.outer.size()>p.teeth*20&&a.outer.size()<50000,"unexpected profile size");
+  require(a.outer.size()>size_t(p.teeth)*20u&&a.outer.size()<50000u,"unexpected profile size");
   require(a.bore.size()==96,"bore sampling failed");
   require(std::abs(a.pitchRadius-36.)<1e-9,"incorrect pitch radius");
   require(std::abs(a.outerRadius-39.)<1e-9,"incorrect outer radius");
