@@ -1175,6 +1175,13 @@ public:
  std::optional<std::array<QPointF,4>> selectionFrameQuad()const{
   return selectionQuadScene();
  }
+ void rememberSelectionFrame(const std::array<QPointF,4>& corners){
+  if(selected.empty()||nativeMode_)return;
+  orientedFrame_=corners;
+  orientedFrameIds_=selected;
+  orientedFrameGeneration_=editor.geometryGeneration;
+  viewport()->update();
+ }
  QPainterPath nativeItemPath(Key key)const{return nativeItems_.at(key)->path();}
  // A sessao deve estar viva durante todo o periodo em que estiver anexada.
  void attachNative(CurveDragSession* session){
@@ -4790,35 +4797,49 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   run([this,field,target]{
    check(std::isfinite(target),"Valor numerico invalido.");
    const auto ids=numericSelectionIds();
-   const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
-   const double width=hi.x-lo.x,height=hi.y-lo.y;
-   check(std::isfinite(width)&&std::isfinite(height)&&width>=0&&height>=0,
-      "Limites geometricos invalidos.");
+   const auto quad=view.selectionFrameQuad();
+   check(quad.has_value(),"Moldura de selecao ausente.");
+   auto q=*quad;
+   const QPointF x=q[1]-q[0],y=q[3]-q[0];
+   const double width=std::hypot(x.x(),x.y()),height=std::hypot(y.x(),y.y());
+   check(std::isfinite(width)&&std::isfinite(height)&&width>1e-8&&height>1e-8,
+      "Selecao sem largura/altura editavel.");
    const double ax=double(selectionAnchor_%3)*0.5;
    const double ay=double(selectionAnchor_/3)*0.5;
-   const Pt pivot{lo.x+ax*width,lo.y+ay*height};
-   if(field==0||field==1){
-    const Pt delta=field==0?Pt{target-pivot.x,0.}:Pt{0.,target-pivot.y};
-    check(std::isfinite(delta.x)&&std::isfinite(delta.y),"Deslocamento invalido.");
-    if(std::hypot(delta.x,delta.y)<1e-8)return;
-    view.editor.moveObjects(ids,delta);
+   const QPointF reference=q[0]+x*ax+y*ay;
+   if(field<2){
+    const QPointF delta=field==0?QPointF(target-reference.x(),0.):
+      QPointF(0.,target-reference.y());
+    check(std::isfinite(delta.x())&&std::isfinite(delta.y()),"Deslocamento invalido.");
+    if(std::hypot(delta.x(),delta.y())<1e-8)return;
+    view.editor.moveObjects(ids,fromQt(delta));
+    for(auto& p:q)p+=delta;
    }else{
-    check(width>1e-8&&height>1e-8,
-       "Selecao sem largura/altura: nao redimensionar linhas degeneradas.");
     check(target>=0.01&&target<=1000000.,"Dimensao fora do limite.");
     const double factor=target/(field==2?width:height);
-    check(std::isfinite(factor)&&factor>0.,"Fator de escala invalido.");
+    check(std::isfinite(factor)&&factor>0.,"Escala invalida.");
     const bool lock=selectionAspectLock_&&selectionAspectLock_->isChecked();
     const double sx=field==2||lock?factor:1.;
     const double sy=field==3||lock?factor:1.;
     if(std::abs(sx-1.)<1e-9&&std::abs(sy-1.)<1e-9)return;
     check(std::isfinite(width*sx)&&std::isfinite(height*sy)&&
       width*sx<=1000000.&&height*sy<=1000000.,"Tamanho final excedeu limite.");
-    view.editor.scaleObjects(ids,pivot,sx,sy);
+    const QPointF ux=x/width,uy=y/height;
+    const double aa=sx*ux.x()*ux.x()+sy*uy.x()*uy.x();
+    const double bb=sx*ux.x()*ux.y()+sy*uy.x()*uy.y();
+    const double cc=sx*ux.y()*ux.x()+sy*uy.y()*uy.x();
+    const double dd=sx*ux.y()*ux.y()+sy*uy.y()*uy.y();
+    view.editor.affineObjects(ids,fromQt(reference),aa,bb,cc,dd);
+    for(auto& p:q){
+     const QPointF delta=p-reference;
+     p=reference+QPointF(aa*delta.x()+bb*delta.y(),
+                         cc*delta.x()+dd*delta.y());
+    }
    }
-   view.rebuild(); // persistent geometry only, no physical command
+   view.rememberSelectionFrame(q);
+   view.rebuild(); // exactly one editor transaction; no physical commands
   });
-  updateSelectionContext(); // also reset control after rejected input
+  updateSelectionContext();
  }
  void updateSelectionContext(){
   if(!selectionContextBar_)return;
@@ -4891,25 +4912,28 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   std::vector<int> ids;
   if(numericEnabled)try{ids=numericSelectionIds();}
   catch(const std::exception&){numericEnabled=false;}
-  QRectF r;
-  if(numericEnabled){
-   const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
-   r=QRectF(QPointF(lo.x,lo.y),QPointF(hi.x,hi.y)).normalized();
-  }else if(bounds)r=bounds->normalized();
   const double ax=double(selectionAnchor_%3)*0.5,ay=double(selectionAnchor_/3)*0.5;
-  const std::array<double,4> values={r.left()+ax*r.width(),
-    r.top()+ay*r.height(),r.width(),r.height()};
+  std::array<double,4> values{};
+  if(auto quad=view.selectionFrameQuad()){
+   const QPointF x=(*quad)[1]-(*quad)[0],y=(*quad)[3]-(*quad)[0];
+   const QPointF ref=(*quad)[0]+x*ax+y*ay;
+   values={ref.x(),ref.y(),std::hypot(x.x(),x.y()),std::hypot(y.x(),y.y())};
+  }else if(bounds){
+   const QRectF r=bounds->normalized();
+   values={r.left()+ax*r.width(),r.top()+ay*r.height(),r.width(),r.height()};
+  }
+  const double width=values[2],height=values[3];
   selectionNumericUpdating_=true;
   for(int k=0;k<4;++k){
    auto* spin=selectionNumeric_[size_t(k)];
    if(!spin)continue;
    const QSignalBlocker guard(spin);
-   spin->setEnabled(numericEnabled&&(k<2||(r.width()>1e-8&&r.height()>1e-8)));
+   spin->setEnabled(numericEnabled&&(k<2||(width>1e-8&&height>1e-8)));
    spin->setValue(std::clamp(values[size_t(k)],spin->minimum(),spin->maximum()));
   }
   selectionNumericUpdating_=false;
   if(selectionAspectLock_)selectionAspectLock_->setEnabled(numericEnabled&&
-     r.width()>1e-8&&r.height()>1e-8);
+     width>1e-8&&height>1e-8);
   selectionContextSummary_->setToolTip(numericEnabled?
     "Grade laranja define referencia para X/Y e dimensoes. Enter confirma, Ctrl+Z desfaz.":
     "Somente leitura para texto editavel, Bezier nativa, imagens, camadas bloqueadas.");
