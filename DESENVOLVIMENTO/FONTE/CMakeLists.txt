@@ -320,3 +320,10 @@ target_include_directories(alencar_test19_9_rotary_offline PRIVATE src)
 if(NOT MSVC)
  target_compile_options(alencar_test19_9_rotary_offline PRIVATE -O2 -Wall -Wextra -Wpedantic)
 endif()
+
+# 19.9 — C++ portable gear generator; no printer, laser or Qt dependency.
+add_executable(alencar_test19_9_gear_offline tests/gear_generator_19_9_standalone.cpp)
+target_include_directories(alencar_test19_9_gear_offline PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_9_gear_offline PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
