@@ -7693,7 +7693,7 @@ static QJsonObject layoutIcons198Test(){
  auto* numericContainer=sizes.findChild<QWidget*>("selection_numeric_container_19_8");
  auto* actionContainer=sizes.findChild<QWidget*>("selection_actions_19_8");
  check(!sw->isEnabled()&&sw->text()=="—"&&numericContainer&&actionContainer&&
-       !numericContainer->isVisible()&&!actionContainer->isVisible(),
+       numericContainer->isHidden()&&actionContainer->isHidden(),
        "Selecao vazia mostrou medidas anteriores ou botoes de acao");
  EditableText textMeta;textMeta.text="ALENCAR";textMeta.fontFamily="Arial";
  textMeta.heightMm=12;textMeta.spacingPercent=100;
@@ -7701,7 +7701,7 @@ static QJsonObject layoutIcons198Test(){
  const int textId=sizes.view.editor.addEditableText(
    {{{10,10},{20,10},{20,20},{10,20}}},textMeta,0);
  sizes.view.rebuild();sizes.view.activate({textId,0});sizes.refresh();
- check(numericContainer->isVisible()&&actionContainer->isVisible(),
+ check(!numericContainer->isHidden()&&!actionContainer->isHidden(),
        "Nova selecao nao reabriu as medidas contextuais");
  auto* editText=sizes.findChild<QPushButton*>("selection_context_edit_text_19_8");
  auto* summary=sizes.findChild<QLabel*>("selection_context_summary_19_8");
