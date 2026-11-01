@@ -1408,7 +1408,8 @@ protected:
  }
 public:
  QtEditorLab(Document d):QGraphicsView(),editor(std::move(d)){
-  setScene(&scene_);setSceneRect(-2000,-2000,5000,5000);setRenderHints(QPainter::Antialiasing);
+  setScene(&scene_);setSceneRect(-2000,-2000,5000,5000);
+  setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
   setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);setTransformationAnchor(QGraphicsView::NoAnchor);
   // QAbstractScrollArea entrega os movimentos atraves do QWidget viewport.
   // Garantir rastreamento explicitamente no filho que recebe os eventos.
@@ -1482,7 +1483,10 @@ public:
   for(auto& c:editor.state().doc.contours){
     const auto meta=editor.state().objects.at(c.key.object);
     const auto layer=editor.state().layers.at(meta.layer);
-    auto* item=scene_.addPath(pathOf(c),QPen(layerColor(meta.layer),0));
+    QPen vectorPen(layerColor(meta.layer),1.15,Qt::SolidLine,
+                   Qt::RoundCap,Qt::RoundJoin);
+    vectorPen.setCosmetic(true);
+    auto* item=scene_.addPath(pathOf(c),vectorPen);
     item->setZValue(1);
     item->setVisible(layer.visible&&!hiddenTextEditingMembers_.count(c.key.object));
     objects_[c.key]=item;itemsByObject_[c.key.object].push_back(item);

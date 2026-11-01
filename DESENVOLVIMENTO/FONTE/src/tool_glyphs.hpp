@@ -9,8 +9,10 @@
 #include <QString>
 namespace alaser {
 inline QIcon toolGlyph(const QString& id){
- QPixmap pix(32,32);pix.fill(Qt::transparent);
- QPainter p(&pix);p.setRenderHint(QPainter::Antialiasing);
+ // Render at 2x logical resolution to avoid jagged, sketch-like toolbar glyphs.
+ QPixmap pix(64,64);pix.setDevicePixelRatio(2.0);pix.fill(Qt::transparent);
+ QPainter p(&pix);p.setRenderHint(QPainter::Antialiasing,true);
+ p.scale(2.,2.);
  QPen pen(QColor("#DE914C"),2.3,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin);
  p.setPen(pen);p.setBrush(Qt::NoBrush);
  if(id=="select"){
