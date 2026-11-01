@@ -4576,7 +4576,12 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const bool polyline=view.tool==QtEditorLab::Tool::Select&&!view.nativeModeActive()&&!view.selected.empty();
   const bool show=nativeSelected||polyline;
   selectionContextBar_->setVisible(show);
-  if(!show)return;
+  if(!show){
+   // Do not leave active numeric controls when selection is cleared.
+   for(auto* spin:selectionNumeric_)if(spin)spin->setEnabled(false);
+   if(selectionAspectLock_)selectionAspectLock_->setEnabled(false);
+   return;
+  }
   const auto bounds=view.selectionPreviewRect();
   std::set<int> groupIds;
   bool editableSelection=polyline;
