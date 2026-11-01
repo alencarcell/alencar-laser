@@ -88,4 +88,93 @@ inline Result generate(const Parameters& p){
   throw std::invalid_argument("contorno excessivamente complexo");
  return out;
 }
+
+/* Parâmetros editoriais: nenhuma função aciona máquina ou exporta G-code.
+ * Passo circular = pi * módulo. Não confundir passo circular com circunferência.
+ */
+inline double circularPitchFromModule(double moduleMm){
+ if(!std::isfinite(moduleMm)||moduleMm<0.5||moduleMm>20.)
+  throw std::invalid_argument("modulo fora dos limites");
+ return std::numbers::pi*moduleMm;
+}
+inline double moduleFromCircularPitch(double pitchMm){
+ const double m=pitchMm/std::numbers::pi;
+ if(!std::isfinite(pitchMm)||!std::isfinite(m)||m<0.5-1e-6||m>20.+1e-6)
+  throw std::invalid_argument("passo circular fora dos limites");
+ return std::clamp(m,0.5,20.);
+}
+
+// Geometria nominal do par; a fase dos dentes e a folga ainda NAO sao resolvidas.
+// Nao oferecer o resultado como par mecanicamente homologado.
+struct PairParameters{
+ Parameters driver{};
+ int drivenTeeth=36;
+ double drivenBoreMm=6.;
+};
+struct PairResult{
+ Result driver,driven;
+ double centerDistanceMm=0.;
+ double ratio=0.; // magnitude da redução = dentes acionados / dentes motores
+ Point driverCenter{},drivenCenter{};
+ bool meshingValidated=false;
+};
+inline PairResult generatePairNominal(const PairParameters& request){
+ auto second=request.driver;
+ second.teeth=request.drivenTeeth;
+ second.boreMm=request.drivenBoreMm;
+ PairResult out;
+ out.driver=generate(request.driver);
+ out.driven=generate(second);
+ out.centerDistanceMm=out.driver.pitchRadius+out.driven.pitchRadius;
+ out.ratio=double(second.teeth)/request.driver.teeth;
+ out.driverCenter={0.,0.};
+ out.drivenCenter={out.centerDistanceMm,0.};
+ return out;
+}
+
+// Cremalheira teórica de dentes trapezoidais, sem arredondamento/raiz de fresa.
+// Mantém a mesma referência módulo/ângulo do pinhão, mas não valida encaixe real.
+struct RackParameters{
+ int teeth=8;
+ double moduleMm=3.;
+ double pressureDeg=20.;
+ double baseThicknessMm=9.;
+};
+struct RackResult{
+ std::vector<Point> outline;
+ double circularPitchMm=0.;
+ double widthMm=0.,heightMm=0.;
+ bool meshingValidated=false;
+};
+inline RackResult generateRackNominal(const RackParameters& params){
+ if(params.teeth<1||params.teeth>120||
+    !std::isfinite(params.moduleMm)||params.moduleMm<0.5||params.moduleMm>20.||
+    !std::isfinite(params.pressureDeg)||params.pressureDeg<14.||params.pressureDeg>30.||
+    !std::isfinite(params.baseThicknessMm)||
+    params.baseThicknessMm<0.5*params.moduleMm||
+    params.baseThicknessMm>30.*params.moduleMm)
+  throw std::invalid_argument("parametros da cremalheira fora dos limites");
+ const double m=params.moduleMm,alpha=params.pressureDeg*std::numbers::pi/180.;
+ const double pitch=circularPitchFromModule(m),a=m,d=1.25*m;
+ const double flank=std::tan(alpha);
+ if(pitch/2.-2*d*flank<=0.||pitch/2.-2*a*flank<=0.)
+  throw std::invalid_argument("espacamento do dente da cremalheira invalido");
+ RackResult out;
+ out.circularPitchMm=pitch;out.widthMm=params.teeth*pitch;
+ out.heightMm=params.baseThicknessMm+a+d;
+ const double left=-pitch/2.,right=(params.teeth-.5)*pitch;
+ append(out.outline,{left,-d-params.baseThicknessMm});
+ append(out.outline,{left,-d});
+ for(int i=0;i<params.teeth;++i){
+  const double x=i*pitch;
+  append(out.outline,{x-pitch/4.-d*flank,-d});
+  append(out.outline,{x-pitch/4.+a*flank,a});
+  append(out.outline,{x+pitch/4.-a*flank,a});
+  append(out.outline,{x+pitch/4.+d*flank,-d});
+ }
+ append(out.outline,{right,-d});
+ append(out.outline,{right,-d-params.baseThicknessMm});
+ std::reverse(out.outline.begin(),out.outline.end()); // contorno externo anti-horário
+ return out;
+}
 } // namespace alaser::gear
