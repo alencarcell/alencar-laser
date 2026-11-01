@@ -23,6 +23,7 @@
 #include "render_chunks.hpp"
 #include "rotary_dialog_19_9.hpp"
 #include "gear_dialog_19_9.hpp"
+#include "gear_compound_dialog_19_9.hpp"
 #include <QApplication>
 #include <QGraphicsView>
 #include <QGraphicsScene>
@@ -2980,6 +2981,51 @@ public:
     "Confira espessura do material, folga e kerf antes de cortar.")
     .arg(spec.teeth).arg(inserted.size()));
  }
+
+ // Creates nominal editable outlines only. No output/G-code/hardware.
+ void insertGeneratedPair(const alaser::gear::PairParameters& spec,alaser::gear::Point center){
+  check(!view.busy(),"Termine a acao atual antes de gerar um par.");
+  check(std::isfinite(center.x)&&std::isfinite(center.y),"Centro invalido");
+  const auto result=alaser::gear::generatePairNominal(spec);
+  const int layerId=layers->currentData().toInt();
+  const auto& layer=view.editor.state().layers.at(layerId);
+  check(layer.visible&&!layer.locked,"Camada deve estar visivel e desbloqueada");
+  auto convert=[&](const std::vector<alaser::gear::Point>& source,double offset){
+   std::vector<Pt> points;points.reserve(source.size());
+   for(const auto& p:source)points.push_back({center.x+offset+p.x,center.y-p.y});
+   return points;
+  };
+  std::vector<std::vector<Pt>> contours;
+  contours.push_back(convert(result.driver.outer,0.));
+  if(!result.driver.bore.empty())contours.push_back(convert(result.driver.bore,0.));
+  contours.push_back(convert(result.driven.outer,result.centerDistanceMm));
+  if(!result.driven.bore.empty())contours.push_back(convert(result.driven.bore,result.centerDistanceMm));
+  const auto inserted=view.editor.addContours(std::move(contours),true,layerId,true);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  view.activate({inserted.front(),0});recoveryPolicy_.edited();
+  captureEvent("gear_generator_created",int(inserted.size()));refresh();
+  status->setText(QString("Par nominal: %1 mm entre centros, relação %2:1. "
+    "Folga, fase e engrenamento NÃO validados.")
+   .arg(result.centerDistanceMm,0,'f',2).arg(result.ratio,0,'f',2));
+ }
+ void insertGeneratedRack(const alaser::gear::RackParameters& spec,alaser::gear::Point origin){
+  check(!view.busy(),"Termine a acao atual antes de gerar cremalheira.");
+  check(std::isfinite(origin.x)&&std::isfinite(origin.y),"Origem invalida");
+  const auto result=alaser::gear::generateRackNominal(spec);
+  const int layerId=layers->currentData().toInt();
+  const auto& layer=view.editor.state().layers.at(layerId);
+  check(layer.visible&&!layer.locked,"Camada deve estar visivel e desbloqueada");
+  std::vector<Pt> points;points.reserve(result.outline.size());
+  for(const auto& p:result.outline)points.push_back({origin.x+p.x,origin.y-p.y});
+  std::vector<std::vector<Pt>> contours;contours.push_back(std::move(points));
+  const auto inserted=view.editor.addContours(std::move(contours),true,layerId,true);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  view.activate({inserted.front(),0});recoveryPolicy_.edited();
+  captureEvent("gear_generator_created",int(inserted.size()));refresh();
+  status->setText(QString("Cremalheira nominal criada: %1 dentes, passo %2 mm. "
+    "Encaixe e kerf NÃO validados.")
+   .arg(spec.teeth).arg(result.circularPitchMm,0,'f',3));
+ }
  void configureWorkspace(){
   QDialog dialog(this);dialog.setWindowTitle("Área de desenho e mesa — Alencar Laser");
   dialog.setMinimumWidth(420);
@@ -4479,6 +4525,27 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    const auto center=dialog.centerMm();
    run([this,settings,center]{insertGeneratedGear(settings,center);});
    view.setFocus();
+  });
+
+  auto* pairAction=gearsMenu->addAction("Par de engrenagens (nominal / offline)...");
+  pairAction->setObjectName("generate_gear_pair_offline_19_9");
+  connect(pairAction,&QAction::triggered,this,[this]{
+   if(view.busy()){status->setText("Conclua o gesto antes de gerar o par.");return;}
+   alaser::gear::CompoundGearDialog dialog(alaser::gear::CompoundKind::Pair,
+       workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight,this);
+   if(dialog.exec()!=QDialog::Accepted){view.setFocus();return;}
+   const auto p=dialog.pairParameters(),origin=dialog.origin();
+   run([this,p,origin]{insertGeneratedPair(p,origin);});view.setFocus();
+  });
+  auto* rackAction=gearsMenu->addAction("Cremalheira (nominal / offline)...");
+  rackAction->setObjectName("generate_gear_rack_offline_19_9");
+  connect(rackAction,&QAction::triggered,this,[this]{
+   if(view.busy()){status->setText("Conclua o gesto antes de gerar a cremalheira.");return;}
+   alaser::gear::CompoundGearDialog dialog(alaser::gear::CompoundKind::Rack,
+       workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight,this);
+   if(dialog.exec()!=QDialog::Accepted){view.setFocus();return;}
+   const auto p=dialog.rackParameters(),origin=dialog.origin();
+   run([this,p,origin]{insertGeneratedRack(p,origin);});view.setFocus();
   });
   auto* laserMenu=mainMenu->addMenu("Laser");
   auto* rotaryEntry=laserMenu->addAction("Configurar rotativo (Rolo / Mandril) — OFFLINE...");
