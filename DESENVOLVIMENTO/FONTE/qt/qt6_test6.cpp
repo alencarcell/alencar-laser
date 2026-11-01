@@ -350,6 +350,14 @@ class QtEditorLab final:public QGraphicsView{
  double transformSx_=1.,transformSy_=1.,transformAngle_=0.;
  QPointF transformMoveDelta_{};
  QTransform selectionPreviewTransform_{};
+ // A moldura de edição não é a caixa envolvente axis-aligned. Sua orientação
+ // é transitória, vinculada à seleção e à geração da geometria (Undo seguro).
+ std::optional<std::array<QPointF,4>> orientedFrame_;
+ std::set<int> orientedFrameIds_;
+ uint64_t orientedFrameGeneration_=0;
+ std::array<QPointF,4> transformQuad_{};
+ double transformAffineA_=1.,transformAffineB_=0.,
+        transformAffineC_=0.,transformAffineD_=1.;
  std::vector<int> transformIds_;
  std::vector<QGraphicsPathItem*> transformItems_;
  bool nativeContourPressing_=false;
@@ -669,44 +677,72 @@ class QtEditorLab final:public QGraphicsView{
   }
   return selectedBounds();
  }
+ static std::array<QPointF,4> quadFromRect(const QRectF& r){
+  return {r.topLeft(),r.topRight(),r.bottomRight(),r.bottomLeft()};
+ }
+ bool orientedFrameValid()const{
+  return !nativeMode_&&orientedFrame_&&orientedFrameIds_==selected&&
+         orientedFrameGeneration_==editor.geometryGeneration;
+ }
+ std::optional<std::array<QPointF,4>> selectionQuadScene()const{
+  if(transformDragging_){
+   auto points=transformQuad_;
+   for(auto& p:points)p=selectionPreviewTransform_.map(p);
+   return points;
+  }
+  if(nativeMode_&&!nativeEditHandles_&&nativeSession_&&nativeSession_->selected()){
+   const auto it=nativeItems_.find(*nativeSession_->selected());
+   if(it!=nativeItems_.end())return quadFromRect(it->second->path().boundingRect());
+  }
+  if(selected.empty()||tool!=Tool::Select)return {};
+  std::optional<std::array<QPointF,4>> points;
+  if(orientedFrameValid())points=*orientedFrame_;
+  else if(const auto bounds=selectedBounds())points=quadFromRect(*bounds);
+  if(points&&shapeDragging_)for(auto& p:*points)p+=shapePreviewDelta_;
+  return points;
+ }
+ static QPointF middle(QPointF a,QPointF b){return (a+b)/2.;}
+ std::array<QPointF,13> handlesForQuad(const std::array<QPointF,4>& q)const{
+  const auto map=viewportTransform();
+  std::array<QPointF,4> c;
+  for(int i=0;i<4;++i)c[size_t(i)]=map.map(q[size_t(i)]);
+  const QPointF center=middle(c[0],c[2]);
+  std::array<QPointF,13> handles{
+   c[0],middle(c[0],c[1]),c[1],middle(c[1],c[2]),
+   c[2],middle(c[2],c[3]),c[3],middle(c[3],c[0]),
+   c[0],c[1],c[2],c[3],center
+  };
+  for(int i=0;i<4;++i){
+   const QPointF v=c[size_t(i)]-center;
+   const double len=std::max(1e-8,std::hypot(v.x(),v.y()));
+   handles[size_t(8+i)]=c[size_t(i)]+v*(24./len);
+  }
+  return handles;
+ }
  std::array<QPointF,13> selectionHandles(const QRectF& bounds)const{
-  const QPointF tl=viewportTransform().map(bounds.topLeft());
-  const QPointF br=viewportTransform().map(bounds.bottomRight());
-  const double x0=tl.x(),x1=br.x(),y0=tl.y(),y1=br.y();
-  const double cx=(x0+x1)*.5,cy=(y0+y1)*.5;
-  return {QPointF(x0,y0),QPointF(cx,y0),QPointF(x1,y0),
-   QPointF(x1,cy),QPointF(x1,y1),QPointF(cx,y1),
-   QPointF(x0,y1),QPointF(x0,cy),
-   QPointF(x0-17,y0-17),QPointF(x1+17,y0-17),
-   QPointF(x1+17,y1+17),QPointF(x0-17,y1+17),
-   QPointF(cx,cy)};
+  return handlesForQuad(quadFromRect(bounds));
  }
  void paintSelectionHandles(QPainter* p)const{
   if(tool!=Tool::Select||nativeEditHandles_)return;
-  if(selected.empty()&&!(nativeMode_&&nativeSession_&&nativeSession_->selected()))return;
-  auto bounds=selectionDisplayBounds();if(!bounds)return;
-  const QPointF topLeft=viewportTransform().map(bounds->topLeft());
-  const QPointF bottomRight=viewportTransform().map(bounds->bottomRight());
-  const QRectF pixel(topLeft,bottomRight);
-  const auto handles=selectionHandles(*bounds);
-  p->save();p->resetTransform();p->setBrush(Qt::NoBrush);
-  QPen edge(QColor(238,154,60),1,Qt::DashLine);edge.setCosmetic(true);p->setPen(edge);
-  p->drawRect(pixel.normalized());
+  auto quad=selectionQuadScene();if(!quad)return;
+  const auto handles=handlesForQuad(*quad);
+  QPolygonF outline;
+  for(const auto& point:*quad)outline<<viewportTransform().map(point);
+  p->save();p->resetTransform();p->setRenderHint(QPainter::Antialiasing,true);
+  p->setBrush(Qt::NoBrush);
+  QPen edge(QColor(243,158,66),1.1,Qt::DashLine);
+  edge.setCosmetic(true);p->setPen(edge);p->drawPolygon(outline);
   for(int h=0;h<13;++h){
-   const QPointF point=handles[size_t(h)];
+   const QPointF at=handles[size_t(h)];
    p->setPen(QPen(QColor("#182633"),1));
-   p->setBrush(h==12?QColor("#FFAE45"):(h>=8?QColor("#49BCF4"):QColor("#F3F5F7")));
+   p->setBrush(h==12?QColor("#FFAE45"):(h>=8?QColor("#55C8F4"):QColor("#F3F5F7")));
    if(h==12){
-    p->drawRect(QRectF(point-QPointF(5.,5.),QSizeF(10.,10.)));
-    p->drawLine(point+QPointF(-3,0),point+QPointF(3,0));
-    p->drawLine(point+QPointF(0,-3),point+QPointF(0,3));
+    p->drawEllipse(at,4.,4.);
+    p->drawLine(at+QPointF(-2.,0),at+QPointF(2.,0));
    }else if(h>=8){
-    // Sinal de rotacao curva como nos editores vetoriais, sem alterar hit-test.
-    p->setBrush(Qt::NoBrush);p->setPen(QPen(QColor("#55C8F4"),2));
-    p->drawArc(QRectF(point.x()-6,point.y()-6,12,12),35*16,260*16);
-    p->drawLine(point+QPointF(5,-4),point+QPointF(8,-3));
-    p->drawLine(point+QPointF(5,-4),point+QPointF(6,-7));
-   }else p->drawRect(QRectF(point-QPointF(4.,4.),QSizeF(8.,8.)));
+    p->setBrush(Qt::NoBrush);p->setPen(QPen(QColor("#55C8F4"),1.7));
+    p->drawArc(QRectF(at.x()-6,at.y()-6,12,12),35*16,260*16);
+   }else p->drawRect(QRectF(at-QPointF(3.5,3.5),QSizeF(7,7)));
   }
   p->restore();
  }
@@ -717,6 +753,8 @@ class QtEditorLab final:public QGraphicsView{
   nativeTransformDragging_=false;nativeTransformKey_={};
   transformSx_=transformSy_=1.;transformAngle_=0.;transformMoveDelta_={};
   selectionPreviewTransform_=QTransform();
+  transformAffineA_=transformAffineD_=1.;
+  transformAffineB_=transformAffineC_=0.;
   viewport()->update();
  }
  bool beginSelectionTransform(QPointF position){
@@ -724,7 +762,9 @@ class QtEditorLab final:public QGraphicsView{
   const bool native=nativeMode_&&nativeSession_&&nativeSession_->selected();
   if(!native&&(nativeMode_||selected.empty()))return false;
   const auto bounds=selectionDisplayBounds();if(!bounds)return false;
-  const auto handles=selectionHandles(*bounds);
+  const auto quad=selectionQuadScene();
+  if(!quad)return false;
+  const auto handles=handlesForQuad(*quad);
   int h=-1;double distance=11.;
   // Preferir o ponto central quando a selecao e grande suficiente.
   if(QLineF(position,handles[12]).length()<=7.){h=12;distance=7.;}
@@ -750,7 +790,8 @@ class QtEditorLab final:public QGraphicsView{
   }
   if(transformItems_.empty()){cancelSelectionTransform();return false;}
   transformDragging_=true;transformHandle_=h;transformBounds_=*bounds;
-  transformAnchor_=h>=8?bounds->center():QPointF{};
+  transformQuad_=*quad;
+  transformAnchor_=h>=8?middle((*quad)[0],(*quad)[2]):QPointF{};
   transformSx_=transformSy_=1.;transformAngle_=0.;
   return true;
  }
