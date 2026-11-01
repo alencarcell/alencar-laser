@@ -22,6 +22,7 @@
 #include "raster_project_19_8.hpp"
 #include "render_chunks.hpp"
 #include "rotary_dialog_19_9.hpp"
+#include "gear_dialog_19_9.hpp"
 #include <QApplication>
 #include <QGraphicsView>
 #include <QGraphicsScene>
@@ -2955,6 +2956,30 @@ public:
    machineProfileSelector_->setCurrentIndex(workspaceCfg_.profile=="Personalizado"?1:0);
   }
  }
+ void insertGeneratedGear(const alaser::gear::Parameters& spec,alaser::gear::Point center){
+  check(!view.busy(),"Termine a acao atual antes de criar uma engrenagem.");
+  check(std::isfinite(center.x)&&std::isfinite(center.y),"Centro invalido");
+  const auto result=alaser::gear::generate(spec);
+  const int layerId=layers->currentData().toInt();
+  const auto& layer=view.editor.state().layers.at(layerId);
+  check(layer.visible&&!layer.locked,"Camada deve estar visivel e desbloqueada");
+  auto convert=[&](const std::vector<alaser::gear::Point>& source){
+   std::vector<Pt> points;points.reserve(source.size());
+   for(const auto& p:source)points.push_back({center.x+p.x,center.y-p.y});
+   return points;
+  };
+  std::vector<std::vector<Pt>> contours;
+  contours.push_back(convert(result.outer));
+  if(!result.bore.empty())contours.push_back(convert(result.bore));
+  const auto inserted=view.editor.addContours(std::move(contours),true,layerId,true);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  view.activate({inserted.front(),0});recoveryPolicy_.edited();
+  captureEvent("gear_generator_created",int(inserted.size()));
+  refresh();
+  status->setText(QString("Engrenagem de %1 dentes criada (%2 contornos, um Undo). "
+    "Confira espessura do material, folga e kerf antes de cortar.")
+    .arg(spec.teeth).arg(inserted.size()));
+ }
  void configureWorkspace(){
   QDialog dialog(this);dialog.setWindowTitle("Área de desenho e mesa — Alencar Laser");
   dialog.setMinimumWidth(420);
@@ -4441,6 +4466,18 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* centerShortcut=sideAlignMenu->addAction(centerBedAction->text());
   connect(centerShortcut,&QAction::triggered,centerBedAction,&QAction::trigger);
   alignShortcut->setMenu(sideAlignMenu);
+  auto* generateMenu=mainMenu->addMenu("Gerar");
+  auto* gearAction=generateMenu->addAction("Engrenagem paramétrica (mm)...");
+  gearAction->setObjectName("generate_gear_offline_19_9");
+  connect(gearAction,&QAction::triggered,this,[this]{
+   if(view.busy()){status->setText("Conclua o gesto atual antes de gerar uma engrenagem.");return;}
+   alaser::gear::GearDialog dialog(workspaceCfg_.drawingWidth,
+                                    workspaceCfg_.drawingHeight,this);
+   if(dialog.exec()!=QDialog::Accepted){view.setFocus();return;}
+   const auto settings=dialog.parameters(),center=dialog.centerMm();
+   run([this,settings,center]{insertGeneratedGear(settings,center);});
+   view.setFocus();
+  });
   auto* laserMenu=mainMenu->addMenu("Laser");
   auto* rotaryEntry=laserMenu->addAction("Configurar rotativo (Rolo / Mandril) — OFFLINE...");
   rotaryEntry->setObjectName("open_rotary_setup_offline_19_9");
