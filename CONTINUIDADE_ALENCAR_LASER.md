@@ -892,3 +892,12 @@ Registrar mudanças, testes e pendências.
 - Melhorias visuais em temas claro/escuro: cabeçalho `POSIÇÃO E TAMANHO · mm`, QDoubleSpinBox com contraste e foco visível, sem sufixos de unidade em cada campo (reduzia área útil), 2 colunas compactas, ações com maior legibilidade.
 - Teste Qt `--layout-icons-19-8-test` atualizado para alternador, canvas estável, ausência de números residuais e retorno das propriedades na próxima seleção. PR #13 rascunho, `main` e máquina física preservadas. Testes Windows deste commit ainda necessários antes de homologar.
 - Ajuste fino da regressão Qt: verificar `isHidden()` nas áreas internas em vez de `isVisible()`, que também depende da aba pai estar atualmente selecionada. Assim a suíte confirma ocultação explícita sem exigir que a aba Seleção esteja aberta.
+
+## 01/11/2026 — MÓDULO ROTATIVO POR ROLOS — ETAPA FUTURA
+- O usuário perguntou se configurações e suporte ao rolo rotativo estavam no cronograma. Auditoria do documento e da árvore Git em 01/11/2026: não havia especificação de rolo rotativo, nem função implementada/homologada.
+- Registrado no planejamento como **módulo subsequente à estabilização e homologação manual da candidata 19.8**, sem inventar prazo ou marcar pronto. Especificação em `DESENVOLVIMENTO/ESPECIFICACOES/PLANEJAMENTO_ROLO_ROTATIVO_19_9.md`.
+- Fase R1: perfil de rolo e formulário de configurações **100% offline**, com diâmetro do rolete/objeto, circunferência, mm/rotação quando aplicável, eixo/direção condicionados ao hardware real, valores salvos e modo plano preservado.
+- Fase R2: prévia em superfície cilíndrica desenrolada e aviso de ultrapassagem de circunferência, testes matemáticos/persistência e regressões Windows, ainda sem controle físico.
+- Fase R3: somente após validação separada, identificar o modelo exato do rolo e sua ligação à AlgoLaser Alpha MK2 20W, calibrar segundo manual e aprovar testes com movimento físico em missão específica. Não enviar comandos, alterar firmware ou emitir laser na 19.8.
+- Referência oficial funcional: https://docs.lightburnsoftware.com/2.1/Reference/RotaryMode/RotaryModeGCode/ .
+- Registro de cronograma apenas, nenhuma alteração em código do editor, `main`, `APLICATIVO`, dados, arquivos originais ou controladora.
