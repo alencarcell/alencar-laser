@@ -7656,6 +7656,68 @@ static QJsonObject drawAndJoin198Test(){
 
 static QJsonObject layoutIcons198Test(){
  LabWindow w(Document{});w.resize(1280,760);w.show();QApplication::processEvents();
+
+ // Validate the actual Qt rotary configuration without changing a machine.
+ QTemporaryDir rotaryDir;
+ check(rotaryDir.isValid(),"Rotary test temp directory unavailable");
+ QSettings rotarySettings(rotaryDir.filePath("rotary.ini"),QSettings::IniFormat);
+ {
+  alaser::rotary::RotarySetupDialog dlg(rotarySettings,50.);
+  auto* roll=dlg.findChild<QRadioButton*>("rotary_roller_19_9");
+  auto* chuck=dlg.findChild<QRadioButton*>("rotary_chuck_19_9");
+  auto* enabled=dlg.findChild<QCheckBox*>("rotary_enabled_offline_19_9");
+  auto* testMotor=dlg.findChild<QPushButton*>("rotary_test_motor_disabled_19_9");
+  auto* mm=dlg.findChild<QDoubleSpinBox*>("rotary_mm_per_turn_19_9");
+  auto* rollerDia=dlg.findChild<QDoubleSpinBox*>("rotary_roller_diameter_19_9");
+  auto* obj=dlg.findChild<QDoubleSpinBox*>("rotary_object_diameter_19_9");
+  auto* circle=dlg.findChild<QDoubleSpinBox*>("rotary_circumference_19_9");
+  check(roll&&chuck&&enabled&&testMotor&&mm&&rollerDia&&obj&&circle&&
+        roll->isChecked()&&!enabled->isChecked()&&!testMotor->isEnabled()&&
+        mm->value()==0.,"Rotary initial state is unsafe or invents calibration");
+  obj->setValue(80.);
+  check(std::abs(circle->value()-80.*std::numbers::pi)<0.02,
+        "Object diameter did not update circumference");
+  circle->setValue(100.*std::numbers::pi);
+  check(std::abs(obj->value()-100.)<0.02,
+        "Circumference did not update object diameter");
+  mm->setValue(40.);rollerDia->setValue(20.);enabled->setChecked(true);
+  dlg.accept();
+  check(dlg.result()==QDialog::Accepted,"Offline rotary setup was not saved");
+ }
+ {
+  alaser::rotary::RotarySetupDialog dlg(rotarySettings);
+  auto* roller=dlg.findChild<QRadioButton*>("rotary_roller_19_9");
+  auto* enabled=dlg.findChild<QCheckBox*>("rotary_enabled_offline_19_9");
+  auto* rollerDia=dlg.findChild<QDoubleSpinBox*>("rotary_roller_diameter_19_9");
+  check(roller&&enabled&&rollerDia&&roller->isChecked()&&enabled->isChecked()&&
+       std::abs(rollerDia->value()-20.)<.01,
+       "Offline rotary profile did not survive reopen");
+  dlg.show();QApplication::processEvents();
+  dlg.findChild<QRadioButton*>("rotary_chuck_19_9")->click();
+  check(rollerDia->isHidden(),"Chuck does not hide roller-diameter control");
+  dlg.reject();
+ }
+ check(w.findChild<QAction*>("open_rotary_setup_offline_19_9")!=nullptr,
+       "Offline rotary menu missing");
+ // Page placement: editing only, with an atomic single Undo.
+ LabWindow placeWindow(Document{});placeWindow.resize(1000,700);
+ const int movedId=placeWindow.view.editor.rectangle({30,45},20,10);
+ const int untouchedId=placeWindow.view.editor.rectangle({310,310},10,10);
+ placeWindow.view.rebuild();placeWindow.view.activate({movedId,0});
+ auto* movePage=placeWindow.findChild<QAction*>("move_selection_page_2_0_19_9");
+ check(movePage!=nullptr,"Move selection to top-right missing");
+ const auto beforePlacement=placeWindow.view.editor.state().doc;
+ movePage->trigger();
+ const auto changed=boundsOf(placeWindow.view.editor.state().doc,{movedId});
+ const auto untouched=boundsOf(placeWindow.view.editor.state().doc,{untouchedId});
+ check(std::abs(changed.second.x-400.)<1e-7&&
+       std::abs(changed.first.y)<1e-7&&
+       std::abs(untouched.first.x-310.)<1e-7,
+       "Page placement did not preserve nonselected shapes");
+ check(placeWindow.view.editor.undo()&&
+       sameDoc(beforePlacement,placeWindow.view.editor.state().doc),
+       "Page placement undo must restore original geometry");
+
  auto* selectionRibbon=w.findChild<QFrame*>("selection_context_19_8");
  auto* selectionLabel=w.findChild<QLabel*>("selection_context_summary_19_8");
  auto* contextGroup=w.findChild<QPushButton*>("selection_context_group_19_8");
