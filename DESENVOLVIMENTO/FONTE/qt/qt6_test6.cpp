@@ -4297,6 +4297,14 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     });
    });
   }
+  auto* physicalMenu=arrangeMenu->addMenu("Mover laser para seleção — BLOQUEADO");
+  physicalMenu->setToolTipsVisible(true);
+  for(const auto& [name,x,y]:positions){
+   auto* disabled=physicalMenu->addAction("Laser para "+name.toLower());
+   disabled->setObjectName(QString("physical_laser_move_disabled_%1_%2_19_9").arg(x).arg(y));
+   disabled->setEnabled(false);
+   disabled->setToolTip("Exige homologação física; nenhum movimento disponível.");
+  }
   auto* alignMenu=arrangeMenu->addMenu("Alinhar formas");
   for(const auto& [label,mode]:std::vector<std::pair<QString,int>>{
        {"Esquerda",0},{"Direita",1},{"Topo",2},{"Base",3},
