@@ -262,6 +262,8 @@ try {
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
         $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\interacao'
         New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --gear-generator-19-9-test $fixture $destino
+        Checar-ResultadoQt 'Gerador de engrenagens offline' (Join-Path $destino 'RESULTADO_ENGRENAGENS_19_9.json')
         & $app --layout-icons-19-8-test $fixture $destino
         Checar-ResultadoQt 'Barra compacta, alinhamento e espelhamento' (Join-Path $destino 'RESULTADO_LAYOUT_ICONES_19_8.json')
         & $app --raster-object-19-8-test $fixture $destino
