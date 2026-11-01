@@ -8285,8 +8285,48 @@ static QJsonObject gearGenerator199Test(){
    check(c.closed&&c.nodes.size()>=90,"Contorno de engrenagem/furo aberto");
  check(w.view.editor.undo()&&sameDoc(before,w.view.editor.state().doc),
        "Undo nao restaurou projeto apos engrenagem");
+ alaser::gear::CompoundGearDialog pairDialog(alaser::gear::CompoundKind::Pair,400.,400.);
+ auto* pairDriver=pairDialog.findChild<QSpinBox*>("gear_compound_teeth_19_9");
+ auto* pairDriven=pairDialog.findChild<QSpinBox*>("gear_pair_driven_teeth_19_9");
+ auto* pairSummary=pairDialog.findChild<QLabel*>("gear_compound_summary_19_9");
+ auto* pairPreview=pairDialog.findChild<QWidget*>("gear_compound_preview_19_9");
+ check(pairDriver&&pairDriven&&pairSummary&&pairPreview,"Controles do par nominal ausentes");
+ check(pairDriver->value()==19&&pairDriven->value()==38,
+       "Defaults do par nominal incorretos");
+ auto* pairModule=pairDialog.findChild<QDoubleSpinBox*>("gear_compound_module_19_9");
+ check(pairModule!=nullptr,"Modulo do par ausente");
+ pairModule->setValue(3.);
+ check(pairSummary->text().contains("85.500"),
+       "Distancia entre centros do par nao foi recalculada");
+ check(w.findChild<QAction*>("generate_gear_pair_offline_19_9")!=nullptr,
+       "Menu de par nominal ausente");
+ const auto pairUndo=w.view.editor.undoCount();
+ w.insertGeneratedPair(pairDialog.pairParameters(),{160.,160.});
+ check(w.view.editor.undoCount()==pairUndo+1,"Par nao gerou Undo unico");
+ check(w.view.editor.state().doc.contours.size()==before.contours.size()+4,
+       "Par nao criou engrenagens e furos");
+ check(w.view.editor.undo()&&sameDoc(before,w.view.editor.state().doc),
+       "Undo do par nao restaurou geometria");
+
+ alaser::gear::CompoundGearDialog rackDialog(alaser::gear::CompoundKind::Rack,400.,400.);
+ auto* rackTeeth=rackDialog.findChild<QSpinBox*>("gear_compound_teeth_19_9");
+ auto* rackSummary=rackDialog.findChild<QLabel*>("gear_compound_summary_19_9");
+ check(rackTeeth&&rackSummary&&rackTeeth->value()==10,
+       "Controles da cremalheira ausentes");
+ check(rackSummary->text().contains("94.25"),
+       "Passo/comprimento de cremalheira incorretos");
+ check(w.findChild<QAction*>("generate_gear_rack_offline_19_9")!=nullptr,
+       "Menu de cremalheira ausente");
+ const auto rackUndo=w.view.editor.undoCount();
+ w.insertGeneratedRack(rackDialog.rackParameters(),{120.,200.});
+ check(w.view.editor.undoCount()==rackUndo+1,"Cremalheira nao gerou Undo unico");
+ check(w.view.editor.state().doc.contours.size()==before.contours.size()+1,
+       "Cremalheira nao criou contorno unico");
+ check(w.view.editor.undo()&&sameDoc(before,w.view.editor.state().doc),
+       "Undo da cremalheira nao restaurou geometria");
  return {{"status","PASS"},{"gear_preview",true},{"editable_contours",true},
          {"single_undo",true},{"old_objects_preserved",true},
+         {"pair_nominal_preview_and_undo",true},{"rack_nominal_preview_and_undo",true},
          {"hardware_commands_sent",false}};
 }
 static QJsonObject rasterObject198Test(){
