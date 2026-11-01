@@ -21,6 +21,7 @@
 #include "branding_pegaso_19_8.hpp"
 #include "raster_project_19_8.hpp"
 #include "render_chunks.hpp"
+#include "rotary_dialog_19_9.hpp"
 #include <QApplication>
 #include <QGraphicsView>
 #include <QGraphicsScene>
@@ -4314,6 +4315,16 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   connect(centerShortcut,&QAction::triggered,centerBedAction,&QAction::trigger);
   alignShortcut->setMenu(sideAlignMenu);
   auto* laserMenu=mainMenu->addMenu("Laser");
+  auto* rotaryEntry=laserMenu->addAction("Configurar rotativo (Rolo / Mandril) — OFFLINE...");
+  rotaryEntry->setObjectName("open_rotary_setup_offline_19_9");
+  connect(rotaryEntry,&QAction::triggered,this,[this]{
+   std::optional<double> extent;
+   if(const auto bounds=view.selectionPreviewRect())extent=bounds->height();
+   QSettings rotarySettings("AlencarLaser","DesktopBeta");
+   alaser::rotary::RotarySetupDialog dialog(rotarySettings,extent,this);
+   dialog.exec();
+   view.setFocus();
+  });
   auto* wifiEntry=laserMenu->addAction("USB / Wi-Fi — Diagnóstico apenas");
   connect(wifiEntry,&QAction::triggered,this,[wifiLauncher]{wifiLauncher->click();});
   auto* transmit=laserMenu->addAction("Iniciar trabalho / emissão — BLOQUEADO");transmit->setEnabled(false);
