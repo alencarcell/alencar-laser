@@ -6729,8 +6729,20 @@ static QJsonObject inlineTransforms198Test(const QString& directory){
  drag(rotateStart.toPoint(),rotateEnd.toPoint());
  check(v.editor.undoCount()==before+2,"Rotacao nao criou passo de undo");
  check(stateText(v.editor.state())!=stateScaled,"Rotacao nao alterou vertices");
+ // A moldura deve manter a largura e altura LOCAIS ao girar, sem crescer.
+ const auto oriented=v.selectionFrameQuad();
+ check(oriented.has_value(),"Moldura orientada ausente apos girar");
+ const auto len=[](QPointF a,QPointF b){return QLineF(a,b).length();};
+ check(std::abs(len((*oriented)[0],(*oriented)[1])-40.)<1.5&&
+       std::abs(len((*oriented)[1],(*oriented)[2])-20.)<1.5,
+       "Moldura cresceu com a rotacao: comprimentos locais devem permanecer");
+ check(std::abs((*oriented)[0].y()-(*oriented)[1].y())>2.,
+       "Moldura continuou horizontal quando o objeto foi girado");
  pressKey(transformWindow,Qt::Key_Z,Qt::ControlModifier);
  check(stateText(v.editor.state())==stateScaled,"Undo da rotacao nao restaurou desenho");
+ const auto restored=v.selectionFrameQuad();
+ check(restored&&std::abs(len((*restored)[0],(*restored)[1])-40.)<1.5,
+       "Undo nao descartou moldura orientada antiga");
  // Shift permite escala nao proporcional; Ctrl fixa o centro.
  const int freeId=v.editor.rectangle({110,45},20,10);
  v.clearSelection();v.rebuild();clickScene(transformWindow,{115,45});
