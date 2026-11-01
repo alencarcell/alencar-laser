@@ -50,7 +50,7 @@ inline Result generate(const Parameters& p){
  const double flankStart=std::max(rf,rb);
  const double baseHalf=pi/(2.*p.teeth)+involute(rp,rb);
  const auto halfAt=[&](double r){return baseHalf-involute(r,rb);};
- if(halfAt(ra)<=0.002 || baseHalf>=pi/p.teeth)
+ if(halfAt(ra)<=0.002 || halfAt(flankStart)>=pi/p.teeth)
   throw std::invalid_argument("perfil de dente invalido: ajuste dentes/modulo/angulo");
  Result out;
  out.pitchRadius=rp;out.outerRadius=ra;out.rootRadius=rf;out.baseRadius=rb;
@@ -74,8 +74,10 @@ inline Result generate(const Parameters& p){
   }
   append(out.outer,polar(rf,center+startHalf));
   const double gap=toothStep-2.*startHalf;
-  for(int j=1;j<=5;++j)
+  for(int j=1;j<=5;++j){
+   if(i==p.teeth-1&&j==5)continue; // closing edge supplied by closed path
    append(out.outer,polar(rf,center+startHalf+gap*j/5.));
+  }
  }
  if(p.boreMm>0.){
   out.bore.reserve(96);
