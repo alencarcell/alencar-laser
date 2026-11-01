@@ -6,7 +6,8 @@
 - Formulário Qt: número de dentes, ângulo de pressão, furo, centro X/Y e checkbox de pré-visualização.
 - Menu: `Gerar > Engrenagens > Engrenagem simples (mm)...`.
 - Mantidas as transações de inserção como contornos vetoriais com um Undo e sem alterar outros objetos.
-- Núcleo C++ independente de Qt: `generatePairNominal()` fornece razão e distância entre centros; `generateRackNominal()` fornece um perfil **teórico** de cremalheira. Essas duas rotinas ainda **não** estão conectadas à inserção ou à prévia na interface.
+- Núcleo C++ independente de Qt: `generatePairNominal()` fornece razão e distância entre centros; `generateRackNominal()` fornece um perfil **teórico** de cremalheira.
+- Avanço posterior: `qt/gear_compound_dialog_19_9.hpp` incorpora prévia de par e de cremalheira; menu `Gerar > Engrenagens` tem três opções. O Qt cria contornos editáveis em uma transação de Undo. O par usa o centro do primeiro pinhão e a cremalheira a posição da linha primitiva do primeiro dente. Nenhuma interação física é habilitada.
 
 ## Contrato geométrico
 
@@ -26,7 +27,7 @@ Cremalheira: largura `z·p`; dentes trapezoidais teóricos no ângulo de pressã
 ## Validação e restrições
 
 - Regressão portátil: `DESENVOLVIMENTO/FONTE/tests/gear_generator_19_9_standalone.cpp`, coberta pelo target `alencar_test19_9_gear_offline`.
-- Regressão GUI Qt: `--gear-generator-19-9-test`, que verifica campos sincronizados, prévia, contorno e Undo.
+- Regressão GUI Qt: `--gear-generator-19-9-test`, que verifica campos sincronizados, prévia, engrenagem simples, par e cremalheira nominais, preservação dos objetos anteriores e Undo atômico.
 - A homologação necessita compilação Windows, testes Qt e inspeção manual das duas capturas de referência.
 - O perfil de dente vigente é aproximado. Não comprova engrenamento, resistência estrutural, ausência de interferência ou precisão de montagem.
 - **Kerf e folgas de encaixe ainda não são aplicados**. Quando implementados, deverão operar como compensação parametrizada não destrutiva, distinta da geometria nominal e sujeita a cupom de teste no material.
