@@ -874,3 +874,8 @@ Registrar mudanças, testes e pendências.
 - Reutilizados `Editor::moveObjects` e `Editor::scaleObjects`, que expandem membros de grupos. Camadas bloqueadas/ocultas, seleção vazia, texto com metadados editáveis, imagens raster, curvas Bézier nativas e dimensões degeneradas não são transformados numericamente; valores inválidos são recusados sem modificar o original. Nenhuma mudança no formato `.alaser` ou no código GRBL.
 - A nova regressão Qt `--layout-icons-19-8-test` confere escala proporcional e Undo/Redo, referência inferior direita, X/Y, escala sem trava, valor repetido sem histórico, desativação sem seleção. **CI Windows e teste com mouse real ainda exigidos para este commit.**
 - Apenas branch experimental e PR #13 rascunho. `main`, versão estável, backups, comunicadores e emissão física intocados.
+ 
+## 01/11/2026 — Propriedades contextuais de texto e imagem
+- Texto vetorial com metadados mostra `Texto editável selecionado`, mantém X/Y/L/A somente leitura e apresenta o botão `Editar texto` que reutiliza o editor original de conteúdo/fonte, evitando alterações sem atualização de metadados; duplicação como polilinha desabilitada nesse tipo.
+- Imagem raster selecionada mostra posição e dimensões de sua caixa em modo somente leitura, sem habilitar agrupar ou transformar como vetor. A seleção de imagem notifica a interface mesmo em clique sem movimento; continua sem comandos físicos. Curvas Bézier permanecem somente leitura no painel numérico.
+- A regressão Qt `--layout-icons-19-8-test` agora verifica estados de texto editável e imagem raster e impedimento de controles incompatíveis. CI Windows pós-commit e validação manual ainda necessários.

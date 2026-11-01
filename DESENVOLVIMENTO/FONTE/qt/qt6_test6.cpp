@@ -934,7 +934,8 @@ class QtEditorLab final:public QGraphicsView{
   rasterDragging_=rasterResizing_=false;
   viewport()->setCursor(Qt::ArrowCursor);
   if(changed&&diagnosticEvent)diagnosticEvent(resize?"image_resized":"image_moved",1);
-  if(changed&&stateChanged)stateChanged();
+  // Even a click without movement changes which object is selected.
+  if(stateChanged)stateChanged();
  }
 public:
  // API de imagem da mesa: acessível ao diálogo LabWindow; armazenamento continua privado.
@@ -961,6 +962,7 @@ public:
  const QImage& rasterImage()const{return rasterSource_;}
  QRectF rasterBounds()const{return rasterRect_;}
  bool hasRasterImage()const{return !rasterSource_.isNull();}
+ bool rasterSelectionActive()const{return rasterSelected_&&!rasterSource_.isNull();}
  void clearRasterImage(){
   rasterSelected_=rasterDragging_=rasterResizing_=false;
   rasterSource_=QImage();rasterRect_=QRectF();
@@ -2590,6 +2592,7 @@ public:
  QPushButton* selectionContextUngroup_=nullptr;
  QPushButton* selectionContextDuplicate_=nullptr;
  QPushButton* selectionContextDelete_=nullptr;
+ QPushButton* selectionContextTextEdit_=nullptr;
  std::array<QDoubleSpinBox*,4> selectionNumeric_{}; // X/Y/W/H
  QCheckBox* selectionAspectLock_=nullptr;
  std::array<QToolButton*,9> selectionAnchorButtons_{};
@@ -3233,6 +3236,20 @@ public:
     "Duplicar uma forma poligonal independente","duplicate_obj");
   selectionContextDelete_=contextButton("selection_context_delete_19_8","Excluir",
     "Excluir seleção. Para 25+ objetos, exige confirmação; Ctrl+Z restaura.","delete_shapes");
+  selectionContextTextEdit_=new QPushButton("Editar texto",selectionContextBar_);
+  selectionContextTextEdit_->setObjectName("selection_context_edit_text_19_8");
+  selectionContextTextEdit_->setToolTip("Editar fonte, conteúdo e estilo do texto vetorial original.");
+  selectionContextTextEdit_->setFocusPolicy(Qt::NoFocus);
+  selectionContextTextEdit_->setProperty("compact",true);
+  contextRow->addWidget(selectionContextTextEdit_);
+  selectionContextTextEdit_->hide();
+  connect(selectionContextTextEdit_,&QPushButton::clicked,this,[this]{
+   if(view.busy()||view.nativeModeActive())return;
+   std::set<int> roots;
+   for(int id:view.selected)
+    if(auto t=view.editor.findEditableText(id))roots.insert(t->first);
+   if(roots.size()==1)editVectorTextObject(*roots.begin());
+  });
   // Numeric row: four mm fields, proportion lock, actual 3x3 anchor grid.
   auto* numericRow=new QHBoxLayout;
   numericRow->setSpacing(4);
@@ -4573,17 +4590,22 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
  void updateSelectionContext(){
   if(!selectionContextBar_)return;
   const bool nativeSelected=view.nativeSelected().has_value()&&view.nativeModeActive();
-  const bool polyline=view.tool==QtEditorLab::Tool::Select&&!view.nativeModeActive()&&!view.selected.empty();
-  const bool show=nativeSelected||polyline;
+  const bool rasterSelected=view.rasterSelectionActive();
+  const bool polyline=view.tool==QtEditorLab::Tool::Select&&!view.nativeModeActive()&&
+       !rasterSelected&&!view.selected.empty();
+  const bool show=nativeSelected||polyline||rasterSelected;
   selectionContextBar_->setVisible(show);
   if(!show){
+   if(selectionContextTextEdit_)selectionContextTextEdit_->hide();
    // Do not leave active numeric controls when selection is cleared.
    for(auto* spin:selectionNumeric_)if(spin)spin->setEnabled(false);
    if(selectionAspectLock_)selectionAspectLock_->setEnabled(false);
    return;
   }
-  const auto bounds=view.selectionPreviewRect();
-  std::set<int> groupIds;
+  const auto bounds=rasterSelected?std::optional<QRectF>(view.rasterBounds()):
+                                    view.selectionPreviewRect();
+  std::set<int> groupIds,textRoots;
+  bool allText=polyline;
   bool editableSelection=polyline;
   bool groupedObject=false;
   if(polyline)for(int id:view.selected){
@@ -4593,8 +4615,13 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    }
    groupIds.insert(it->second.group>0?-it->second.group:id);
    groupedObject|=it->second.group>0;
+   const auto text=view.editor.findEditableText(id);
+   if(text)textRoots.insert(text->first);else allText=false;
   }
-  const QString prefix=nativeSelected?QString("Curva Bézier selecionada"):
+  const bool textOnly=allText&&textRoots.size()==1;
+  const QString prefix=rasterSelected?QString("Imagem raster selecionada"):
+     nativeSelected?QString("Curva Bézier selecionada"):
+     textOnly?QString("Texto editável selecionado"):
      QString("%1 forma(s)%2").arg(view.selected.size()).arg(
        groupedObject?" · grupo":"");
   if(bounds){
@@ -4606,8 +4633,13 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }else selectionContextSummary_->setText(prefix+"  |  medidas indisponíveis");
   selectionContextGroup_->setEnabled(editableSelection&&groupIds.size()>=2);
   selectionContextUngroup_->setEnabled(editableSelection&&groupedObject);
-  selectionContextDuplicate_->setEnabled(editableSelection&&view.selected.size()==1&&!groupedObject);
+  selectionContextDuplicate_->setEnabled(editableSelection&&!textOnly&&
+          view.selected.size()==1&&!groupedObject);
   selectionContextDelete_->setEnabled(nativeSelected||editableSelection);
+  if(selectionContextTextEdit_){
+   selectionContextTextEdit_->setVisible(textOnly);
+   selectionContextTextEdit_->setEnabled(textOnly&&editableSelection);
+  }
   bool numericEnabled=editableSelection&&!view.busy()&&
        !(curves&&curves->dragging())&&bounds.has_value();
   std::vector<int> ids;
@@ -7562,6 +7594,23 @@ static QJsonObject layoutIcons198Test(){
  check(sizes.view.editor.undoCount()==noop,"Valor repetido criou Undo desnecessario");
  sizes.view.clearSelection();sizes.refresh();
  check(!sw->isEnabled(),"Campo continuou editavel sem selecao");
+ EditableText textMeta;textMeta.text="ALENCAR";textMeta.fontFamily="Arial";
+ textMeta.heightMm=12;textMeta.spacingPercent=100;
+ textMeta.anchor={10,10};textMeta.sourceBoundsMin={10,10};
+ const int textId=sizes.view.editor.addEditableText(
+   {{{10,10},{20,10},{20,20},{10,20}}},textMeta,0);
+ sizes.view.rebuild();sizes.view.activate({textId,0});sizes.refresh();
+ auto* editText=sizes.findChild<QPushButton*>("selection_context_edit_text_19_8");
+ auto* summary=sizes.findChild<QLabel*>("selection_context_summary_19_8");
+ check(editText&&editText->isVisible()&&editText->isEnabled()&&
+    summary->text().contains("Texto editável")&&!sw->isEnabled(),
+    "Texto editable exposto como poligono numerico ou sem edicao contextual");
+ sizes.view.clearSelection();sizes.view.setTool(QtEditorLab::Tool::Select);
+ QImage bitmap(12,6,QImage::Format_ARGB32);bitmap.fill(Qt::white);
+ sizes.view.setRasterImage(bitmap);sizes.refresh();
+ check(summary->text().contains("Imagem raster")&&!sw->isEnabled()&&
+    !sizes.findChild<QPushButton*>("selection_context_group_19_8")->isEnabled(),
+    "Imagem raster nao tem propriedades restritas");
  sizes.close();
  // Real viewport mouse modifiers must match the reference editing model.
  w.view.setTransform(QTransform::fromScale(6,6));w.view.centerOn(28,15);
