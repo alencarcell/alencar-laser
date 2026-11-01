@@ -799,8 +799,9 @@ class QtEditorLab final:public QGraphicsView{
   if(!transformDragging_)return;
   QTransform t;
   if(transformHandle_==12){
-   const QPointF origin=viewportTransform().map(transformBounds_.center());
-   QPointF delta=mapToScene(pointer.toPoint())-transformBounds_.center();
+   const QPointF pivot=middle(transformQuad_[0],transformQuad_[2]);
+   const QPointF origin=viewportTransform().map(pivot);
+   QPointF delta=mapToScene(pointer.toPoint())-pivot;
    // LightBurn: Shift limita deslocamento em 0/45/90 graus.
    if(mods.testFlag(Qt::ShiftModifier)){
     const double angle=std::atan2(delta.y(),delta.x());
@@ -811,8 +812,8 @@ class QtEditorLab final:public QGraphicsView{
    transformMoveDelta_=delta;
    t.translate(delta.x(),delta.y());(void)origin;
   }else if(transformHandle_>=8){
-   const QPointF pivot=transformBounds_.center();
-   const auto handles=selectionHandles(transformBounds_);
+   const QPointF pivot=middle(transformQuad_[0],transformQuad_[2]);
+   const auto handles=handlesForQuad(transformQuad_);
    const QPointF initial=handles[size_t(transformHandle_)];
    const QPointF center=viewportTransform().map(pivot);
    const auto start=initial-center;
@@ -823,29 +824,37 @@ class QtEditorLab final:public QGraphicsView{
     transformAngle_=std::round(transformAngle_/15.)*15.;
    t.translate(pivot.x(),pivot.y());t.rotate(transformAngle_);t.translate(-pivot.x(),-pivot.y());
   }else{
-   const double x0=transformBounds_.left(),x1=transformBounds_.right();
-   const double y0=transformBounds_.top(),y1=transformBounds_.bottom();
-   const double mx=(x0+x1)*.5,my=(y0+y1)*.5;
-   const bool center=mods.testFlag(Qt::ControlModifier);
-   const auto handles=selectionHandles(transformBounds_);
+   const auto& q=transformQuad_;
+   const auto handles=handlesForQuad(q);
    const QPointF oldPoint=mapToScene(handles[size_t(transformHandle_)].toPoint());
    const QPointF moving=mapToScene(pointer.toPoint());
+   const QPointF middleTop=middle(q[0],q[1]);
+   const QPointF middleRight=middle(q[1],q[2]);
+   const QPointF middleBottom=middle(q[2],q[3]);
+   const QPointF middleLeft=middle(q[3],q[0]);
+   const QPointF center=middle(q[0],q[2]);
    QPointF pivot;
    switch(transformHandle_){
-    case 0:pivot={x1,y1};break;case 1:pivot={mx,y1};break;
-    case 2:pivot={x0,y1};break;case 3:pivot={x0,my};break;
-    case 4:pivot={x0,y0};break;case 5:pivot={mx,y0};break;
-    case 6:pivot={x1,y0};break;default:pivot={x1,my};break;
+    case 0:pivot=q[2];break;case 1:pivot=middleBottom;break;
+    case 2:pivot=q[3];break;case 3:pivot=middleLeft;break;
+    case 4:pivot=q[0];break;case 5:pivot=middleTop;break;
+    case 6:pivot=q[1];break;default:pivot=middleRight;break;
    }
-   if(center)pivot=transformBounds_.center();
+   if(mods.testFlag(Qt::ControlModifier))pivot=center;
    transformAnchor_=pivot;
+   QPointF ux=q[1]-q[0],uy=q[3]-q[0];
+   const double lenX=std::hypot(ux.x(),ux.y()),lenY=std::hypot(uy.x(),uy.y());
+   if(lenX<1e-8||lenY<1e-8)return;
+   ux/=lenX;uy/=lenY;
+   auto dot=[](QPointF a,QPointF b){return a.x()*b.x()+a.y()*b.y();};
    const bool horizontal=transformHandle_!=1&&transformHandle_!=5;
    const bool vertical=transformHandle_!=3&&transformHandle_!=7;
    double sx=1.,sy=1.;
-   if(horizontal&&std::abs(oldPoint.x()-pivot.x())>1e-9)
-     sx=(moving.x()-pivot.x())/(oldPoint.x()-pivot.x());
-   if(vertical&&std::abs(oldPoint.y()-pivot.y())>1e-9)
-     sy=(moving.y()-pivot.y())/(oldPoint.y()-pivot.y());
+   const QPointF original=oldPoint-pivot,newPt=moving-pivot;
+   if(horizontal&&std::abs(dot(original,ux))>1e-8)
+    sx=dot(newPt,ux)/dot(original,ux);
+   if(vertical&&std::abs(dot(original,uy))>1e-8)
+    sy=dot(newPt,uy)/dot(original,uy);
    sx=std::clamp(sx,.02,100.);sy=std::clamp(sy,.02,100.);
    const bool corner=transformHandle_%2==0;
    if(corner&&!mods.testFlag(Qt::ShiftModifier)){
@@ -853,7 +862,15 @@ class QtEditorLab final:public QGraphicsView{
     sx=uniform;sy=uniform;
    }
    transformSx_=sx;transformSy_=sy;
-   t.translate(pivot.x(),pivot.y());t.scale(sx,sy);t.translate(-pivot.x(),-pivot.y());
+   // Local axes are rotated, so scale along that basis rather than global X/Y.
+   const double a=sx*ux.x()*ux.x()+sy*uy.x()*uy.x();
+   const double b=sx*ux.x()*ux.y()+sy*uy.x()*uy.y();
+   const double c=sx*ux.y()*ux.x()+sy*uy.y()*uy.x();
+   const double d=sx*ux.y()*ux.y()+sy*uy.y()*uy.y();
+   transformAffineA_=a;transformAffineB_=b;
+   transformAffineC_=c;transformAffineD_=d;
+   t=QTransform(a,c,0.,b,d,0.,pivot.x()-a*pivot.x()-b*pivot.y(),
+                pivot.y()-c*pivot.x()-d*pivot.y(),1.);
   }
   selectionPreviewTransform_=t;
   for(auto* item:transformItems_)item->setTransform(t);
@@ -863,11 +880,14 @@ class QtEditorLab final:public QGraphicsView{
   if(!transformDragging_)return;
   const int h=transformHandle_;
   const auto ids=transformIds_;
-  const QPointF pivot=h>=8?transformBounds_.center():transformAnchor_;
+  const QPointF pivot=h>=8?middle(transformQuad_[0],transformQuad_[2]):transformAnchor_;
   const double sx=transformSx_,sy=transformSy_,angle=transformAngle_;
+  const double a=transformAffineA_,b=transformAffineB_,
+               c=transformAffineC_,d=transformAffineD_;
   const QPointF move=transformMoveDelta_;
   const bool native=nativeTransformDragging_;
   const Key nativeKey=nativeTransformKey_;
+  const auto finishedQuad=selectionQuadScene();
   cancelSelectionTransform();
   if(native){
    if(!nativeSession_||!nativeSession_->selected()||*nativeSession_->selected()!=nativeKey)return;
@@ -888,7 +908,12 @@ class QtEditorLab final:public QGraphicsView{
    editor.rotateObjects(ids,fromQt(pivot),angle);
   }else{
    if(std::abs(sx-1.)<1e-5&&std::abs(sy-1.)<1e-5)return;
-   editor.scaleObjects(ids,fromQt(pivot),sx,sy);
+   editor.affineObjects(ids,fromQt(pivot),a,b,c,d);
+  }
+  if(finishedQuad){
+   orientedFrame_=*finishedQuad;
+   orientedFrameIds_=selected;
+   orientedFrameGeneration_=editor.geometryGeneration;
   }
   rebuild();
   if(diagnosticEvent)diagnosticEvent(h==12?"shapes_moved":h>=8?"selection_rotated":"selection_scaled",int(ids.size()));
@@ -1146,6 +1171,10 @@ public:
  size_t nativeItemCount()const{return nativeItems_.size();}
  // Interface somente-leitura para verificar desenho da moldura em teste.
  std::optional<QRectF> selectionPreviewRect()const{return selectionDisplayBounds();}
+ // Test-only and UI read access to the oriented frame, not serialized in .alaser.
+ std::optional<std::array<QPointF,4>> selectionFrameQuad()const{
+  return selectionQuadScene();
+ }
  QPainterPath nativeItemPath(Key key)const{return nativeItems_.at(key)->path();}
  // A sessao deve estar viva durante todo o periodo em que estiver anexada.
  void attachNative(CurveDragSession* session){
@@ -2242,10 +2271,15 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   }
   if(shapeDragging_){
    const QPointF delta=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
+   const auto displacedFrame=selectionQuadScene();
    clearShapePreview();
    if(QLineF(QPointF{},delta).length()>1e-8){
     const int changed=int(selected.size());
     editor.moveObjects({selected.begin(),selected.end()},fromQt(delta));
+    if(displacedFrame){
+     orientedFrame_=*displacedFrame;orientedFrameIds_=selected;
+     orientedFrameGeneration_=editor.geometryGeneration;
+    }
     rebuild();
     if(diagnosticEvent)diagnosticEvent("shapes_moved",changed);
    }
