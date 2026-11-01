@@ -647,6 +647,22 @@ public:
   });
   return selectedResult;
  }
+ // Rotate-aware affine resize. A single atomic transaction keeps grouped objects
+ // intact; the preview rectangle is NOT serialized as project geometry.
+ // [a b; c d] maps the local axes of the oriented selection.
+ void affineObjects(std::vector<int> ids,Pt pivot,double a,double b,double c,double d){
+  const double determinant=a*d-b*c;
+  if(!std::isfinite(pivot.x)||!std::isfinite(pivot.y)||
+     !std::isfinite(a)||!std::isfinite(b)||!std::isfinite(c)||!std::isfinite(d)||
+     !std::isfinite(determinant)||std::abs(determinant)<1e-9)
+   throw std::runtime_error("invalid oriented resize");
+  change([&](EditorState& st){
+   apply(st,ids,[&](Pt p){
+    const double x=p.x-pivot.x,y=p.y-pivot.y;
+    return Pt{pivot.x+a*x+b*y,pivot.y+c*x+d*y};
+   });
+  });
+ }
  void rotateObjects(std::vector<int> ids,Pt pivot,double angle){change([&](EditorState& s){apply(s,ids,[&](Pt p){return rotateAround(p,pivot,angle);});});}
  void scaleObjects(std::vector<int> ids,Pt pivot,double sx,double sy){if(!std::isfinite(sx)||!std::isfinite(sy)||sx==0||sy==0)throw std::runtime_error("invalid scale");change([&](EditorState& s){apply(s,ids,[&](Pt p){return Pt{pivot.x+(p.x-pivot.x)*sx,pivot.y+(p.y-pivot.y)*sy};});});}
  void mirrorX(std::vector<int> ids,double axisX){change([&](EditorState& s){apply(s,ids,[&](Pt p){return Pt{2*axisX-p.x,p.y};});});}
