@@ -8361,7 +8361,7 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
     QByteArray(reinterpret_cast<const char*>(img.constBits()),img.sizeInBytes()),
     QCryptographicHash::Sha256);
  };
- for(const auto& pair:std::array<std::pair<QString,QString>,8>{
+ for(const auto& pair:std::array<std::pair<QString,QString>,10>{
    std::pair<QString,QString>{"flip_h","flip_v"},
    {"distribute_horizontal","distribute_vertical"},
    {"same_width","same_height"},
@@ -8369,6 +8369,8 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
    {"undo","redo"},
    {"play","pause"},
    {"pause","stop"},
+   {"add_node","remove_node"},
+   {"new","import"},
    {"line_to_curve","curve_to_line"}})
   check(fingerprint(pair.first)!=fingerprint(pair.second),
         "Duas funcoes diferentes compartilham glifo indistinguivel");
