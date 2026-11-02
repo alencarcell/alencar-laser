@@ -63,3 +63,9 @@ Testes do Qt foram ampliados para comparar pares em imagem real **reduzida a 20 
 - `delete_edge`: novo símbolo com duas extremidades de segmento separadas por uma lacuna e um X central, para distinguir o comando de `remove_node` nas miniaturas pequenas.
 - Alteração apenas em `src/tool_glyphs.hpp`; sem mudanças no motor de geometria, na Tesoura, no Undo ou em comandos de máquina.
 - Commit `dcac734`; **testes locais Qt/Windows e aprovação visual desta mudança ainda pendentes**. Validar com `-SomenteIcones`, inclusive a prancha em 20 px; não declarar homologado antes da nova execução.
+
+
+## Refinamento vetorial das setas direcionais — 02/11/2026
+- `move_n`, `move_ne`, `move_e`, `move_se`, `move_s`, `move_sw`, `move_w`, `move_nw`: silhueta fechada composta por haste e ponta, calculada a partir de vetor unitário, em vez de rotação de polígono alongado. Isso preserva direção e margens das diagonais sem tolerâncias artificiais.
+- Commit `fc159f0`; mudanças limitadas ao desenho Qt, sem conectar qualquer comando de movimento físico.
+- **Pendente:** novo teste local `-SomenteIcones`, inspeção da prancha em escala 20/24/58 px e CI Qt Windows. Não homologar apenas com revisão estática.
