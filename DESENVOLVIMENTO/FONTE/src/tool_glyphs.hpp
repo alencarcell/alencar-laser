@@ -125,10 +125,10 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false){
  }else if(id=="stop"){
   p.setPen(Qt::NoPen);p.setBrush(accent);p.drawRoundedRect(QRectF(7,7,18,18),2,2);
  }else if(id=="fit"){
-  for(const auto& lineSeg:std::array<std::array<double,4>,8>{
-   {{4,11,4,4}},{{4,4,11,4}},{{21,4,28,4}},{{28,4,28,11}},
-   {{4,21,4,28}},{{4,28,11,28}},{{21,28,28,28}},{{28,21,28,28}}})
-   line(lineSeg[0],lineSeg[1],lineSeg[2],lineSeg[3]);
+  line(4,11,4,4);line(4,4,11,4);
+  line(21,4,28,4);line(28,4,28,11);
+  line(4,21,4,28);line(4,28,11,28);
+  line(21,28,28,28);line(28,21,28,28);
  }else if(id=="settings"||id=="mechanism"){
   const double pi=3.14159265358979323846;
   QPolygonF gear;
