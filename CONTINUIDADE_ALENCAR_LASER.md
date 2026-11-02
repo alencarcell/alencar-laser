@@ -1013,3 +1013,12 @@ Registrar mudanças, testes e pendências.
 - Relatório `RESULTADO_ENGRENAGENS_19_9.json`: PASS (prévia, contornos editáveis, pares nominais, cremalheira, Oficina de Mecanismos, Undo e preservação de arte; **não é homologação mecânica**).
 - As imagens `PRANCHA_CRITICOS_19_9.png` (20/24/58 px) e `PRANCHA_ICONES_REAIS_19_9.png` foram extraídas do artefato e inspecionadas; ícones completos e sem recorte evidente, inclusive Adicionar/Remover nó. **Aprovação visual pelo proprietário ainda pendente**, sobretudo fidelidade fina aos rabiscos em 100%/200% DPI no Windows.
 - Resultado: gates automatizados C++, PowerShell e Qt Windows aprovados. **PR #13 continua draft**; não fazer merge na `main`, não publicar nova versão homologada, não modificar `APLICATIVO`, não ativar hardware/GRBL/Wi-Fi de controle/G-code/movimento/emissão física sem testes e aprovação separados.
+
+
+## 02/11/2026 — Mitigacao experimental de renderizacao em projeto denso
+- Evidencia: 417 contornos e 122.390 nos, render p95 252,333 ms, p99 1127,8413 ms, max 1505,4573 ms e 6 command_error sem causa especifica.
+- Commit 8b9df99 no Qt: MinimalViewportUpdate substitui BoundingRectViewportUpdate, e anchors isolados fora da viewport sao descartados antes do desenho. O Qt continua salvando estado do QPainter.
+- SEM homologacao de desempenho: medir com mesmo arquivo e gestos no Windows; reverter se houver artefatos ou regressao. Projetos originais e dados permanecem intocados.
+- PENDENTE: diagnostico de erros categorizado, instrumentacao de render, simplificacao opt-in com Undo, e painel redimensionavel.
+- A comunicacao fisica continua BLOQUEADA. Futuro modo de diagnostico conectado deve ser exclusivamente somente leitura, com escolha explicita de dispositivo, timeout, desconexao, sem G-code, movimento, homing ou emissao, e validacao de seguranca antes de habilitar a UI.
+- PR #13 draft; main e APLICATIVO preservados.
