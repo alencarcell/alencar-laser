@@ -38,8 +38,8 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
   p.setPen(QPen(accent,1.3,Qt::DashLine));line(5,23,7,8);line(27,8,24,24);
   p.setPen(normal);square(5,23);square(27,8);
  }else if(id=="new_bezier"){
-  QPainterPath c;c.moveTo(4,25);c.lineTo(13,15);c.cubicTo(20,2,23,25,28,7);p.drawPath(c);
-  square(4,25);square(13,15);square(28,7);
+  QPainterPath c;c.moveTo(4,25);c.lineTo(13,15);c.cubicTo(20,3,23,25,26,7);p.drawPath(c);
+  square(4,25);square(13,15);square(26,7);
  }else if(id=="scissors"){
   p.setPen(QPen(accent,2.2,Qt::SolidLine,Qt::RoundCap));
   p.drawEllipse(QPointF(9,25),4,4);p.drawEllipse(QPointF(23,25),4,4);
@@ -128,7 +128,7 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
  }else if(id=="save"||id=="save_as"){
   rect(6,4,20,24);rect(10,5,12,9);rect(11,20,10,8);
   p.setPen(QPen(accent,2.));line(11,20,21,20);
-  if(id=="save_as"){line(26,20,26,28);line(22,24,30,24);}
+  if(id=="save_as"){line(26,20,26,28);line(22,24,28,24);}
  }else if(id=="undo"||id=="redo"){
   const bool redo=id=="redo";
   p.drawArc(QRectF(6,7,20,20),redo?(-30*16):(30*16),
@@ -198,7 +198,7 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
   if(id=="same_width"){
    rect(4,5,24,5);rect(8,17,16,5);
    p.setPen(QPen(accent,2.1,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
-   line(4,27,28,27);line(4,27,8,24);line(4,27,8,30);line(28,27,24,24);line(28,27,24,30);
+   line(4,27,28,27);line(4,27,8,24);line(4,27,8,29);line(28,27,24,24);line(28,27,24,29);
   }else{
    rect(5,4,7,24);rect(20,8,7,16);
    p.setPen(QPen(accent,2.1,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
@@ -227,8 +227,8 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
   if(id=="star")p.setBrush(accent);
   p.drawPolygon(poly);
  }else if(id=="edit_nodes"){
-  QPolygonF shape;shape<<QPointF(16,4)<<QPointF(27,11)<<QPointF(24,27)
-    <<QPointF(8,27)<<QPointF(5,11);p.drawPolygon(shape);
+  QPolygonF shape;shape<<QPointF(16,5)<<QPointF(26,11)<<QPointF(23,26)
+    <<QPointF(9,26)<<QPointF(6,11);p.drawPolygon(shape);
   for(const auto& q:shape)square(q.x(),q.y());
  }else if(id=="add_node"||id=="remove_node"||id=="delete_edge"||
           id=="smooth_node"||id=="corner_node"||
