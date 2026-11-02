@@ -54,4 +54,6 @@ jobs:
           ./build_ci_native_19_8/rotary_offline
           g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic tests/gear_generator_19_9_standalone.cpp -o build_ci_native_19_8/gear_offline
           ./build_ci_native_19_8/gear_offline
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic tests/mechanism_studio_19_9_standalone.cpp -o build_ci_native_19_8/mechanism_offline
+          ./build_ci_native_19_8/mechanism_offline
           echo 'PASS portable core only; Qt GUI and physical machine not validated.'
