@@ -152,7 +152,21 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
   line(21,4,28,4);line(28,4,28,11);
   line(4,21,4,28);line(4,28,11,28);
   line(21,28,28,28);line(28,21,28,28);
- }else if(id=="settings"||id=="mechanism"||id=="gear_simple"){
+ }else if(id=="rack"){
+  // Barra dentada com pinhao, nao confundir com roda isolada.
+  QPainterPath teeth;
+  teeth.moveTo(3.5,26);teeth.lineTo(3.5,18);
+  for(int i=0;i<5;++i){
+   const double x=4.+i*5.;
+   teeth.lineTo(x+1.,18);teeth.lineTo(x+1.5,14.5);
+   teeth.lineTo(x+3.5,14.5);teeth.lineTo(x+4.,18);
+  }
+  teeth.lineTo(28.5,18);teeth.lineTo(28.5,26);teeth.closeSubpath();
+  p.drawPath(teeth);
+  p.setPen(QPen(accent,2.0));p.setBrush(Qt::NoBrush);
+  p.drawEllipse(QPointF(16,9),5.2,5.2);
+  p.setBrush(accent);p.setPen(Qt::NoPen);p.drawEllipse(QPointF(16,9),1.6,1.6);
+ }else if(id=="settings"||id=="mechanism"||id=="gear_simple"||id=="gear_pair"){
   // Configuracoes = uma roda de ajuste; Mecanismos = duas rodas conjugadas.
   // O icone de engrenagem simples permanece uma unica roda, sem copiar layout.
   const double pi=3.14159265358979323846;
@@ -173,6 +187,10 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
    // Dois centros/raios diferentes: contraste semantico em 20 e 24 px.
    wheel(QPointF(12,20),8.7,9,fg);
    wheel(QPointF(22,10),6.2,7,accent);
+  }else if(id=="gear_pair"){
+   // Par externo: engrenagens iguais lado a lado.
+   wheel(QPointF(9,16),7.3,8,fg);
+   wheel(QPointF(23,16),7.3,8,accent);
   }else if(id=="settings"){
    wheel(QPointF(16,16),12.,9,fg);
    // Controle de ajuste interior (ausente na engrenagem mecanica simples).
@@ -360,7 +378,7 @@ inline const QStringList& alencarSketchIconIds(){
   "move_sw","move_s","move_se","play","pause","stop","fit",
   "open_other","save_as","nodes","bezier","new_bezier","scissors","image",
   "align_left","align_right","align_top","align_bottom","center_bed",
-  "flip_h","flip_v","rotate_90","mechanism","text","pencil"};
+  "flip_h","flip_v","rotate_90","mechanism","gear_simple","gear_pair","rack","text","pencil"};
  return ids;
 }
 } // namespace alaser
