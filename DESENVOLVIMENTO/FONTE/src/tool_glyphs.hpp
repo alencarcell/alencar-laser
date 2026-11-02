@@ -292,7 +292,15 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
   p.drawEllipse(QPointF(27,25),1.5,1.5);
   p.setPen(QPen(fg,1.65,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
   line(16,12,16,20);line(13,17,16,20);line(19,17,16,20);
- }else if(id=="add_node"||id=="remove_node"||id=="delete_edge"||
+ }else if(id=="delete_edge"){
+  // Segmento interrompido + X central: remoção de aresta, não exclusão de nó.
+  // Extremidades permanecem na forma, distinguindo o comando em 20px.
+  p.setPen(normal);
+  line(5,24,11,18);line(21,18,27,24);
+  square(5,24);square(27,24);
+  p.setPen(QPen(accent,2.5,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+  line(12,9,20,17);line(20,9,12,17);
+ }else if(id=="add_node"||id=="remove_node"||
           id=="smooth_node"||id=="corner_node"||id=="axis_align"){
   QPainterPath path;
   if(id=="smooth_node"){
