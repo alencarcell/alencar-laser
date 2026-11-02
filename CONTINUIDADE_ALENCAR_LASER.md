@@ -997,3 +997,10 @@ Registrar mudanças, testes e pendências.
 - `qt/qt6_test6.cpp`: comandos reais `Gerar > Engrenagens` (simples, par, cremalheira, oficina) agora têm ícones atribuídos. Auditoria Qt exige distância visual entre 18 pares semânticos **em 20px** e exporta `PRANCHA_CRITICOS_19_9.png` (20/24/58 px) além da prancha completa.
 - Mapeamento e contrato no arquivo `DESENVOLVIMENTO/ESPECIFICACOES/ICONOGRAFIA_RABISCOS_19_9.md`. PR #13 segue draft. Homologar só após PASS da versão atual no GitHub Actions e comparação da prancha com desenho original (inclusive 100%/200% DPI).
 - Todo o trabalho é **visual/editorial**: não muda motores geométricos, CAM, firmware, backups, `main`, `APLICATIVO` ou bloqueio de emissão física.
+
+## 02/11/2026 — Refinamento de alto contraste: Adicionar nó versus Remover nó
+- Auditado o gate Qt Windows run #284 (commit `4030b21`): compilação C++/Qt e testes portáteis bem-sucedidos, mas `--icon-pack-19-9-test` devolveu FAIL por baixa diferença entre `add_node` e `remove_node` em 20 px: **8 pixels diferentes**, abaixo do mínimo definido de 18.
+- A solução **não reduz a exigência do teste**: código `src/tool_glyphs.hpp` agora apresenta `add_node` com badge **laranja sólido e + escuro**, e `remove_node` com badge **escuro, contorno laranja e − claro**, ambos integralmente dentro da grade e mantendo linha/nó de fundo idênticos.
+- Commits `94e4174` e `99d7fa9` (tipagem explícita da caneta Qt para compilação estável). Sem alterações em regras de edição, Undo, G-code ou interface física.
+- Plano de validação: exigir CI Qt Windows PASS, então recuperar `PRANCHA_CRITICOS_19_9.png` e comparar fidelidade/legibilidade com os rabiscos nas escalas 20, 24 e 58 px. O catálogo permanece **provisório** até validação visual pelo proprietário.
+- Preservados `main`, `APLICATIVO`, instaladores homologados, backups e bloqueio GRBL/laser/emissão. PR #13 segue draft.
