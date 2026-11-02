@@ -9,6 +9,7 @@
 #include <QFont>
 #include <QColor>
 #include <cmath>
+#include <array>
 namespace alaser {
 inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false){
  QPixmap pix(64,64);pix.setDevicePixelRatio(2.);pix.fill(Qt::transparent);
