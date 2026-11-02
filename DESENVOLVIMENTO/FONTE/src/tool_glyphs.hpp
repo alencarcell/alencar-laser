@@ -166,7 +166,7 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
                  <<QPointF(26,21)<<QPointF(5,21));
   line(20,3,20,9);line(20,9,26,9);
   p.setPen(QPen(accent,2.2,Qt::SolidLine,Qt::RoundCap));p.setBrush(QColor("#1A2731"));
-  p.drawEllipse(QPointF(24,24),6,6);line(24,20.8,24,27.2);line(20.8,24,27.2,24);
+  p.drawEllipse(QPointF(23.5,23.5),5.5,5.5);line(23.5,20.3,23.5,26.7);line(20.3,23.5,26.7,23.5);
  }else if(id=="import"){
   p.drawPolygon(QPolygonF()<<QPointF(5,3)<<QPointF(20,3)<<QPointF(25,8)
                   <<QPointF(25,18)<<QPointF(5,18));
