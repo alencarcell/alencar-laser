@@ -4555,6 +4555,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* gearsMenu=generateMenu->addMenu("Engrenagens");
    auto* gearAction=gearsMenu->addAction("Engrenagem simples (mm)...");
   gearAction->setObjectName("generate_gear_offline_19_9");
+  gearAction->setIcon(alaser::toolGlyph("gear_simple"));
   connect(gearAction,&QAction::triggered,this,[this]{
    if(view.busy()){status->setText("Conclua o gesto atual antes de gerar uma engrenagem.");return;}
    alaser::gear::GearDialog dialog(workspaceCfg_.drawingWidth,
@@ -4568,6 +4569,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
 
   auto* pairAction=gearsMenu->addAction("Par de engrenagens (nominal / offline)...");
   pairAction->setObjectName("generate_gear_pair_offline_19_9");
+  pairAction->setIcon(alaser::toolGlyph("gear_pair"));
   connect(pairAction,&QAction::triggered,this,[this]{
    if(view.busy()){status->setText("Conclua o gesto antes de gerar o par.");return;}
    alaser::gear::CompoundGearDialog dialog(alaser::gear::CompoundKind::Pair,
@@ -4579,6 +4581,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
   auto* rackAction=gearsMenu->addAction("Cremalheira (nominal / offline)...");
   rackAction->setObjectName("generate_gear_rack_offline_19_9");
+  rackAction->setIcon(alaser::toolGlyph("rack"));
   connect(rackAction,&QAction::triggered,this,[this]{
    if(view.busy()){status->setText("Conclua o gesto antes de gerar a cremalheira.");return;}
    alaser::gear::CompoundGearDialog dialog(alaser::gear::CompoundKind::Rack,
@@ -4592,6 +4595,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   gearsMenu->addSeparator();
   auto* studio=gearsMenu->addAction("Oficina de Mecanismos — simulação e biblioteca (OFFLINE)...");
   studio->setObjectName("open_mechanism_studio_19_9");
+  studio->setIcon(alaser::toolGlyph("mechanism"));
   studio->setToolTip("Simulação cinematica idealizada, materiais e modelos educativos sem operação física.");
   connect(studio,&QAction::triggered,this,[this]{
    if(view.busy()){status->setText("Conclua o gesto antes de abrir a Oficina de Mecanismos.");return;}
