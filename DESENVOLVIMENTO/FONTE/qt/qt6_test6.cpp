@@ -24,6 +24,7 @@
 #include "rotary_dialog_19_9.hpp"
 #include "gear_dialog_19_9.hpp"
 #include "gear_compound_dialog_19_9.hpp"
+#include "mechanism_studio_dialog_19_9.hpp"
 #include <QApplication>
 #include <QGraphicsView>
 #include <QGraphicsScene>
@@ -3026,6 +3027,43 @@ public:
     "Encaixe e kerf NÃO validados.")
    .arg(spec.teeth).arg(result.circularPitchMm,0,'f',3));
  }
+
+ // Biblioteca de exemplos: sempre usa geometria NOMINAL e uma unica operacao Undo.
+ // Nenhuma rotina aqui pode chegar ao laser, G-code ou firmware.
+ void insertMechanismStudy(const alaser::mechanisms::Settings& config){
+  check(!view.busy(),"Conclua o gesto atual antes de inserir mecanismo.");
+  const auto assembly=alaser::mechanisms::generate(config);
+  check(!assembly.parts.empty(),"Mecanismo vazio.");
+  const int layerId=layers->currentData().toInt();
+  const auto& layer=view.editor.state().layers.at(layerId);
+  check(layer.visible&&!layer.locked,"Camada deve estar visivel e desbloqueada.");
+  double minX=1e20,maxX=-1e20,minY=1e20,maxY=-1e20;
+  std::vector<std::vector<Pt>> contours;
+  for(const auto& part:assembly.parts){
+   for(const auto* polygon:{&part.outer,&part.bore}){
+    if(polygon->empty())continue;
+    std::vector<Pt> points;points.reserve(polygon->size());
+    for(const auto& raw:*polygon){
+     const auto p=alaser::mechanisms::transform(part,raw,0.);
+     minX=std::min(minX,p.x);maxX=std::max(maxX,p.x);
+     minY=std::min(minY,p.y);maxY=std::max(maxY,p.y);
+     points.push_back({p.x,-p.y});
+    }
+    contours.push_back(std::move(points));
+   }
+  }
+  check(!contours.empty(),"Gerador nao retornou contornos.");
+  const double tx=workspaceCfg_.drawingWidth/2.-(minX+maxX)/2.;
+  const double ty=workspaceCfg_.drawingHeight/2.+(minY+maxY)/2.;
+  for(auto& poly:contours)for(auto& p:poly){p.x+=tx;p.y+=ty;}
+  const size_t size=contours.size();
+  const auto inserted=view.editor.addContours(std::move(contours),true,layerId,true);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  view.activate({inserted.front(),0});recoveryPolicy_.edited();
+  captureEvent("mechanism_study_created",int(size));refresh();
+  status->setText(QString("%1 contornos didaticos gerados. Perfil nominal: folga e kerf nao aplicados.")
+     .arg(size));
+ }
  void configureWorkspace(){
   QDialog dialog(this);dialog.setWindowTitle("Área de desenho e mesa — Alencar Laser");
   dialog.setMinimumWidth(420);
@@ -4548,6 +4586,20 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    const auto p=dialog.rackParameters();
    const auto origin=dialog.origin();
    run([this,p,origin]{insertGeneratedRack(p,origin);});view.setFocus();
+  });
+
+  gearsMenu->addSeparator();
+  auto* studio=gearsMenu->addAction("Oficina de Mecanismos — simulação e biblioteca (OFFLINE)...");
+  studio->setObjectName("open_mechanism_studio_19_9");
+  studio->setToolTip("Simulação cinematica idealizada, materiais e modelos educativos sem operação física.");
+  connect(studio,&QAction::triggered,this,[this]{
+   if(view.busy()){status->setText("Conclua o gesto antes de abrir a Oficina de Mecanismos.");return;}
+   alaser::mechanisms::MechanismStudioDialog dialog(this);
+   if(dialog.exec()==QDialog::Accepted){
+    const auto config=dialog.settings();
+    run([this,config]{insertMechanismStudy(config);});
+   }
+   view.setFocus();
   });
   auto* laserMenu=mainMenu->addMenu("Laser");
   auto* rotaryEntry=laserMenu->addAction("Configurar rotativo (Rolo / Mandril) — OFFLINE...");
