@@ -109,6 +109,7 @@
 #include <QDateTime>
 #include <QTemporaryDir>
 #include <QCryptographicHash>
+#include <QSet>
 #include <QFileDialog>
 #include <QSysInfo>
 #include <QLineF>
