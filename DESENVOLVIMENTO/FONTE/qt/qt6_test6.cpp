@@ -8394,9 +8394,59 @@ static QJsonObject gearGenerator199Test(){
        "Cremalheira nao criou contorno unico");
  check(w.view.editor.undo()&&sameDoc(before,w.view.editor.state().doc),
        "Undo da cremalheira nao restaurou geometria");
+
+ alaser::mechanisms::MechanismStudioDialog studio;
+ auto* preset=studio.findChild<QComboBox*>("mechanism_preset_19_9");
+ auto* material=studio.findChild<QComboBox*>("mechanism_material_19_9");
+ auto* thickness=studio.findChild<QDoubleSpinBox*>("mechanism_thickness_19_9");
+ auto* driver=studio.findChild<QSpinBox*>("mechanism_teeth_driver_19_9");
+ auto* driven=studio.findChild<QSpinBox*>("mechanism_teeth_driven_19_9");
+ auto* play=studio.findChild<QPushButton*>("mechanism_play_19_9");
+ auto* pause=studio.findChild<QPushButton*>("mechanism_pause_19_9");
+ auto* reset=studio.findChild<QPushButton*>("mechanism_reset_19_9");
+ auto* canvas=studio.findChild<QWidget*>("mechanism_animation_canvas_19_9");
+ auto* info=studio.findChild<QLabel*>("mechanism_info_19_9");
+ auto* warnings=studio.findChild<QLabel*>("mechanism_warnings_19_9");
+ check(preset&&material&&thickness&&driver&&driven&&play&&pause&&reset&&canvas&&info&&warnings,
+       "Oficina de mecanismos: widgets essenciais ausentes");
+ check(preset->count()==3&&material->count()==3&&
+       info->text().contains("Distância nominal")&&
+       warnings->text().contains("NAO aplicados"),
+       "Oficina de mecanismos: presets, materiais ou avisos ausentes");
+ check(w.findChild<QAction*>("open_mechanism_studio_19_9")!=nullptr,
+       "Gerar > Engrenagens > Oficina de Mecanismos ausente");
+ studio.show();QApplication::processEvents();
+ play->click();QApplication::processEvents();
+ check(!play->isEnabled()&&pause->isEnabled(),"Animação offline não iniciou");
+ pause->click();QApplication::processEvents();
+ check(play->isEnabled()&&!pause->isEnabled(),"Pausar simulação falhou");
+ reset->click();
+ preset->setCurrentIndex(0);
+ check(studio.settings().preset==alaser::mechanisms::Template::ClockTrain,
+       "Preset de estudo de relógio não foi selecionado");
+ const auto countBefore=w.view.editor.state().doc.contours.size();
+ const auto undoBefore=w.view.editor.undoCount();
+ w.insertMechanismStudy(studio.settings());
+ check(w.view.editor.undoCount()==undoBefore+1&&
+       w.view.editor.state().doc.contours.size()==countBefore+6,
+       "Trem de três engrenagens não criou contornos em Undo único");
+ check(w.view.editor.undo()&&sameDoc(before,w.view.editor.state().doc),
+       "Undo do mecanismo não preservou a arte anterior");
+ preset->setCurrentIndex(2);
+ check(studio.settings().preset==alaser::mechanisms::Template::SchoolRack,
+       "Preset escolar de cremalheira ausente");
+ const auto rackBefore=w.view.editor.undoCount();
+ w.insertMechanismStudy(studio.settings());
+ check(w.view.editor.undoCount()==rackBefore+1&&
+       w.view.editor.state().doc.contours.size()==countBefore+3,
+       "Pinhão/cremalheira não gerados numa transação");
+ check(w.view.editor.undo()&&sameDoc(before,w.view.editor.state().doc),
+       "Undo da biblioteca escolar falhou");
+ studio.reject();
  return {{"status","PASS"},{"gear_preview",true},{"editable_contours",true},
          {"single_undo",true},{"old_objects_preserved",true},
          {"pair_nominal_preview_and_undo",true},{"rack_nominal_preview_and_undo",true},
+         {"mechanism_studio_animation_presets_and_undo",true},
          {"hardware_commands_sent",false}};
 }
 static QJsonObject rasterObject198Test(){
