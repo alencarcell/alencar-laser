@@ -973,3 +973,10 @@ Registrar mudanças, testes e pendências.
 - `--icon-pack-19-9-test` em `qt/qt6_test6.cpp`: inspeciona imagem real Qt dos glifos, margens, densidade, diferenciação de pares semânticos e gera `RESULTADO_ICONES_19_9.json` + `PRANCHA_ICONES_REAIS_19_9.png`. Integrado à suíte Qt Windows e `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteIcones` (isolado), além de `-SomenteEngrenagens`.
 - Documento de mapeamento: `DESENVOLVIMENTO/ESPECIFICACOES/ICONOGRAFIA_RABISCOS_19_9.md`. Referência principal segue sendo a imagem manuscrita do proprietário.
 - Branch PR #13 **draft**; verificar PASS do gate Qt Windows e comparar prancha renderizada em 100%/200% DPI com os rabiscos antes de aprovar. Não modificar `main`, instalador homologado, `APLICATIVO`, backups, GRBL, G-code, movimento ou emissão.
+
+## 02/11/2026 — Evidência local de regressões e falha específica de margens
+- Captura do proprietário no VS Code mostra **BUILD E REGRESSOES AUTOMATIZADAS PASSARAM**, incluindo geometria de engrenagens, três modelos da Oficina de Mecanismos, teste de codec `.alaser` v5, tesoura/camadas, geometria, política de recuperação e demais módulos; ainda surgem mensagens `QFont::setPointSize: Point size <= 0` e a própria suíte exige **AVALIAÇÃO VISUAL**.
+- A captura local **não prova** a auditoria de ícones `--icon-pack-19-9-test`. O GitHub Actions Windows Qt da versão `178c1b9` compilou, mas falhou especificamente no gate `icon-pack-19-9`: nove glifos de edição de nós e Bézier tocavam a borda do pixmap de 64 px.
+- Identificados: `add_node`, `remove_node`, `delete_edge`, `smooth_node`, `corner_node`, `line_to_curve`, `curve_to_line`, `axis_align`, `new_bezier`. Esses resultados são objetivos (pixels na margem), não apenas opinião estética.
+- Correção `e6a5c1`: recolher alças, pontos, curvas e badges +/−/X para dentro da área segura 32×32. Não modifica interações do editor, arquivos, hardware nem esquema de dados.
+- Gate exigido antes de marcar iconografia aprovada: novo **PASS Qt Windows**, arquivo `PRANCHA_ICONES_REAIS_19_9.png`, teste manual dos símbolos em 100% e 200% DPI e confronto com rabiscos originais. PR #13 permanece draft.
