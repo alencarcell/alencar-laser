@@ -40,8 +40,8 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
   p.setPen(QPen(accent,1.3,Qt::DashLine));line(5,23,7,8);line(27,8,24,24);
   p.setPen(normal);square(5,23);square(27,8);
  }else if(id=="new_bezier"){
-  QPainterPath c;c.moveTo(4,25);c.lineTo(13,15);c.cubicTo(20,3,23,25,26,7);p.drawPath(c);
-  square(4,25);square(13,15);square(26,7);
+  QPainterPath c;c.moveTo(5,24);c.lineTo(13,15);c.cubicTo(20,5,22,25,25,8);p.drawPath(c);
+  square(5,24);square(13,15);square(25,8);
  }else if(id=="scissors"){
   p.setPen(QPen(accent,2.2,Qt::SolidLine,Qt::RoundCap));
   p.drawEllipse(QPointF(9,25),4,4);p.drawEllipse(QPointF(23,25),4,4);
@@ -237,14 +237,14 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
           id=="line_to_curve"||id=="curve_to_line"||id=="axis_align"){
   QPainterPath path;
   if(id=="smooth_node"||id=="line_to_curve"){
-   path.moveTo(4,25);path.cubicTo(8,2,23,29,28,7);
+   path.moveTo(5,24);path.cubicTo(8,5,22,27,26,8);
   }else if(id=="curve_to_line"||id=="corner_node"){
-   path.moveTo(4,25);path.lineTo(16,10);path.lineTo(28,25);
+   path.moveTo(5,24);path.lineTo(16,10);path.lineTo(26,24);
   }else{
-   path.moveTo(4,23);path.lineTo(16,12);path.lineTo(28,23);
+   path.moveTo(5,23);path.lineTo(16,12);path.lineTo(26,23);
   }
   p.drawPath(path);
-  square(4,23);square(28,23);
+  square(5,23);square(26,23);
   if(id=="axis_align"){
    p.setPen(QPen(accent,1.5,Qt::DashLine));line(16,3,16,29);
    p.setPen(normal);square(16,12);
@@ -255,9 +255,9 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
   }else{
    p.setPen(QPen(accent,2.4,Qt::SolidLine,Qt::RoundCap));square(16,12);
    if(id=="add_node"||id=="remove_node"){
-    p.setBrush(QColor("#1C2835"));p.drawEllipse(QPointF(25,7),6.5,6.5);
-    line(21,7,29,7);if(id=="add_node")line(25,3,25,11);
-   }else{line(22,3,29,10);line(29,3,22,10);}
+    p.setBrush(QColor("#1C2835"));p.drawEllipse(QPointF(24,7),5.0,5.0);
+    line(20.5,7,27.5,7);if(id=="add_node")line(24,3.5,24,10.5);
+   }else{line(21,4,27,10);line(27,4,21,10);}
   }
  }else if(id.startsWith("move_")){
   const QStringList dirs={"nw","n","ne","w","e","sw","s","se"};
