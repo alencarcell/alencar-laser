@@ -327,3 +327,10 @@ target_include_directories(alencar_test19_9_gear_offline PRIVATE src)
 if(NOT MSVC)
  target_compile_options(alencar_test19_9_gear_offline PRIVATE -O2 -Wall -Wextra -Wpedantic)
 endif()
+
+# 19.9 — Oficina de mecanismos: matematica, materiais e animação idealizada OFFLINE.
+add_executable(alencar_test19_9_mechanisms_offline tests/mechanism_studio_19_9_standalone.cpp)
+target_include_directories(alencar_test19_9_mechanisms_offline PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_9_mechanisms_offline PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
