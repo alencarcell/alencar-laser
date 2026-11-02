@@ -327,8 +327,8 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
     // A identidade não depende só de uma haste de 3 px.
     constexpr QPointF badge(23.,9.5);
     constexpr double radius=5.5;
-    p.setPen(id=="add_node"?Qt::NoPen:
-      QPen(accent,1.8,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+    if(id=="add_node")p.setPen(Qt::NoPen);
+    else p.setPen(QPen(accent,1.8,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
     p.setBrush(id=="add_node"?accent:QColor("#1C2835"));
     p.drawEllipse(badge,radius,radius);
     p.setBrush(Qt::NoBrush);
