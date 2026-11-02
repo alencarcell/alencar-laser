@@ -255,8 +255,13 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
   }else{
    p.setPen(QPen(accent,2.4,Qt::SolidLine,Qt::RoundCap));square(16,12);
    if(id=="add_node"||id=="remove_node"){
-    p.setBrush(QColor("#1C2835"));p.drawEllipse(QPointF(24,7),5.0,5.0);
-    line(20.5,7,27.5,7);if(id=="add_node")line(24,3.5,24,10.5);
+    // Insignia +/- deslocada para dentro da grade 32x32:
+    // evita tocar a margem superior com a espessura do contorno Qt (2.4 px).
+    constexpr double badgeX=24.,badgeY=9.,badgeRadius=4.5;
+    p.setBrush(QColor("#1C2835"));
+    p.drawEllipse(QPointF(badgeX,badgeY),badgeRadius,badgeRadius);
+    line(21.,badgeY,27.,badgeY);
+    if(id=="add_node")line(badgeX,6.,badgeX,12.);
    }else{line(21,4,27,10);line(27,4,21,10);}
   }
  }else if(id.startsWith("move_")){
