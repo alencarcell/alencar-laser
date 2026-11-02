@@ -8341,6 +8341,23 @@ static QJsonObject gearGenerator199Test(){
  LabWindow w(Document{});w.resize(1100,750);w.show();QApplication::processEvents();
  check(w.findChild<QAction*>("generate_gear_offline_19_9")!=nullptr,
        "Menu Gerar > Engrenagem ausente");
+ auto* operation=w.findChild<QFrame*>("operation_strip_19_8");
+ auto* title=w.findChild<QLabel*>("operation_title_19_8");
+ auto* selectedButton=w.findChild<QPushButton*>("select");
+ auto* lineButton=w.findChild<QPushButton*>("line");
+ auto* stopButton=w.findChild<QToolButton*>("operation_stop_disabled");
+ auto* startButton=w.findChild<QToolButton*>("operation_start_disabled");
+ auto* pauseButton=w.findChild<QToolButton*>("operation_pause_continue_disabled");
+ check(operation&&operation->height()<=35&&title&&title->text()=="LASER OFF",
+       "Rodape nao esta compacto ou perdeu estado de seguranca");
+ check(selectedButton&&lineButton&&selectedButton->iconSize().width()>=22&&
+       lineButton->iconSize().width()>=22&&
+       !selectedButton->icon().isNull()&&!lineButton->icon().isNull(),
+       "Icones de desenho nao estao completos e legiveis");
+ check(stopButton&&startButton&&pauseButton&&
+       !startButton->isEnabled()&&!pauseButton->isEnabled()&&!stopButton->isEnabled()&&
+       !stopButton->icon().pixmap(QSize(23,23),QIcon::Disabled).isNull(),
+       "Icones e bloqueio fisico de operacao comprometidos");
  const int prior=w.view.editor.rectangle({10,10},12,10);
  const auto before=w.view.editor.state().doc;
  const auto undo=w.view.editor.undoCount();
