@@ -287,8 +287,11 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
 inline QIcon toolGlyph(const QString& id){
  QIcon icon;
  icon.addPixmap(renderAlencarGlyph(id,false),QIcon::Normal,QIcon::Off);
+ icon.addPixmap(renderAlencarGlyph(id,false,true),QIcon::Normal,QIcon::On);
  icon.addPixmap(renderAlencarGlyph(id,true),QIcon::Disabled,QIcon::Off);
+ icon.addPixmap(renderAlencarGlyph(id,true),QIcon::Disabled,QIcon::On);
  icon.addPixmap(renderAlencarGlyph(id,false,true),QIcon::Active,QIcon::Off);
+ icon.addPixmap(renderAlencarGlyph(id,false,true),QIcon::Active,QIcon::On);
  icon.addPixmap(renderAlencarGlyph(id,false,true),QIcon::Selected,QIcon::On);
  return icon;
 }
