@@ -153,15 +153,35 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
   line(4,21,4,28);line(4,28,11,28);
   line(21,28,28,28);line(28,21,28,28);
  }else if(id=="settings"||id=="mechanism"||id=="gear_simple"){
+  // Configuracoes = uma roda de ajuste; Mecanismos = duas rodas conjugadas.
+  // O icone de engrenagem simples permanece uma unica roda, sem copiar layout.
   const double pi=3.14159265358979323846;
-  QPolygonF gear;
-  for(int i=0;i<24;++i){
-   const double theta=i*pi/12.;
-   const double radius=(i%3==0||i%3==1)?13.:10.;
-   gear<<QPointF(16+radius*std::cos(theta),16+radius*std::sin(theta));
+  auto wheel=[&](QPointF center,double radius,int teeth,const QColor& stroke){
+   QPolygonF outline;
+   for(int j=0;j<teeth*4;++j){
+    const double a=-pi/2.+double(j)*2.*pi/double(teeth*4);
+    const double r=(j%4==1||j%4==2)?radius:radius*0.83;
+    outline<<QPointF(center.x()+r*std::cos(a),center.y()+r*std::sin(a));
+   }
+   p.setPen(QPen(stroke,1.8,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+   p.setBrush(Qt::NoBrush);p.drawPolygon(outline);
+   p.setBrush(stroke);p.setPen(Qt::NoPen);
+   p.drawEllipse(center,std::max(1.6,radius*0.23),std::max(1.6,radius*0.23));
+   p.setBrush(Qt::NoBrush);
+  };
+  if(id=="mechanism"){
+   // Dois centros/raios diferentes: contraste semantico em 20 e 24 px.
+   wheel(QPointF(12,20),8.7,9,fg);
+   wheel(QPointF(22,10),6.2,7,accent);
+  }else if(id=="settings"){
+   wheel(QPointF(16,16),12.,9,fg);
+   // Controle de ajuste interior (ausente na engrenagem mecanica simples).
+   p.setPen(QPen(accent,1.8,Qt::SolidLine,Qt::RoundCap));
+   p.setBrush(Qt::NoBrush);
+   p.drawArc(QRectF(10.5,10.5,11,11),20*16,230*16);
+  }else{
+   wheel(QPointF(16,16),12.,12,accent);
   }
-  p.drawPolygon(gear);p.setBrush(accent);p.drawEllipse(QPointF(16,16),4.5,4.5);
- 
  }else if(id=="new"){
   // Folha com dobra e sinal de adição no canto inferior direito.
   p.drawPolygon(QPolygonF()<<QPointF(5,3)<<QPointF(20,3)<<QPointF(26,9)
@@ -232,13 +252,34 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
   QPolygonF shape;shape<<QPointF(16,5)<<QPointF(26,11)<<QPointF(23,26)
     <<QPointF(9,26)<<QPointF(6,11);p.drawPolygon(shape);
   for(const auto& q:shape)square(q.x(),q.y());
+ }else if(id=="line_to_curve"||id=="curve_to_line"){
+  // Transformacao visivel: original no topo (branco), resultado abaixo (laranja).
+  // Seta indica a direcao da conversao, NAO movimento fisico.
+  const bool toCurve=id=="line_to_curve";
+  QPainterPath before,after;
+  if(toCurve){
+   before.moveTo(5,8);before.lineTo(27,8);
+   after.moveTo(5,25);after.cubicTo(9,14,23,14,27,25);
+  }else{
+   before.moveTo(5,11);before.cubicTo(9,2,23,2,27,11);
+   after.moveTo(5,25);after.lineTo(27,25);
+  }
+  p.setPen(QPen(fg,1.9,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+  p.drawPath(before);
+  p.setPen(QPen(accent,2.4,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+  p.drawPath(after);
+  // Marcadores de extremidade e seta descendente para leitura em tamanho pequeno.
+  p.setBrush(accent);p.setPen(Qt::NoPen);
+  p.drawEllipse(QPointF(5,25),1.5,1.5);
+  p.drawEllipse(QPointF(27,25),1.5,1.5);
+  p.setPen(QPen(fg,1.65,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+  line(16,12,16,20);line(13,17,16,20);line(19,17,16,20);
  }else if(id=="add_node"||id=="remove_node"||id=="delete_edge"||
-          id=="smooth_node"||id=="corner_node"||
-          id=="line_to_curve"||id=="curve_to_line"||id=="axis_align"){
+          id=="smooth_node"||id=="corner_node"||id=="axis_align"){
   QPainterPath path;
-  if(id=="smooth_node"||id=="line_to_curve"){
+  if(id=="smooth_node"){
    path.moveTo(5,24);path.cubicTo(8,5,22,27,26,8);
-  }else if(id=="curve_to_line"||id=="corner_node"){
+  }else if(id=="corner_node"){
    path.moveTo(5,24);path.lineTo(16,10);path.lineTo(26,24);
   }else{
    path.moveTo(5,23);path.lineTo(16,12);path.lineTo(26,23);
@@ -250,8 +291,15 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
    p.setPen(normal);square(16,12);
   }else if(id=="smooth_node"||id=="corner_node"){
    p.setPen(QPen(accent,1.6));square(16,12);
-  }else if(id=="line_to_curve"||id=="curve_to_line"){
-   p.setPen(QPen(accent,2.));line(21,25,28,25);line(25,22,28,25);line(25,28,28,25);
+   if(id=="smooth_node"){
+    // Tangentes continuas, diferente de um vertice de canto.
+    p.setPen(QPen(accent,1.35,Qt::DashLine));
+    line(7,17,25,7);
+    p.setPen(Qt::NoPen);p.setBrush(accent);
+    p.drawEllipse(QPointF(7,17),1.7,1.7);
+    p.drawEllipse(QPointF(25,7),1.7,1.7);
+    p.setBrush(Qt::NoBrush);
+   }
   }else{
    p.setPen(QPen(accent,2.4,Qt::SolidLine,Qt::RoundCap));square(16,12);
    if(id=="add_node"||id=="remove_node"){
