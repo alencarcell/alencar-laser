@@ -41,7 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S DESENVOLVIMENTO/FONTE -B DESENVOLVIMENTO/FONTE/build_ci_qt_198 -G Ninja -DALENCAR_REQUIRE_QT=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/ucrt64
-          cmake --build DESENVOLVIMENTO/FONTE/build_ci_qt_198 --parallel 2 --target alencar_test7_qt6 alencar_test15_qt_integrated alencar_test16_qt_persistence alencar_test17_mission alencar_test15_core alencar_work_local_edit_stress alencar_test19_8_distribute_offline alencar_test19_9_rotary_offline alencar_test19_9_gear_offline
+          cmake --build DESENVOLVIMENTO/FONTE/build_ci_qt_198 --parallel 2 --target alencar_test7_qt6 alencar_test15_qt_integrated alencar_test16_qt_persistence alencar_test17_mission alencar_test15_core alencar_work_local_edit_stress alencar_test19_8_distribute_offline alencar_test19_9_rotary_offline alencar_test19_9_gear_offline alencar_test19_9_mechanisms_offline
       - name: Test Bezier resize and abandoned-gesture recovery without hardware
         shell: msys2 {0}
         run: |
@@ -64,6 +64,7 @@ jobs:
           "$build/alencar_test19_8_distribute_offline.exe"
           "$build/alencar_test19_9_rotary_offline.exe"
           "$build/alencar_test19_9_gear_offline.exe"
+          "$build/alencar_test19_9_mechanisms_offline.exe"
           for mode in gear-generator-19-9 layout-icons-19-8 raster-object-19-8 recovery-19-8 edit-tools-19-7 refine-curves-trace-19-8 scissor-closures-19-8 layers-ungroup-19-8 simulation-raster-19-8 route-nesting-19-8 layer-route-19-8 simulation-motion-19-8 text-fill-align-19-8 text-format-19-8 inline-transforms-19-8 editor-multitool-19-8 drawing-tools-19-8 lbrn2-import shape-operations navigation workspace; do
             mkdir -p "$out/$mode"
             if ! "$build/alencar_test7_qt6.exe" "--$mode-test" "$fixture" "$out/$mode"; then
