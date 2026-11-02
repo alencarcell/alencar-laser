@@ -127,7 +127,7 @@ class MechanismStudioDialog final :public QDialog {
   const QSignalBlocker m(module_),p(pressure_),b(bore_),t(driver_),f(driven_);
   module_->setValue(d.moduleMm);pressure_->setValue(d.pressureDeg);
   bore_->setValue(d.boreMm);driver_->setValue(d.teeth1);driven_->setValue(d.teeth2);
-  driven_->setPrefix(index==2?"Dentes da barra: ":"");
+  // O rótulo do formulário já identifica a barra; sem prefixo longo no campo.
   refresh();
  }
  void refresh(){
