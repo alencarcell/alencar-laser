@@ -8361,22 +8361,76 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
     QByteArray(reinterpret_cast<const char*>(img.constBits()),img.sizeInBytes()),
     QCryptographicHash::Sha256);
  };
- for(const auto& pair:std::array<std::pair<QString,QString>,10>{
-   std::pair<QString,QString>{"flip_h","flip_v"},
+ const std::array<std::pair<QString,QString>,15> criticalPairs={{{"flip_h","flip_v"},
    {"distribute_horizontal","distribute_vertical"},
-   {"same_width","same_height"},
-   {"align_center_x","align_center_y"},
-   {"undo","redo"},
-   {"play","pause"},
-   {"pause","stop"},
-   {"add_node","remove_node"},
-   {"new","import"},
-   {"line_to_curve","curve_to_line"}})
+   {"same_width","same_height"},{"align_center_x","align_center_y"},
+   {"undo","redo"},{"play","pause"},{"pause","stop"},
+   {"add_node","remove_node"},{"new","import"},
+   {"line_to_curve","curve_to_line"},{"settings","mechanism"},
+   {"gear_simple","mechanism"},{"settings","gear_simple"},
+   {"smooth_node","corner_node"},{"edit_nodes","select"}}};
+ // Mais importante que alterar um hash: diferenca perceptivel apos reducao a 20 px.
+ auto difference20=[](const QString& left,const QString& right)->int{
+  const auto normalized=[](const QString& id){
+   return alaser::renderAlencarGlyph(id).toImage()
+    .scaled(20,20,Qt::IgnoreAspectRatio,Qt::SmoothTransformation)
+    .convertToFormat(QImage::Format_ARGB32);
+  };
+  const auto a=normalized(left),b=normalized(right);
+  int distinct=0;
+  for(int y=0;y<20;++y)for(int x=0;x<20;++x){
+   const QColor ca=a.pixelColor(x,y),cb=b.pixelColor(x,y);
+   if(std::abs(ca.alpha()-cb.alpha())>40 ||
+      (std::max(ca.alpha(),cb.alpha())>70 &&
+       std::abs(ca.red()-cb.red())+std::abs(ca.green()-cb.green())+
+       std::abs(ca.blue()-cb.blue())>85))
+    ++distinct;
+  }
+  return distinct;
+ };
+ for(const auto& pair:criticalPairs){
   check(fingerprint(pair.first)!=fingerprint(pair.second),
-        "Duas funcoes diferentes compartilham glifo indistinguivel");
+        "Icones semanticos compartilham pixmaps identicos");
+  const int diff=difference20(pair.first,pair.second);
+  if(diff<18)
+   problems<<QString("%1/%2: diferenca 20px insuficiente (%3 pixels)")
+             .arg(pair.first).arg(pair.second).arg(diff);
+ }
+ // Uma prancha de comparacao pequena/real para aprovacao visual incremental.
+ const QStringList focus={"settings","mechanism","gear_simple","line_to_curve",
+   "curve_to_line","smooth_node","corner_node","add_node","remove_node",
+   "edit_nodes","select","flip_h","flip_v","play","pause","stop"};
+ QImage details(840,((focus.size()+3)/4)*144,QImage::Format_ARGB32_Premultiplied);
+ details.fill(QColor("#17232D"));
+ QPainter audit(&details);audit.setRenderHint(QPainter::Antialiasing,true);
+ QFont auditFont=audit.font();auditFont.setPixelSize(13);audit.setFont(auditFont);
+ for(int i=0;i<focus.size();++i){
+  const int ox=(i%4)*210,oy=(i/4)*144;
+  audit.setPen(QPen(QColor("#3C5060"),1));
+  audit.drawRect(ox+4,oy+4,202,136);
+  const QPixmap pix=alaser::renderAlencarGlyph(focus[i]);
+  audit.drawPixmap(QRect(ox+20,oy+21,20,20),pix);
+  audit.drawPixmap(QRect(ox+63,oy+17,24,24),pix);
+  audit.drawPixmap(QRect(ox+111,oy+9,58,58),pix);
+  audit.setPen(QColor("#F2F4F7"));
+  audit.drawText(QRect(ox+9,oy+76,192,22),
+                 Qt::AlignHCenter|Qt::AlignVCenter,focus[i]);
+  audit.setPen(QColor("#A9B9C6"));
+  audit.drawText(QRect(ox+20,oy+102,180,19),
+                 Qt::AlignHCenter,"20px   24px   58px");
+ }
+ audit.end();
+ if(!folder.isEmpty())
+  check(details.save(folder+"/PRANCHA_CRITICOS_19_9.png"),
+        "Falhou exportacao de detalhes dos glifos reais");
+ if(!problems.isEmpty())
+  throw std::runtime_error(("Distincao visual insuficiente: "+problems.join("; ")).toStdString());
  return {{"status","PASS"},{"icons_verified",n},{"gallery_file","PRANCHA_ICONES_REAIS_19_9.png"},
+         {"critical_gallery","PRANCHA_CRITICOS_19_9.png"},
+         {"perceptual_pairs_checked",int(criticalPairs.size())},
+         {"minimum_20px_distinct_pixels",18},
          {"dpi_2x",true},{"normal_active_disabled_states",true},
-         {"no_fallback_for_reference",true},{"hardware_commands_sent",false}};
+         {"hardware_commands_sent",false}};
 }
 static QJsonObject gearGenerator199Test(){
  // No device, connection, G-code or physical action is involved.
