@@ -988,3 +988,12 @@ Registrar mudanças, testes e pendências.
 - Commit `e59144e`: estender auditoria de pares visuais para exigir que adicionar/remover nó e novo/importar não tenham os mesmos pixels.
 - Os avisos QFont/setPointSize do build são independentes da falha. O resultado ainda exige novo PASS de `-SomenteIcones` e CI Windows Qt, mais inspeção da prancha PNG real.
 - PR #13 continua **draft**, sem alterações em `main`, `APLICATIVO`, instalador homologado, movimentos, G-code ou emissão física.
+
+## 02/11/2026 — Refino de ícones ambíguos e integração real ao menu Gerar
+- Retomada específica após aprovação do teste `-SomenteIcones` na captura do operador e três gates PASS no GitHub, mantendo aprovação **visual provisória** e o manuscrito como referência principal.
+- Corrigida iconografia semântica em `src/tool_glyphs.hpp`: `settings` (engrenagem única de ajuste), `gear_simple` (engrenagem isolada), `mechanism` (duas engrenagens de diâmetros diferentes na diagonal), `gear_pair` (duas engrenagens iguais lado a lado) e `rack` (cremalheira com pinhão), com margens de segurança do QPainter em DPI alto.
+- `line_to_curve` e `curve_to_line` agora mostram claramente origem e destino (reta em cima/curva embaixo ou inverso), com destaque laranja no resultado, ao contrário da seta quase idêntica da versão anterior.
+- `smooth_node` recebeu representação adicional de tangentes; `corner_node` manteve o vértice agudo, sem alças, coerente com os rabiscos.
+- `qt/qt6_test6.cpp`: comandos reais `Gerar > Engrenagens` (simples, par, cremalheira, oficina) agora têm ícones atribuídos. Auditoria Qt exige distância visual entre 18 pares semânticos **em 20px** e exporta `PRANCHA_CRITICOS_19_9.png` (20/24/58 px) além da prancha completa.
+- Mapeamento e contrato no arquivo `DESENVOLVIMENTO/ESPECIFICACOES/ICONOGRAFIA_RABISCOS_19_9.md`. PR #13 segue draft. Homologar só após PASS da versão atual no GitHub Actions e comparação da prancha com desenho original (inclusive 100%/200% DPI).
+- Todo o trabalho é **visual/editorial**: não muda motores geométricos, CAM, firmware, backups, `main`, `APLICATIVO` ou bloqueio de emissão física.
