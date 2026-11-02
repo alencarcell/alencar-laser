@@ -4734,7 +4734,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    check(field!=nullptr,"Campos de selecao nao inicializados");
    field->setParent(operationStrip);
    field->setSuffix("");
-   field->setMinimumWidth(70);field->setMaximumWidth(83);
+   field->setMinimumWidth(76);field->setMaximumWidth(105);
    field->setFixedHeight(26);
    auto* label=new QLabel(footerFieldLabels.at(k),operationStrip);
    operationRow->addWidget(label);
