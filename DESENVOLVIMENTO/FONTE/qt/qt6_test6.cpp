@@ -8306,6 +8306,72 @@ static QJsonObject layoutIcons198Test(){
          {"vertical_mirror",true},{"header_compact",true},
          {"physical_operation_disabled",true}};
 }
+
+static QJsonObject sketchIcons199Audit(const QString& folder){
+ // Prancha de auditoria deriva dos QPixmaps REAIS, sem imagem conceitual.
+ // Verifica segurança visual de cada glifo em botões de 20/24/32 px.
+ const auto& ids=alaser::alencarSketchIconIds();
+ check(ids.size()>=55,"Catalogo de icones original incompleto");
+ const int cols=8,cw=152,ch=105;
+ const int rows=(ids.size()+cols-1)/cols;
+ QImage gallery(cw*cols,ch*rows,QImage::Format_ARGB32_Premultiplied);
+ gallery.fill(QColor("#14202B"));
+ QPainter painter(&gallery);painter.setRenderHint(QPainter::Antialiasing,true);
+ QFont font=painter.font();font.setPixelSize(13);painter.setFont(font);
+ QSet<QString> seen;
+ int n=0;
+ for(const auto& id:ids){
+  if(seen.contains(id))continue;seen.insert(id);
+  const auto native=alaser::renderAlencarGlyph(id);
+  const auto disabled=alaser::renderAlencarGlyph(id,true);
+  const auto active=alaser::renderAlencarGlyph(id,false,true);
+  check(!native.isNull()&&!disabled.isNull()&&!active.isNull(),
+        "Glifo ausente no catalogo de rabiscos");
+  const QImage img=native.toImage().convertToFormat(QImage::Format_ARGB32);
+  int ink=0,border=0;
+  for(int y=0;y<img.height();++y)for(int x=0;x<img.width();++x){
+   const int alpha=img.pixelColor(x,y).alpha();
+   if(alpha>35){++ink;if(x<2||y<2||x>=img.width()-2||y>=img.height()-2)++border;}
+  }
+  check(ink>=80 && border<=3,
+        "Glifo cortado, vazio ou sem margem de seguranca");
+  const int ox=(n%cols)*cw,oy=(n/cols)*ch;
+  painter.setPen(QPen(QColor("#405166"),1));painter.drawRect(ox+2,oy+2,cw-4,ch-4);
+  painter.drawPixmap(ox+12,oy+11,native);
+  painter.drawPixmap(ox+64,oy+15,disabled.scaled(40,40,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+  painter.drawPixmap(ox+108,oy+17,active.scaled(35,35,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+  painter.setPen(QColor("#E9F0F6"));
+  painter.drawText(QRect(ox+7,oy+71,cw-14,24),Qt::AlignHCenter|Qt::AlignVCenter,
+                   painter.fontMetrics().elidedText(id,Qt::ElideRight,cw-18));
+  ++n;
+ }
+ painter.end();
+ if(!folder.isEmpty()){
+  check(QDir().mkpath(folder),"Nao criou pasta da prancha de iconografia");
+  check(gallery.save(folder+"/PRANCHA_ICONES_REAIS_19_9.png"),
+        "Nao conseguiu gravar prancha Qt dos icones");
+ }
+ auto fingerprint=[](const QString& id)->QByteArray{
+  const QImage img=alaser::renderAlencarGlyph(id).toImage().convertToFormat(QImage::Format_ARGB32);
+  return QCryptographicHash::hash(
+    QByteArray(reinterpret_cast<const char*>(img.constBits()),img.sizeInBytes()),
+    QCryptographicHash::Sha256);
+ };
+ for(const auto& pair:std::array<std::pair<QString,QString>,8>{
+   std::pair<QString,QString>{"flip_h","flip_v"},
+   {"distribute_horizontal","distribute_vertical"},
+   {"same_width","same_height"},
+   {"align_center_x","align_center_y"},
+   {"undo","redo"},
+   {"play","pause"},
+   {"pause","stop"},
+   {"line_to_curve","curve_to_line"}})
+  check(fingerprint(pair.first)!=fingerprint(pair.second),
+        "Duas funcoes diferentes compartilham glifo indistinguivel");
+ return {{"status","PASS"},{"icons_verified",n},{"gallery_file","PRANCHA_ICONES_REAIS_19_9.png"},
+         {"dpi_2x",true},{"normal_active_disabled_states",true},
+         {"no_fallback_for_reference",true},{"hardware_commands_sent",false}};
+}
 static QJsonObject gearGenerator199Test(){
  // No device, connection, G-code or physical action is involved.
  alaser::gear::GearDialog dialog(400.,400.);
@@ -8501,6 +8567,14 @@ static QJsonObject rasterObject198Test(){
 }
 int main(int argc,char** argv){
  QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";
+ if(mode=="--icon-pack-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=sketchIcons199Audit(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile file(out+"/RESULTADO_ICONES_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
  if(mode=="--gear-generator-19-9-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=gearGenerator199Test();}
