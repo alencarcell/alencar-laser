@@ -3302,7 +3302,7 @@ public:
   for(const auto& [id,glyph,tip]:quickIcons){
    auto* button=buttons.at(id);
    button->setText("");button->setIcon(alaser::toolGlyph(glyph));
-   button->setIconSize(QSize(20,20));button->setFixedSize(33,32);
+   button->setIconSize(QSize(23,23));button->setFixedSize(35,33);
    button->setToolTip(tip);button->setAccessibleName(tip);
   }
   auto* editIcons=new QFrame;
@@ -3315,7 +3315,7 @@ public:
                                      std::function<void()> click){
     auto* item=new QToolButton(this);
     item->setObjectName(object);item->setIcon(alaser::toolGlyph(glyph));
-    item->setIconSize(QSize(20,20));item->setFixedSize(32,32);
+    item->setIconSize(QSize(23,23));item->setFixedSize(34,33);
     item->setToolTip(help);item->setAccessibleName(help);
     item->setFocusPolicy(Qt::NoFocus);
     connect(item,&QToolButton::clicked,this,[this,click]{run(click);});
@@ -3550,7 +3550,7 @@ public:
   splitter->setChildrenCollapsible(false);splitter->setHandleWidth(3);
   auto* left=new QFrame;left->setObjectName("leftPanel");
   // Largura minima inclui icone 38 px, margens e barra vertical fina.
-  left->setMinimumWidth(68);left->setMaximumWidth(76);
+  left->setMinimumWidth(64);left->setMaximumWidth(74);
   auto* leftOuter=new QVBoxLayout(left);leftOuter->setContentsMargins(4,5,4,5);
   auto* toolScroll=new QScrollArea;toolScroll->setObjectName("toolScroll");
   toolScroll->setWidgetResizable(true);
@@ -3558,7 +3558,7 @@ public:
   toolScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
   toolScroll->setStyleSheet("QScrollBar:vertical { width:6px; }");
   auto* leftContent=new QWidget;leftContent->setObjectName("toolsContent");
-  auto* tools=new QVBoxLayout(leftContent);tools->setContentsMargins(4,4,4,4);tools->setSpacing(5);
+  auto* tools=new QVBoxLayout(leftContent);tools->setContentsMargins(4,4,4,4);tools->setSpacing(4);
   auto* toolGroup=new QButtonGroup(this);toolGroup->setExclusive(true);
   auto compact=[&](QGridLayout* grid,int row,int col,const QString& id,const QString& title,
                    const QString& tooltip,std::function<void()> action){
@@ -3567,8 +3567,8 @@ public:
     b->setAccessibleName(title);
     b->setIcon(alaser::toolGlyph(id));
     b->setText(QString());
-    b->setIconSize(QSize(20,20));
-    b->setFixedSize(QSize(38,36));
+    b->setIconSize(QSize(24,24));
+    b->setFixedSize(QSize(40,37));
     b->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Fixed);
     b->setToolTip(title+" — "+tooltip);b->setFocusPolicy(Qt::NoFocus);
     buttons[id]=b;grid->addWidget(b,row,col);
@@ -3753,8 +3753,8 @@ public:
   importImageButton->setAccessibleName("Imagem / Traçar");
   importImageButton->setToolTip("Importar imagem (PNG/JPEG/BMP/WebP) e traçar vetores");
   importImageButton->setIcon(alaser::toolGlyph("image"));
-  importImageButton->setIconSize(QSize(20,20));
-  importImageButton->setFixedSize(QSize(38,36));
+  importImageButton->setIconSize(QSize(24,24));
+  importImageButton->setFixedSize(QSize(40,37));
   importImageButton->setFocusPolicy(Qt::NoFocus);
   fileGrid->addWidget(importImageButton,fileGrid->count(),0);
   connect(importImageButton,&QPushButton::clicked,this,[this]{
@@ -4684,22 +4684,27 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
 
   auto* statusFrame=new QFrame;statusFrame->setObjectName("bottomStatus");
-  auto* statusRow=new QHBoxLayout(statusFrame);statusRow->setContentsMargins(12,4,12,4);
-  status=new QLabel;status->setObjectName("status");status->setMinimumHeight(24);
+  auto* statusRow=new QHBoxLayout(statusFrame);statusRow->setContentsMargins(8,1,8,1);
+  statusFrame->setFixedHeight(25);
+  status=new QLabel;status->setObjectName("status");status->setMinimumHeight(18);
   statusRow->addWidget(status,1);layout->addWidget(statusFrame);
   // Faixa operacional reservada e INTENCIONALMENTE INATIVA nesta candidata.
   // O unico controle Pausar/Continuar ativo agora e o da PREVIA OFFLINE.
   auto* operationStrip=new QFrame(this);operationStrip->setObjectName("operation_strip_19_8");
   auto* operationRow=new QHBoxLayout(operationStrip);
-  operationRow->setContentsMargins(9,1,9,1);operationRow->setSpacing(4);
-  auto* operationTitle=new QLabel("OPERAÇÃO • BLOQUEADA");
+  operationStrip->setObjectName("operation_strip_19_8");
+  operationStrip->setFixedHeight(35);
+  operationRow->setContentsMargins(6,1,6,1);operationRow->setSpacing(3);
+  auto* operationTitle=new QLabel("LASER OFF");
+  operationTitle->setMinimumWidth(70);
+  operationTitle->setMaximumWidth(90);
   operationTitle->setObjectName("operation_title_19_8");
   operationTitle->setToolTip("Os comandos físicos terão homologação separada da edição offline.");
   operationRow->addWidget(operationTitle);
   auto addOperation=[&](const QString& key,const QString& glyph,const QString& name){
    auto* b=new QToolButton(operationStrip);
-   b->setObjectName(key);b->setIcon(alaser::toolGlyph(glyph));b->setIconSize(QSize(19,19));
-   b->setFixedSize(30,28);b->setFocusPolicy(Qt::NoFocus);
+   b->setObjectName(key);b->setIcon(alaser::toolGlyph(glyph));b->setIconSize(QSize(23,23));
+   b->setFixedSize(28,28);b->setFocusPolicy(Qt::NoFocus);
    b->setAccessibleName(name);b->setToolTip(name+" — INDISPONÍVEL: controle físico não homologado");
    b->setEnabled(false);operationRow->addWidget(b);return b;
   };
@@ -4707,12 +4712,12 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   addOperation("operation_pause_continue_disabled","pause","Pausar / Continuar trabalho");
   addOperation("operation_stop_disabled","stop","Parar trabalho");
   addOperation("operation_frame_disabled","fit","Enquadrar material (máquina)");
-  operationRow->addSpacing(8);
+  operationRow->addSpacing(5);
   auto* estimated=new QLabel("Estimado: —");
   estimated->setObjectName("operation_estimated_19_8");
   estimated->setToolTip("Tempo físico ainda não calculado; consulte a prévia offline para estimativa virtual.");
   operationRow->addWidget(estimated);
-  operationRow->addSpacing(5);
+  operationRow->addSpacing(3);
   auto* elapsed=new QLabel("Decorrido: —");
   elapsed->setObjectName("operation_elapsed_19_8");
   elapsed->setToolTip("Relógio físico indisponível sem operação homologada.");
@@ -4729,19 +4734,20 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    check(field!=nullptr,"Campos de selecao nao inicializados");
    field->setParent(operationStrip);
    field->setSuffix("");
-   field->setMinimumWidth(68);field->setMaximumWidth(92);
-   field->setFixedHeight(27);
+   field->setMinimumWidth(70);field->setMaximumWidth(83);
+   field->setFixedHeight(26);
    auto* label=new QLabel(footerFieldLabels.at(k),operationStrip);
    operationRow->addWidget(label);
    operationRow->addWidget(field);
   }
   selectionAspectLock_->setParent(operationStrip);
   selectionAspectLock_->setText("Proporção");
+  selectionAspectLock_->setMinimumWidth(91);
   selectionAspectLock_->setToolTip("Travar proporções ao redimensionar");
   operationRow->addWidget(selectionAspectLock_);
   auto* anchorChoice=new QComboBox(operationStrip);
   anchorChoice->setObjectName("bottom_selection_anchor_19_9");
-  anchorChoice->setFixedWidth(62);
+  anchorChoice->setFixedWidth(55);
   anchorChoice->setToolTip("Referência de nove pontos para X/Y e redimensionamento");
   anchorChoice->addItems({"↖","↑","↗","←","●","→","↙","↓","↘"});
   anchorChoice->setCurrentIndex(selectionAnchor_);
@@ -4754,6 +4760,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* pagePosition=new QToolButton(operationStrip);
   pagePosition->setObjectName("bottom_position_on_page_19_9");
   pagePosition->setText("Posicionar");
+  pagePosition->setMinimumWidth(84);pagePosition->setFixedHeight(28);
   pagePosition->setToolTip("Mover a seleção na página, nunca a máquina");
   pagePosition->setPopupMode(QToolButton::InstantPopup);
   pagePosition->setMenu(pageMenu);
