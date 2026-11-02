@@ -348,22 +348,28 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
    }else{line(21,4,27,10);line(27,4,21,10);}
   }
  }else if(id.startsWith("move_")){
-  const QStringList dirs={"nw","n","ne","w","e","sw","s","se"};
+  // Setas direcionais: corpo e ponta como uma única silhueta. Evita que
+  // a rotação de um retângulo longo encoste nas bordas em 45 graus.
+  // A direção visual corresponde exatamente ao sufixo N/NE/E/SE/S/SW/W/NW.
   const QString dir=id.mid(5);
-  const int idx=dirs.indexOf(dir);
-  if(idx>=0){
-   const QPolygonF arrows={
-    QPointF(16,3),QPointF(11,9),QPointF(14,9),
-    QPointF(14,25),QPointF(18,25),QPointF(18,9),QPointF(21,9)
+  double dx=0.,dy=0.;
+  if(dir=="n"||dir=="ne"||dir=="nw")dy=-1.;
+  if(dir=="s"||dir=="se"||dir=="sw")dy=1.;
+  if(dir=="e"||dir=="ne"||dir=="se")dx=1.;
+  if(dir=="w"||dir=="nw"||dir=="sw")dx=-1.;
+  if(dx!=0.||dy!=0.){
+   const double norm=std::sqrt(dx*dx+dy*dy);
+   dx/=norm;dy/=norm;
+   const QPointF center(16.,16.);
+   const QPointF forward(dx,dy),side(-dy,dx);
+   auto at=[&](double along,double across){
+    return center+forward*along+side*across;
    };
-   p.save();p.translate(16,16);
-   double deg=0.;
-   if(dir=="ne")deg=45.;else if(dir=="e")deg=90.;
-   else if(dir=="se")deg=135.;else if(dir=="s")deg=180.;
-   else if(dir=="sw")deg=225.;else if(dir=="w")deg=270.;
-   else if(dir=="nw")deg=315.;
-   p.rotate(deg);p.translate(-16,-16);
-   p.setPen(QPen(accent,1.5));p.setBrush(accent);p.drawPolygon(arrows);p.restore();
+   // Ponta em 26,6/26,26 para diagonais; folga física preservada.
+   const QPolygonF arrow={at(11.,0.),at(2.8,-5.0),at(2.8,-2.5),
+                          at(-9.,-2.5),at(-9.,2.5),at(2.8,2.5),at(2.8,5.0)};
+   p.setPen(Qt::NoPen);p.setBrush(accent);p.drawPolygon(arrow);
+   p.setBrush(Qt::NoBrush);
   }
 }else{
   // Icone nao implementado NUNCA vira caixa vazia/fragmento incompreensivel.
