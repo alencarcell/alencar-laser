@@ -1004,3 +1004,12 @@ Registrar mudanças, testes e pendências.
 - Commits `94e4174` e `99d7fa9` (tipagem explícita da caneta Qt para compilação estável). Sem alterações em regras de edição, Undo, G-code ou interface física.
 - Plano de validação: exigir CI Qt Windows PASS, então recuperar `PRANCHA_CRITICOS_19_9.png` e comparar fidelidade/legibilidade com os rabiscos nas escalas 20, 24 e 58 px. O catálogo permanece **provisório** até validação visual pelo proprietário.
 - Preservados `main`, `APLICATIVO`, instaladores homologados, backups e bloqueio GRBL/laser/emissão. PR #13 segue draft.
+
+## 02/11/2026 — Qt Windows PASS após reexecução do gate por falha do MSYS2
+- CI Qt Windows da PR #13, workflow run `41481861640` (tentativa de reexecução dos jobs falhos), foi repetido usando `rerun_failed_workflow_run_jobs` após erro anterior de download das bases MSYS2. A reexecução **passou** instalação, compilação, regressão Bézier, suíte offline completa e salvamento das evidências, sem necessidade de alterar código ou relaxar exigências. Executou o código em `08135d780ed369792bcdf5a4047f720766a37323`.
+- Artefato GitHub Actions: `windows-work-regression`, ID `13159509801`, 55 arquivos; registros localizados em `work_results/icon-pack-19-9/`.
+- Relatório `RESULTADO_ICONES_19_9.json`: `status=PASS`, `icons_verified=70`, `perceptual_pairs_checked=18`, `minimum_20px_distinct_pixels=18`, `dpi_2x=true`, `hardware_commands_sent=false`.
+- Relatório `RESULTADO_LAYOUT_ICONES_19_8.json`: PASS (alinhamento, espelhar vertical, centralização, integridade da arte e controles físicos desabilitados).
+- Relatório `RESULTADO_ENGRENAGENS_19_9.json`: PASS (prévia, contornos editáveis, pares nominais, cremalheira, Oficina de Mecanismos, Undo e preservação de arte; **não é homologação mecânica**).
+- As imagens `PRANCHA_CRITICOS_19_9.png` (20/24/58 px) e `PRANCHA_ICONES_REAIS_19_9.png` foram extraídas do artefato e inspecionadas; ícones completos e sem recorte evidente, inclusive Adicionar/Remover nó. **Aprovação visual pelo proprietário ainda pendente**, sobretudo fidelidade fina aos rabiscos em 100%/200% DPI no Windows.
+- Resultado: gates automatizados C++, PowerShell e Qt Windows aprovados. **PR #13 continua draft**; não fazer merge na `main`, não publicar nova versão homologada, não modificar `APLICATIVO`, não ativar hardware/GRBL/Wi-Fi de controle/G-code/movimento/emissão física sem testes e aprovação separados.
