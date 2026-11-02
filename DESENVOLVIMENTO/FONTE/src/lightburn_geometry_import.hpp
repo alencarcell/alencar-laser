@@ -235,7 +235,7 @@ inline std::vector<std::pair<std::vector<Pt>,bool>> decodePathPieces(const Parse
  // Delegates every contiguous run to the existing strict Bezier/Line decoder.
  const QString encoded=n.primList.trimmed();
  if(encoded=="LineClosed"||encoded=="LineOpen")return {decodePath(n)};
- static const QRegularExpression primitive(R"(([LB])(\\d+)\\s+(\\d+))");
+ static const QRegularExpression primitive(R"(([LB])(\d+)\s+(\d+))");
  auto it=primitive.globalMatch(encoded);
  std::vector<QString> runs;
  QString run;
