@@ -8320,6 +8320,7 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
  QPainter painter(&gallery);painter.setRenderHint(QPainter::Antialiasing,true);
  QFont font=painter.font();font.setPixelSize(13);painter.setFont(font);
  QSet<QString> seen;
+ QStringList problems;
  int n=0;
  for(const auto& id:ids){
   if(seen.contains(id))continue;seen.insert(id);
@@ -8334,8 +8335,8 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
    const int alpha=img.pixelColor(x,y).alpha();
    if(alpha>35){++ink;if(x<2||y<2||x>=img.width()-2||y>=img.height()-2)++border;}
   }
-  check(ink>=80 && border<=3,
-        "Glifo cortado, vazio ou sem margem de seguranca");
+  if(ink<80 || border>3)
+   problems<<QString("%1: ink=%2, border=%3").arg(id).arg(ink).arg(border);
   const int ox=(n%cols)*cw,oy=(n/cols)*ch;
   painter.setPen(QPen(QColor("#405166"),1));painter.drawRect(ox+2,oy+2,cw-4,ch-4);
   painter.drawPixmap(ox+12,oy+11,native);
@@ -8352,6 +8353,8 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
   check(gallery.save(folder+"/PRANCHA_ICONES_REAIS_19_9.png"),
         "Nao conseguiu gravar prancha Qt dos icones");
  }
+ if(!problems.isEmpty())
+  throw std::runtime_error(("Margem ou tinta ruim: "+problems.join("; ")).toStdString());
  auto fingerprint=[](const QString& id)->QByteArray{
   const QImage img=alaser::renderAlencarGlyph(id).toImage().convertToFormat(QImage::Format_ARGB32);
   return QCryptographicHash::hash(
