@@ -17,7 +17,7 @@
 namespace alaser {
 inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool active=false){
  QPixmap pix(64,64);pix.setDevicePixelRatio(2.);pix.fill(Qt::transparent);
- QPainter p(&pix);p.setRenderHint(QPainter::Antialiasing,true);p.scale(2.,2.);
+ // DPR=2 ja converte coordenadas logicas de 32x32 em 64x64 pixels.\n // Nao duplicar via p.scale(2,2): isso recorta os icones no quadrante.\n QPainter p(&pix);p.setRenderHint(QPainter::Antialiasing,true);
  const QColor fg=disabled?QColor("#B7C0C8"):(active?QColor("#FFF4E8"):QColor("#F3F4F6"));
  const QColor accent=disabled?QColor("#B7C0C8"):(active?QColor("#FF810E"):QColor("#FFAB55"));
  const QPen normal(fg,2.1,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin);
