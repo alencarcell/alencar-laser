@@ -956,3 +956,11 @@ Registrar mudanças, testes e pendências.
 - Gates novos: CMake `alencar_test19_9_mechanisms_offline`, GitHub Actions C++ portátil e Qt Windows, script local `-SomenteEngrenagens` e teste Qt `--gear-generator-19-9-test` ampliado para modelos, animação, ícones, rodapé e Undo.
 - Especificação detalhada: `DESENVOLVIMENTO/ESPECIFICACOES/MISSAO_19_9_MECANISMOS_LAYOUT.md`.
 - Status: **EXPERIMENTAL na PR #13; aguardando PASS de toda a CI Qt Windows e teste manual de mouse, DPI e reabertura `.alaser`.** `main`, instalador aprovado, `APLICATIVO`, hardware, USB de controle, G-code, movimento, potência e emissão **intocados/bloqueados**.
+
+## 02/11/2026 — Aprovação provisória da prancha de ícones
+- O proprietário avaliou a prancha gerada a partir de seus rabiscos e ressaltou que **a versão apresentada não reproduziu fielmente seus desenhos**. A prancha foi **aceita somente de forma provisória** como direção de trabalho, para permitir avanço gradual e refinamentos por função.
+- **Fonte de referência prioritária:** os rabiscos originais enviados pelo proprietário; a prancha interpretada é uma referência secundária, não deve substituir as formas/semânticas originais nem ser chamada de biblioteca oficial definitiva.
+- A adoção provisória **não significa** que os ícones PNG da prancha foram individualizados, vetorizados, homologados ou integrados ao executável. Não substituir o código `src/tool_glyphs.hpp` automaticamente com base apenas na imagem ilustrativa.
+- Refinar progressivamente, principalmente a direção e a geometria exatas das setas (espelhamentos e deslocamentos), alinhamento, distribuir, edição de nós, arquivo/sistema e controles de operação. Priorizar legibilidade em 20–24 px e proporção sem cortes, com estados normal/ativo/desabilitado.
+- Antes de integrar novos glifos: confrontar **rabisco original × ícone proposto × função real do comando**. Se a leitura visual divergir, refazer sem alterar a lógica do comando. Validar em 100%/200% DPI e rodapé compacto, sem textos truncados.
+- PR #13 permanece experimental; `main`, versão homologada e emissão física continuam intocados/bloqueados.
