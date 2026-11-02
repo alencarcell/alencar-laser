@@ -1,6 +1,7 @@
 #pragma once
 // Oficina didatica: somente Qt/QPainter + matematica; SEM CAM/GRBL/hardware.
 #include "mechanism_studio_19_9.hpp"
+#include "tool_glyphs.hpp"
 #include <QDialog>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -42,18 +43,28 @@ protected:
   painter.setPen(QPen(QColor("#405264"),1));
   painter.drawRect(rect().adjusted(1,1,-2,-2));
   if(geometry_.parts.empty())return;
-  // Vista normalizada ao longo de uma volta, sem corte visual da geometria.
+  // Enquadramento constante em toda a volta: a animação não deve "respirar".
+  // Para pinhões, utiliza circunferência envolvente; para cremalheira, curso
+  // máximo ±pi * (mm por radiano) considerando o ângulo normalizado.
   double minX=1e20,minY=1e20,maxX=-1e20,maxY=-1e20;
-  const auto fit=[&](double rad){
-   for(const auto& part:geometry_.parts){
+  for(const auto& part:geometry_.parts){
+   if(part.rack){
+    const double slide=std::numbers::pi*std::abs(part.slideRatio);
     for(const auto& p:part.outer){
-     const auto v=transform(part,p,rad);
-     minX=std::min(minX,v.x);minY=std::min(minY,v.y);
-     maxX=std::max(maxX,v.x);maxY=std::max(maxY,v.y);
+     minX=std::min(minX,part.origin.x+p.x-slide);
+     maxX=std::max(maxX,part.origin.x+p.x+slide);
+     minY=std::min(minY,part.origin.y+p.y);
+     maxY=std::max(maxY,part.origin.y+p.y);
     }
+   }else{
+    double radius=0.;
+    for(const auto& p:part.outer)radius=std::max(radius,std::hypot(p.x,p.y));
+    minX=std::min(minX,part.origin.x-radius);
+    maxX=std::max(maxX,part.origin.x+radius);
+    minY=std::min(minY,part.origin.y-radius);
+    maxY=std::max(maxY,part.origin.y+radius);
    }
-  };
-  fit(0.);fit(angle_);
+  }
   if(!(maxX>minX&&maxY>minY))return;
   const double sx=double(std::max(10,width()-44))/(maxX-minX);
   const double sy=double(std::max(10,height()-44))/(maxY-minY);
@@ -189,10 +200,13 @@ public:
   scroll->setMaximumHeight(315);root->addWidget(scroll);
   scene_=new MechanismCanvas(this);root->addWidget(scene_,1);
   auto* playback=new QHBoxLayout;
-  play_=new QPushButton("▶ Iniciar simulação",this);
+  play_=new QPushButton("Iniciar simulação",this);
+  play_->setIcon(alaser::toolGlyph("play"));play_->setIconSize(QSize(20,20));
   play_->setObjectName("mechanism_play_19_9");
-  pause_=new QPushButton("Ⅱ Pausar",this);pause_->setObjectName("mechanism_pause_19_9");
-  auto* reset=new QPushButton("↺ Reiniciar posição",this);
+  pause_=new QPushButton("Pausar",this);
+  pause_->setIcon(alaser::toolGlyph("pause"));pause_->setIconSize(QSize(20,20));pause_->setObjectName("mechanism_pause_19_9");
+  auto* reset=new QPushButton("Reiniciar posição",this);
+  reset->setIcon(alaser::toolGlyph("undo"));reset->setIconSize(QSize(20,20));
   reset->setObjectName("mechanism_reset_19_9");
   playback->addWidget(play_);playback->addWidget(pause_);playback->addWidget(reset);
   playback->addStretch();
