@@ -57,3 +57,9 @@ Depois da aprovação **provisória** do catálogo, foram refinadas as seguintes
 Testes do Qt foram ampliados para comparar pares em imagem real **reduzida a 20 px**, não apenas por hashes diferentes; exigem diferença perceptível mínima em 18 pixels da grade 20×20. O teste também gera `PRANCHA_CRITICOS_19_9.png` com exemplares em 20, 24 e 58 px. O ensaio Qt comprova que todas as quatro ações do menu de engrenagens têm ícones atribuídos.
 
 **Estado de aprovação:** ainda experimental. A imagem original manuscrita continua a referência primária; a qualidade gráfica precisa de avaliação do proprietário na imagem real e na tela em DPI 100%/200%. PR #13 draft; `main`, `APLICATIVO`, dispositivos e emissão física intactos.
+
+
+## Refinamento isolado — excluir aresta (02/11/2026)
+- `delete_edge`: novo símbolo com duas extremidades de segmento separadas por uma lacuna e um X central, para distinguir o comando de `remove_node` nas miniaturas pequenas.
+- Alteração apenas em `src/tool_glyphs.hpp`; sem mudanças no motor de geometria, na Tesoura, no Undo ou em comandos de máquina.
+- Commit `dcac734`; **testes locais Qt/Windows e aprovação visual desta mudança ainda pendentes**. Validar com `-SomenteIcones`, inclusive a prancha em 20 px; não declarar homologado antes da nova execução.
