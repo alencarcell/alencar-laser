@@ -8422,12 +8422,12 @@ static QJsonObject gearGenerator199Test(){
  auto* pause=studio.findChild<QPushButton*>("mechanism_pause_19_9");
  auto* reset=studio.findChild<QPushButton*>("mechanism_reset_19_9");
  auto* canvas=studio.findChild<QWidget*>("mechanism_animation_canvas_19_9");
- auto* info=studio.findChild<QLabel*>("mechanism_info_19_9");
+ auto* studioInfo=studio.findChild<QLabel*>("mechanism_info_19_9");
  auto* warnings=studio.findChild<QLabel*>("mechanism_warnings_19_9");
- check(preset&&material&&thickness&&driver&&driven&&play&&pause&&reset&&canvas&&info&&warnings,
+ check(preset&&material&&thickness&&driver&&driven&&play&&pause&&reset&&canvas&&studioInfo&&warnings,
        "Oficina de mecanismos: widgets essenciais ausentes");
  check(preset->count()==3&&material->count()==3&&
-       info->text().contains("Distância nominal")&&
+       studioInfo->text().contains("Distância nominal")&&
        warnings->text().contains("NAO aplicados"),
        "Oficina de mecanismos: presets, materiais ou avisos ausentes");
  check(w.findChild<QAction*>("open_mechanism_studio_19_9")!=nullptr,
