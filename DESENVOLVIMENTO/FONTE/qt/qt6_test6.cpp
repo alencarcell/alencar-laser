@@ -8,6 +8,7 @@
 #include "persistent_session_store.hpp"
 #include "recovery_policy.hpp"
 #include "tool_glyphs.hpp"
+#include "dense_render_policy_19_9.hpp"
 #include "serial_observer_win.hpp"
 #include "zoom_precision_196.hpp"
 #include "grbl_tcp_rules_196.hpp"
@@ -304,6 +305,7 @@ protected:
 
 class QtEditorLab final:public QGraphicsView{
  QGraphicsScene scene_;
+ bool fastDenseDisplay_=false; // visual mode only; canonical vector data unchanged
  WorkspaceConfig workspace_{};
  bool workspaceGuides_=false;
  bool workspaceDark_=true;
@@ -1416,7 +1418,7 @@ public:
   setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
   // Preferir invalidacao localizada: selecionar centenas de contornos nao deve
   // unir todo o canvas em uma unica regiao de repintura gigantesca.
-  setViewportUpdateMode(QGraphicsView::MinimalViewportUpdate);
+  setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
   setOptimizationFlag(QGraphicsView::DontSavePainterState,false);
   setTransformationAnchor(QGraphicsView::NoAnchor);
   // QAbstractScrollArea entrega os movimentos atraves do QWidget viewport.
@@ -1442,6 +1444,11 @@ public:
   std::vector<int> changed;
   std::set_symmetric_difference(styledObjects_.begin(),styledObjects_.end(),
     selected.begin(),selected.end(),std::back_inserter(changed));
+  // Batch selection style updates: suppress intermediate scene repaints.
+  // Each object keeps exactly the same pen and Z-level as before.
+  const bool batch=alaser::renderpolicy199::batchSelectionStyles(changed.size());
+  const auto previousMode=viewportUpdateMode();
+  if(batch)setViewportUpdateMode(QGraphicsView::NoViewportUpdate);
   for(int objectId:changed){
    auto it=itemsByObject_.find(objectId);
    if(it==itemsByObject_.end())continue;
@@ -1455,6 +1462,10 @@ public:
    }
   }
   styledObjects_=selected;
+  if(batch){
+   setViewportUpdateMode(previousMode);
+   viewport()->update();
+  }
   styleApplyMs.push_back(profiler.nsecsElapsed()/1e6);
  }
  qint64 styleSetterCalls()const{return styleSetterCalls_;}
@@ -1462,7 +1473,21 @@ public:
  size_t indexedQueries()const{return picker_.indexedQueries();}
  size_t directQueries()const{return picker_.directQueries();}
  void invalidateSelectionCache(){picker_.invalidate();}
+ bool fastDenseDisplay()const noexcept{return fastDenseDisplay_;}
  void rebuild(){
+  // Adaptive drawing quality: no simplification of geometry or hit-testing.
+  // Recalculate only at rebuild (load/edit), not on each paint/mouse move.
+  std::size_t displayNodes=0;
+  for(const auto& contour:editor.state().doc.contours){
+   displayNodes+=contour.nodes.size();
+   if(displayNodes>alaser::renderpolicy199::kDenseNodeThreshold)break;
+  }
+  const bool fast=alaser::renderpolicy199::useFastDisplay(displayNodes);
+  if(fast!=fastDenseDisplay_){
+   fastDenseDisplay_=fast;
+   setRenderHint(QPainter::Antialiasing,!fast);
+   setRenderHint(QPainter::SmoothPixmapTransform,!fast);
+  }
   clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
   clearPolyline();clearBezierDraft();clearMarquee();scene_.clear();rasterOverlay_=nullptr;rasterFrame_=nullptr;rasterHandle_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   // Composite closed Fill paths per layer with the same parity rule used
@@ -2846,7 +2871,9 @@ public:
     {"undo_available",int(view.editor.undoCount())},{"redo_available",int(view.editor.redoCount())},
     {"bezier_undo_available",int(curves?curves->undoCount():0)},
     {"bezier_redo_available",int(curves?curves->redoCount():0)}}},
-   {"performance",QJsonObject{{"paint_samples",int(view.paintMs.size())},
+   {"performance",QJsonObject{{"fast_dense_display",view.fastDenseDisplay()},
+      {"viewport_update_strategy","bounding_rect"},
+      {"paint_samples",int(view.paintMs.size())},
       {"paint_p50_ms",percentile(view.paintMs,.5)},
       {"paint_p95_ms",percentile(view.paintMs,.95)},
       {"paint_p99_ms",percentile(view.paintMs,.99)},

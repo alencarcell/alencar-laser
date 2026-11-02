@@ -1030,3 +1030,12 @@ Registrar mudanças, testes e pendências.
 - GUI permite prosseguir para parser em caso de subcaminhos separados, mas continua bloqueando segmentos zero; commit f57f79f. O importador ainda rejeita Text e Bitmap como tipos nao suportados; arquivo WALLE completo NAO pode ser declarado importavel.
 - **Sem compilacao Windows, teste automatico Qt ou homologacao nesta alteracao.** Validar importacao de arquivo sintetico multipart (dois caminhos independentes, fechado/aberto, Bezier, undo), comparacao geometricamente exata e WALLE real em modo atomico; nenhum documento pode ser alterado se houver tipo nao suportado.
 - Main, APLICATIVO, firmware e comunicacao fisica permanecem inalterados/bloqueados.
+
+
+## 02/11/2026 — Modo visual adaptativo de alto volume, experimento Rayforge
+- Referencia arquitetural analisada: Rayforge 1.13.2 separa a representacao em canvas da geometria editavel. A implementacao em Qt 6 e original, sem transferencia de GTK/Python ou dependencias externas.
+- Novo `src/dense_render_policy_19_9.hpp`: acima de 80.000 nos, o viewport desliga antialiasing e SmoothPixmapTransform apenas na visualizacao, restaurando-os em documentos menores. Nenhum ponto, contorno, path, grupo, layer ou arquivo .alaser e alterado.
+- Qt reverte `MinimalViewportUpdate` para `BoundingRectViewportUpdate`; ao mudar estilo de 32+ objetos, suprime atualizacoes intermedias com NoViewportUpdate e solicita apenas um repaint final. Metricas JSON incorporam `fast_dense_display` e `viewport_update_strategy`.
+- Teste C++ portatil `tests/test_dense_render_policy_19_9.cpp` para limites 80.000/80.001 e 31/32; compilacao Qt Windows e benchmark real **AINDA PENDENTES**.
+- Baseline real: 415 contornos, 120.081 nos, paint p50 73,8873 ms, p95 1062,0717 ms, p99 1125,2906 ms, max 1615,7267 ms, hit-test p95 159,6687 ms. Repetir com mesma copia e gestos; manter original e registrar memoria. Se a performance regredir, reverter commit; nao habilitar laser.
+- Nao habilitar comunicacao fisica, movimento, G-code ou laser. PR #13 segue draft; main e APLICATIVO intactos.
