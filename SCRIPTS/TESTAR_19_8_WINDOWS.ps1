@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteIcones, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -103,6 +103,19 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteIcones) {
+        Write-Host 'ICONES ALENCAR 19.9: glifos reais Qt em 1x/2x, sem hardware.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt do atlas de icones'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\icones_19_9'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --icon-pack-19-9-test $fixture $destino
+        Checar-ResultadoQt 'Auditoria de glifos da prancha manuscrita' (Join-Path $destino 'RESULTADO_ICONES_19_9.json')
+        Write-Host "PRANCHA_REAL: $(Join-Path $destino 'PRANCHA_ICONES_REAIS_19_9.png')" -ForegroundColor Green
+        return
+    }
     if ($SomenteEngrenagens) {
         Write-Host 'ENGRENAGENS 19.9: geometria C++ e formulario Qt offline.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test19_9_gear_offline alencar_test19_9_mechanisms_offline alencar_test7_qt6
