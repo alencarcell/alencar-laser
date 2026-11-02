@@ -42,3 +42,18 @@ Glifos adicionais existem como *catálogo visual*. **Criar um ícone não ativa 
 
 ## Aceitação do proprietário e próximo refinamento
 Manter a aprovação **provisória**. Confrontar a prancha PNG real, os rabiscos e o executável no Windows. Refinar largura/ângulos das setas, espelhamento e contraste, sem cortes, sem texto truncado. Não alterar `main`, `APLICATIVO`, firmware, CAM, emissão, backups ou instalador homologado sem aprovação.
+
+
+## Revisão de distinção visual — 02/11/2026
+
+Depois da aprovação **provisória** do catálogo, foram refinadas as seguintes ambigüidades reais da prancha Qt:
+
+- `settings` — uma engrenagem de ajuste com arco interior; distinta de `gear_simple` — engrenagem isolada de dentes explícitos.
+- `mechanism` — duas engrenagens de **diâmetros diferentes** em diagonal; `gear_pair` — duas engrenagens **iguais** lado a lado; `rack` — cremalheira de dentes retos com pinhão.
+- `line_to_curve` — reta em cima, curva embaixo e seta de conversão; `curve_to_line` — curva em cima e reta embaixo. O desenho destaca o resultado em laranja para não depender apenas de uma seta minúscula.
+- `smooth_node` — curvatura com representação adicional de tangentes; `corner_node` — canto angular, sem tangentes.
+- Ações **já existentes** em `Gerar > Engrenagens` recebem seus ícones: simples, par, cremalheira e oficina. Não foram criadas novas funções de hardware.
+
+Testes do Qt foram ampliados para comparar pares em imagem real **reduzida a 20 px**, não apenas por hashes diferentes; exigem diferença perceptível mínima em 18 pixels da grade 20×20. O teste também gera `PRANCHA_CRITICOS_19_9.png` com exemplares em 20, 24 e 58 px. O ensaio Qt comprova que todas as quatro ações do menu de engrenagens têm ícones atribuídos.
+
+**Estado de aprovação:** ainda experimental. A imagem original manuscrita continua a referência primária; a qualidade gráfica precisa de avaliação do proprietário na imagem real e na tela em DPI 100%/200%. PR #13 draft; `main`, `APLICATIVO`, dispositivos e emissão física intactos.
