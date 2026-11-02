@@ -8365,13 +8365,14 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
     QByteArray(reinterpret_cast<const char*>(img.constBits()),img.sizeInBytes()),
     QCryptographicHash::Sha256);
  };
- const std::array<std::pair<QString,QString>,15> criticalPairs={{{"flip_h","flip_v"},
+ const std::array<std::pair<QString,QString>,18> criticalPairs={{{"flip_h","flip_v"},
    {"distribute_horizontal","distribute_vertical"},
    {"same_width","same_height"},{"align_center_x","align_center_y"},
    {"undo","redo"},{"play","pause"},{"pause","stop"},
    {"add_node","remove_node"},{"new","import"},
    {"line_to_curve","curve_to_line"},{"settings","mechanism"},
    {"gear_simple","mechanism"},{"settings","gear_simple"},
+   {"gear_pair","mechanism"},{"gear_pair","gear_simple"},{"rack","gear_pair"},
    {"smooth_node","corner_node"},{"edit_nodes","select"}}};
  // Mais importante que alterar um hash: diferenca perceptivel apos reducao a 20 px.
  auto difference20=[](const QString& left,const QString& right)->int{
@@ -8401,7 +8402,7 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
              .arg(pair.first).arg(pair.second).arg(diff);
  }
  // Uma prancha de comparacao pequena/real para aprovacao visual incremental.
- const QStringList focus={"settings","mechanism","gear_simple","line_to_curve",
+ const QStringList focus={"settings","mechanism","gear_simple","gear_pair","rack","line_to_curve",
    "curve_to_line","smooth_node","corner_node","add_node","remove_node",
    "edit_nodes","select","flip_h","flip_v","play","pause","stop"};
  QImage details(840,((focus.size()+3)/4)*144,QImage::Format_ARGB32_Premultiplied);
@@ -8560,6 +8561,14 @@ static QJsonObject gearGenerator199Test(){
        studioInfo->text().contains("Distância nominal")&&
        warnings->text().contains("NAO aplicados"),
        "Oficina de mecanismos: presets, materiais ou avisos ausentes");
+ auto* simpleAction=w.findChild<QAction*>("generate_gear_offline_19_9");
+ auto* pairAction=w.findChild<QAction*>("generate_gear_pair_offline_19_9");
+ auto* rackAction=w.findChild<QAction*>("generate_gear_rack_offline_19_9");
+ auto* mechanismAction=w.findChild<QAction*>("open_mechanism_studio_19_9");
+ check(simpleAction&&pairAction&&rackAction&&mechanismAction&&
+       !simpleAction->icon().isNull()&&!pairAction->icon().isNull()&&
+       !rackAction->icon().isNull()&&!mechanismAction->icon().isNull(),
+       "Engrenagens e mecanismos precisam de icones reais nas acoes");
  check(w.findChild<QAction*>("open_mechanism_studio_19_9")!=nullptr,
        "Gerar > Engrenagens > Oficina de Mecanismos ausente");
  studio.show();QApplication::processEvents();
