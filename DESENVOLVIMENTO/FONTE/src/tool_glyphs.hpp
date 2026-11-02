@@ -321,13 +321,22 @@ inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false,bool act
   }else{
    p.setPen(QPen(accent,2.4,Qt::SolidLine,Qt::RoundCap));square(16,12);
    if(id=="add_node"||id=="remove_node"){
-    // Insignia +/- deslocada para dentro da grade 32x32:
-    // evita tocar a margem superior com a espessura do contorno Qt (2.4 px).
-    constexpr double badgeX=24.,badgeY=9.,badgeRadius=4.5;
-    p.setBrush(QColor("#1C2835"));
-    p.drawEllipse(QPointF(badgeX,badgeY),badgeRadius,badgeRadius);
-    line(21.,badgeY,27.,badgeY);
-    if(id=="add_node")line(badgeX,6.,badgeX,12.);
+    // Mesmo nó, sinais +/- grandes e silhuetas distintas em 20 px.
+    // Adicionar = disco laranja sólido com + escuro;
+    // Remover = disco escuro contornado de laranja com - claro.
+    // A identidade não depende só de uma haste de 3 px.
+    constexpr QPointF badge(23.,9.5);
+    constexpr double radius=5.5;
+    p.setPen(id=="add_node"?Qt::NoPen:
+      QPen(accent,1.8,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+    p.setBrush(id=="add_node"?accent:QColor("#1C2835"));
+    p.drawEllipse(badge,radius,radius);
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(id=="add_node"?QColor("#1C2835"):fg,
+                  2.3,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));
+    line(19.8,9.5,26.2,9.5);
+    if(id=="add_node")line(23.,6.3,23.,12.7);
+    p.setPen(normal);
    }else{line(21,4,27,10);line(27,4,21,10);}
   }
  }else if(id.startsWith("move_")){
