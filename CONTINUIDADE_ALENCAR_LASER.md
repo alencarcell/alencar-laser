@@ -1022,3 +1022,11 @@ Registrar mudanças, testes e pendências.
 - PENDENTE: diagnostico de erros categorizado, instrumentacao de render, simplificacao opt-in com Undo, e painel redimensionavel.
 - A comunicacao fisica continua BLOQUEADA. Futuro modo de diagnostico conectado deve ser exclusivamente somente leitura, com escolha explicita de dispositivo, timeout, desconexao, sem G-code, movimento, homing ou emissao, e validacao de seguranca antes de habilitar a UI.
 - PR #13 draft; main e APLICATIVO preservados.
+
+
+## 02/11/2026 — Importacao LBRN2 com subcaminhos independentes (experimental)
+- Arquivo real WALLE.lbrn2 recebido: LightBurn 2.0.05, 3406 Path, 526 Rect, 126 Ellipse, 19 Group, 7 Text, 5 Bitmap. Preflight anterior registrou 93 transicoes entre tracos desconectados e zero segmentos de comprimento zero.
+- `lightburn_geometry_import.hpp`: `decodePathPieces` separa sequencias L/B quando proximo inicio difere do ultimo fim, reutiliza decodePath conservador por trecho; flatten cria contornos separados, sem linha artificial, com camada/grupo herdado. Commits 4f113b6 e 644eef7.
+- GUI permite prosseguir para parser em caso de subcaminhos separados, mas continua bloqueando segmentos zero; commit f57f79f. O importador ainda rejeita Text e Bitmap como tipos nao suportados; arquivo WALLE completo NAO pode ser declarado importavel.
+- **Sem compilacao Windows, teste automatico Qt ou homologacao nesta alteracao.** Validar importacao de arquivo sintetico multipart (dois caminhos independentes, fechado/aberto, Bezier, undo), comparacao geometricamente exata e WALLE real em modo atomico; nenhum documento pode ser alterado se houver tipo nao suportado.
+- Main, APLICATIVO, firmware e comunicacao fisica permanecem inalterados/bloqueados.
