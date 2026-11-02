@@ -229,6 +229,49 @@ inline std::pair<std::vector<Pt>,bool> decodePath(const ParseNode& n){
  return {std::move(points),closed};
 }
 
+
+inline std::vector<std::pair<std::vector<Pt>,bool>> decodePathPieces(const ParseNode& n){
+ // Splits disconnected primitive chains WITHOUT inserting a connecting edge.
+ // Delegates every contiguous run to the existing strict Bezier/Line decoder.
+ const QString encoded=n.primList.trimmed();
+ if(encoded=="LineClosed"||encoded=="LineOpen")return {decodePath(n)};
+ static const QRegularExpression primitive(R"(([LB])(\\d+)\\s+(\\d+))");
+ auto it=primitive.globalMatch(encoded);
+ std::vector<QString> runs;
+ QString run;
+ int last=-1,count=0;
+ qsizetype offset=0;
+ while(it.hasNext()){
+  const auto m=it.next();
+  if(!encoded.mid(offset,m.capturedStart()-offset).trimmed().isEmpty())
+   throw std::runtime_error("PrimList contem trecho desconhecido");
+  offset=m.capturedEnd();
+  bool okA=false,okB=false;
+  const int a=m.captured(2).toInt(&okA),b=m.captured(3).toInt(&okB);
+  if(!okA||!okB||a<0||b<0)
+   throw std::runtime_error("Indice PrimList invalido");
+  if(last>=0&&last!=a){
+   runs.push_back(run);run.clear();
+  }
+  if(++count>50000)throw std::runtime_error("Excesso de segmentos LightBurn");
+  if(!run.isEmpty())run+=" ";
+  run+=m.captured(0);
+  last=b;
+ }
+ if(!encoded.mid(offset).trimmed().isEmpty()||count==0)
+  throw std::runtime_error("PrimList desconhecida ou vazia");
+ if(!run.isEmpty())runs.push_back(run);
+ if(runs.size()>30000)throw std::runtime_error("Excesso de subcaminhos LightBurn");
+ std::vector<std::pair<std::vector<Pt>,bool>> result;
+ result.reserve(runs.size());
+ for(const auto& part:runs){
+  ParseNode piece=n;
+  piece.primList=part;
+  result.push_back(decodePath(piece));
+ }
+ return result;
+}
+
 inline void flatten(const ParseNode& n,const QTransform& parent,
                     std::vector<GeometryShape>& result,
                     int& nextGroup,int inheritedGroup=0){
@@ -259,16 +302,17 @@ inline void flatten(const ParseNode& n,const QTransform& parent,
     }
   }
  }else if(n.type=="Path"){
-  auto converted=decodePath(n);
-  pts=std::move(converted.first);
+  const auto pieces=decodePathPieces(n);
   if(n.children.size())throw std::runtime_error("Path com filhos nao suportada");
-  for(auto& p:pts){
-   const QPointF q=total.map(QPointF(p.x,p.y));
-   if(!std::isfinite(q.x())||!std::isfinite(q.y())||std::abs(q.x())>1e7||std::abs(q.y())>1e7)
-    throw std::runtime_error("Path fora dos limites seguros");
-   p={q.x(),q.y()};
+  for(auto piece:pieces){
+   for(auto& p:piece.first){
+    const QPointF q=total.map(QPointF(p.x,p.y));
+    if(!std::isfinite(q.x())||!std::isfinite(q.y())||std::abs(q.x())>1e7||std::abs(q.y())>1e7)
+     throw std::runtime_error("Path fora dos limites seguros");
+    p={q.x(),q.y()};
+   }
+   result.push_back({std::move(piece.first),n.cutIndex,piece.second,inheritedGroup});
   }
-  result.push_back({std::move(pts),n.cutIndex,converted.second,inheritedGroup});
   return;
  }else if(n.type=="Ellipse"){
   constexpr int steps=384;
