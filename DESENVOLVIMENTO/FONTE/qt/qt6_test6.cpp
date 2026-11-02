@@ -6876,9 +6876,18 @@ static QJsonObject inlineTransforms198Test(const QString& directory){
        "Moldura continuou horizontal quando o objeto foi girado");
  pressKey(transformWindow,Qt::Key_Z,Qt::ControlModifier);
  check(stateText(v.editor.state())==stateScaled,"Undo da rotacao nao restaurou desenho");
+ // A implementacao real de history() limpa a selecao em Undo e Redo.
+ // Portanto nenhuma moldura deve sobreviver enquanto nada esta selecionado.
+ check(v.selected.empty()&&!v.selectionFrameQuad().has_value(),
+       "Undo conservou selecao ou moldura orientada antiga");
+ // Ao selecionar novamente, a geometria restaurada deve reger a nova moldura:
+ // nao reaproveitar orientacao transitória de um gesto desfeito.
+ v.activate({id,0});
  const auto restored=v.selectionFrameQuad();
- check(restored&&std::abs(len((*restored)[0],(*restored)[1])-40.)<1.5,
-       "Undo nao descartou moldura orientada antiga");
+ check(restored&&std::abs(len((*restored)[0],(*restored)[1])-40.)<1.5&&
+       std::abs(len((*restored)[1],(*restored)[2])-20.)<1.5&&
+       std::abs((*restored)[0].y()-(*restored)[1].y())<1e-6,
+       "Moldura antiga reapareceu apos nova selecao pos-Undo");
  // Shift permite escala nao proporcional; Ctrl fixa o centro.
  const int freeId=v.editor.rectangle({110,45},20,10);
  v.clearSelection();v.rebuild();clickScene(transformWindow,{115,45});
