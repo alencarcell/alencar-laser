@@ -119,6 +119,11 @@ try {
         New-Item -ItemType Directory -Path $destino -Force | Out-Null
         & $app --gear-generator-19-9-test $fixture $destino
         Checar-ResultadoQt 'Formulario Inkscape e criacao atomica' (Join-Path $destino 'RESULTADO_ENGRENAGENS_19_9.json')
+        $iconDir = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\icones_19_9'
+        New-Item -ItemType Directory -Path $iconDir -Force | Out-Null
+        & $app --icon-pack-19-9-test $fixture $iconDir
+        Checar-ResultadoQt 'Auditoria de iconografia contra rabiscos' (Join-Path $iconDir 'RESULTADO_ICONES_19_9.json')
+        Write-Host "PRANCHA REAL: $(Join-Path $iconDir 'PRANCHA_ICONES_REAIS_19_9.png')" -ForegroundColor Cyan
         Write-Host 'ENGRENAGENS PASS nos testes sinteticos. Mecanica, kerf e maquina NAO homologados.' -ForegroundColor Green
         return
     }
