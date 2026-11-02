@@ -1414,7 +1414,11 @@ public:
  QtEditorLab(Document d):QGraphicsView(),editor(std::move(d)){
   setScene(&scene_);setSceneRect(-2000,-2000,5000,5000);
   setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
-  setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);setTransformationAnchor(QGraphicsView::NoAnchor);
+  // Preferir invalidacao localizada: selecionar centenas de contornos nao deve
+  // unir todo o canvas em uma unica regiao de repintura gigantesca.
+  setViewportUpdateMode(QGraphicsView::MinimalViewportUpdate);
+  setOptimizationFlag(QGraphicsView::DontSavePainterState,false);
+  setTransformationAnchor(QGraphicsView::NoAnchor);
   // QAbstractScrollArea entrega os movimentos atraves do QWidget viewport.
   // Garantir rastreamento explicitamente no filho que recebe os eventos.
   setMouseTracking(true);viewport()->setMouseTracking(true);
@@ -1771,11 +1775,16 @@ protected:
   // QGraphicsPathItem normalizes a move-only path to empty. Draw isolated
   // anchors separately while keeping canonical path equality exact.
   p->save();p->resetTransform();
+  const QTransform visibleTransform=viewportTransform();
+  const QRectF visiblePixels=QRectF(QPointF(0,0),QSizeF(viewport()->size())).adjusted(-4,-4,4,4);
   for(const auto& c:editor.state().doc.contours)if(c.nodes.size()==1){
-   const auto& layer=editor.state().layers.at(editor.state().objects.at(c.key.object).layer);
+   const QPointF pixel=visibleTransform.map(toQt(c.nodes.front().p));
+   if(!visiblePixels.contains(pixel))continue;
+   const auto& meta=editor.state().objects.at(c.key.object);
+   const auto& layer=editor.state().layers.at(meta.layer);
    if(!layer.visible)continue;
-   p->setPen(Qt::NoPen);p->setBrush(selected.count(c.key.object)?QColor(239,109,25):layerColor(editor.state().objects.at(c.key.object).layer));
-   p->drawEllipse(viewportTransform().map(toQt(c.nodes.front().p)),2,2);
+   p->setPen(Qt::NoPen);p->setBrush(selected.count(c.key.object)?QColor(239,109,25):layerColor(meta.layer));
+   p->drawEllipse(pixel,2,2);
   }
    p->restore();
    paintSelectionHandles(p);
