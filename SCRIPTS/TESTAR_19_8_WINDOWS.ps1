@@ -105,11 +105,14 @@ try {
 
     if ($SomenteEngrenagens) {
         Write-Host 'ENGRENAGENS 19.9: geometria C++ e formulario Qt offline.' -ForegroundColor Cyan
-        & $cmake --build $build --parallel 2 --target alencar_test19_9_gear_offline alencar_test7_qt6
+        & $cmake --build $build --parallel 2 --target alencar_test19_9_gear_offline alencar_test19_9_mechanisms_offline alencar_test7_qt6
         Checar-Saida 'Compilacao focada do gerador'
         $core = Join-Path $build 'alencar_test19_9_gear_offline.exe'
         & $core
         Checar-Saida 'Regressoes de passo, par e cremalheira nominais'
+        $mechanisms = Join-Path $build 'alencar_test19_9_mechanisms_offline.exe'
+        & $mechanisms
+        Checar-Saida 'Biblioteca de mecanismos e animacao matematica offline'
         $app = Join-Path $build 'alencar_test7_qt6.exe'
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
         $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\engrenagens'
@@ -372,6 +375,7 @@ try {
         'alencar_test19_8_recovery_policy',
         'alencar_test19_9_rotary_offline',
         'alencar_test19_9_gear_offline',
+        'alencar_test19_9_mechanisms_offline',
         'alencar_test_v5_codec_regression'
     )
     & $cmake --build $build --parallel 2 --target $alvos
