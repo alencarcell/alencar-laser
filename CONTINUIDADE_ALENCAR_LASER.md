@@ -980,3 +980,11 @@ Registrar mudanças, testes e pendências.
 - Identificados: `add_node`, `remove_node`, `delete_edge`, `smooth_node`, `corner_node`, `line_to_curve`, `curve_to_line`, `axis_align`, `new_bezier`. Esses resultados são objetivos (pixels na margem), não apenas opinião estética.
 - Correção `e6a5c1`: recolher alças, pontos, curvas e badges +/−/X para dentro da área segura 32×32. Não modifica interações do editor, arquivos, hardware nem esquema de dados.
 - Gate exigido antes de marcar iconografia aprovada: novo **PASS Qt Windows**, arquivo `PRANCHA_ICONES_REAIS_19_9.png`, teste manual dos símbolos em 100% e 200% DPI e confronto com rabiscos originais. PR #13 permanece draft.
+
+## 02/11/2026 — Correção de margem dos glifos adicionar/remover nó
+- Captura local do usuário ao executar a auditoria de ícones `-SomenteIcones`: build Qt concluído, mas `RESULTADO_ICONES_19_9.json` devolveu FAIL: `Margem ou tinta ruim: add_node: ink=1196, border=4; remove_node: ink=1196, border=4`. O gate interrompeu corretamente a execução.
+- Inspeção de `src/tool_glyphs.hpp`: os dois símbolos compartilham o badge circular +/- originalmente centrado em (24,7), raio 5, com caneta 2,4 px; essa geometria alcançava a borda física superior da imagem HiDPI.
+- Commit `676ad3b`: deslocar o badge ao centro (24,9), raio 4,5, reposicionando + e − no interior da grade 32×32; **não aumentar a tolerância da auditoria**.
+- Commit `e59144e`: estender auditoria de pares visuais para exigir que adicionar/remover nó e novo/importar não tenham os mesmos pixels.
+- Os avisos QFont/setPointSize do build são independentes da falha. O resultado ainda exige novo PASS de `-SomenteIcones` e CI Windows Qt, mais inspeção da prancha PNG real.
+- PR #13 continua **draft**, sem alterações em `main`, `APLICATIVO`, instalador homologado, movimentos, G-code ou emissão física.
