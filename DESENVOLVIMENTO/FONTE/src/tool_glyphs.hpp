@@ -1,140 +1,152 @@
 #pragma once
-// Qt painter glyphs: consistent, high-contrast icons with no external font dependency.
+// Iconografia proprietaria ALENCAR: glifos 32x32, 2x DPI, completos e contrastantes.
+// Sem fontes externas, emojis, capturas ou desenhos copiados do LightBurn.
 #include <QIcon>
 #include <QPixmap>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPolygonF>
+#include <QFont>
+#include <QColor>
 #include <cmath>
-#include <QString>
 namespace alaser {
-inline QIcon toolGlyph(const QString& id){
- // Render at 2x logical resolution to avoid jagged, sketch-like toolbar glyphs.
- QPixmap pix(64,64);pix.setDevicePixelRatio(2.0);pix.fill(Qt::transparent);
- QPainter p(&pix);p.setRenderHint(QPainter::Antialiasing,true);
- p.scale(2.,2.);
- QPen pen(QColor("#DE914C"),2.3,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin);
- p.setPen(pen);p.setBrush(Qt::NoBrush);
+inline QPixmap renderAlencarGlyph(const QString& id,bool disabled=false){
+ QPixmap pix(64,64);pix.setDevicePixelRatio(2.);pix.fill(Qt::transparent);
+ QPainter p(&pix);p.setRenderHint(QPainter::Antialiasing,true);p.scale(2.,2.);
+ const QColor fg=disabled?QColor("#A6AFB8"):QColor("#F3F4F6");
+ const QColor accent=disabled?QColor("#969DA5"):QColor("#FFAB55");
+ const QPen normal(fg,2.1,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin);
+ p.setPen(normal);p.setBrush(Qt::NoBrush);
+ auto line=[&](double x,double y,double xx,double yy){p.drawLine(QPointF(x,y),QPointF(xx,yy));};
+ auto rect=[&](double x,double y,double w,double h){p.drawRoundedRect(QRectF(x,y,w,h),1.,1.);};
+ auto square=[&](double x,double y){
+  p.setBrush(accent);p.drawRect(QRectF(x-2.2,y-2.2,4.4,4.4));p.setBrush(Qt::NoBrush);
+ };
  if(id=="select"){
-  QPolygonF arrow;arrow<<QPointF(6,4)<<QPointF(9,26)<<QPointF(14,19)<<QPointF(20,27)<<QPointF(24,24)<<QPointF(18,17)<<QPointF(27,15);
-  p.drawPolygon(arrow);
+  QPolygonF arrow;arrow<<QPointF(7,4)<<QPointF(8,27)<<QPointF(14,21)<<QPointF(19,29)
+   <<QPointF(22,27)<<QPointF(17,19)<<QPointF(26,17);
+  p.setBrush(accent);p.drawPolygon(arrow);
  }else if(id=="nodes"){
-  p.drawLine(6,23,26,8);p.setBrush(QColor("#DE914C"));
-  p.drawRect(4,21,5,5);p.drawRect(23,5,5,5);
+  p.drawLine(QPointF(6,25),QPointF(25,7));square(6,25);square(25,7);square(15,16);
  }else if(id=="bezier"){
-  QPainterPath path;path.moveTo(5,24);path.cubicTo(5,4,27,28,27,7);p.drawPath(path);
-  p.setBrush(QColor("#DE914C"));p.drawEllipse(QPointF(5,24),2.5,2.5);p.drawEllipse(QPointF(27,7),2.5,2.5);
+  QPainterPath c;c.moveTo(5,23);c.cubicTo(5,5,26,27,27,8);p.drawPath(c);
+  p.setPen(QPen(accent,1.3,Qt::DashLine));line(5,23,7,8);line(27,8,24,24);
+  p.setPen(normal);square(5,23);square(27,8);
  }else if(id=="new_bezier"){
-  // Unified Draw Paths icon: one straight edge, then one true cubic.
-  // Anchor markers show that corners and smooth nodes share one tool.
-  QPainterPath path;path.moveTo(4,25);path.lineTo(12,18);
-  path.cubicTo(15,3,25,28,28,7);p.drawPath(path);
-  p.setBrush(QColor("#DE914C"));
-  for(const QPointF at:{QPointF(4,25),QPointF(12,18),QPointF(28,7)})
-   p.drawEllipse(at,2.5,2.5);
+  QPainterPath c;c.moveTo(4,25);c.lineTo(13,15);c.cubicTo(20,2,23,25,28,7);p.drawPath(c);
+  square(4,25);square(13,15);square(28,7);
+ }else if(id=="scissors"){
+  p.setPen(QPen(accent,2.2,Qt::SolidLine,Qt::RoundCap));
+  p.drawEllipse(QPointF(9,25),4,4);p.drawEllipse(QPointF(23,25),4,4);
+  p.setPen(normal);line(12,21,26,5);line(20,21,6,5);
+ }else if(id=="line"){
+  line(6,25,26,7);square(6,25);square(26,7);
+ }else if(id=="rectangle"){
+  rect(5,7,22,18);p.setPen(QPen(accent,2.));line(5,7,27,7);
+ }else if(id=="ellipse"){
+  p.drawEllipse(QRectF(4,7,24,18));
+  p.setPen(QPen(accent,2.));p.drawArc(QRectF(4,7,24,18),0,115*16);
+ }else if(id=="polygon"){
+  QPolygonF a;a<<QPointF(16,4)<<QPointF(28,13)<<QPointF(24,27)
+   <<QPointF(8,27)<<QPointF(4,13);p.drawPolygon(a);square(16,4);
+ }else if(id=="pencil"){
+  p.save();p.translate(16,16);p.rotate(45);
+  p.drawRoundedRect(QRectF(-3,-12,6,22),1,1);
+  p.setBrush(accent);p.drawPolygon(QPolygonF()<<QPointF(-3,10)<<QPointF(3,10)<<QPointF(0,15));
+  p.restore();
+ }else if(id=="text"){
+  QFont font=p.font();font.setBold(true);font.setPixelSize(26);p.setFont(font);
+  p.setPen(fg);p.drawText(QRectF(2,1,28,30),Qt::AlignCenter,"T");
+  p.setPen(QPen(accent,1.5));line(7,28,25,28);
  }else if(id=="image"){
-  p.drawRect(QRectF(4,6,24,21));
-  p.drawEllipse(QPointF(11,12),2.2,2.2);
-  QPolygonF hills;hills<<QPointF(6,24)<<QPointF(14,16)<<QPointF(18,20)
-                        <<QPointF(22,14)<<QPointF(27,24);
-  p.drawPolyline(hills);
- }else if(id=="align_left"||id=="align_right"||id=="align_center_x"||
-          id=="align_top"||id=="align_bottom"||id=="align_center_y"){
-  const bool vertical=id=="align_left"||id=="align_right"||id=="align_center_x";
-  if(vertical){
-   const int x=id=="align_left"?5:(id=="align_right"?27:16);
-   p.setPen(QPen(QColor("#F1B575"),1.5,Qt::DashLine));p.drawLine(x,3,x,29);p.setPen(pen);
-   if(id=="align_left"){p.drawLine(6,10,18,10);p.drawLine(6,20,26,20);}
-   else if(id=="align_right"){p.drawLine(14,10,26,10);p.drawLine(6,20,26,20);}
-   else {p.drawLine(10,10,22,10);p.drawLine(6,20,26,20);}
+  rect(4,5,24,23);p.setBrush(accent);p.drawEllipse(QPointF(11,12),2.4,2.4);
+  p.setBrush(Qt::NoBrush);p.drawPolyline(QPolygonF()<<QPointF(5,26)<<QPointF(13,17)
+    <<QPointF(18,22)<<QPointF(23,15)<<QPointF(27,22));
+ }else if(id.startsWith("align_")){
+  if(id=="align_both"){
+   p.setPen(QPen(accent,1.3,Qt::DashLine));line(16,3,16,29);line(3,16,29,16);
+   p.setPen(normal);rect(6,10,11,12);rect(14,7,11,17);
   }else{
-   const int y=id=="align_top"?5:(id=="align_bottom"?27:16);
-   p.setPen(QPen(QColor("#F1B575"),1.5,Qt::DashLine));p.drawLine(3,y,29,y);p.setPen(pen);
-   if(id=="align_top"){p.drawRect(7,6,8,10);p.drawRect(19,6,8,18);}
-   else if(id=="align_bottom"){p.drawRect(7,16,8,10);p.drawRect(19,8,8,18);}
-   else {p.drawRect(7,11,8,10);p.drawRect(19,7,8,18);}
+   const bool vertical=id=="align_left"||id=="align_right"||id=="align_center_x";
+   const double axis=vertical?(id=="align_left"?6:id=="align_right"?26:16):
+     (id=="align_top"?6:id=="align_bottom"?26:16);
+   p.setPen(QPen(accent,1.2,Qt::DashLine));
+   if(vertical)line(axis,3,axis,29);else line(3,axis,29,axis);
+   p.setPen(normal);
+   if(id=="align_left"){rect(7,8,11,5);rect(7,19,19,5);}
+   else if(id=="align_right"){rect(15,8,11,5);rect(7,19,19,5);}
+   else if(id=="align_center_x"){rect(11,8,10,5);rect(6,19,20,5);}
+   else if(id=="align_top"){rect(8,7,5,11);rect(19,7,5,19);}
+   else if(id=="align_bottom"){rect(8,15,5,11);rect(19,7,5,19);}
+   else {rect(8,11,5,10);rect(19,6,5,20);}
   }
- }else if(id=="align_both"){
-  // Two shapes share the SAME center, X and Y (relative alignment).
-  p.setPen(QPen(QColor("#F1B575"),1.1,Qt::DashLine));
-  p.drawLine(16,3,16,29);p.drawLine(3,16,29,16);p.setPen(pen);
-  p.drawRect(QRectF(7,10,11,10));p.drawRect(QRectF(11,7,11,16));
-  p.setBrush(QColor("#DE914C"));p.drawEllipse(QPointF(16,16),2.,2.);
  }else if(id=="center_bed"){
-  // The OUTER frame represents the physical bed, NOT another object.
-  p.setPen(QPen(QColor("#F1B575"),1.3));p.drawRect(QRectF(3,3,26,26));
-  p.setPen(QPen(QColor("#F1B575"),1.,Qt::DashLine));
-  p.drawLine(16,4,16,28);p.drawLine(4,16,28,16);p.setPen(pen);
-  p.drawRect(QRectF(11,11,10,10));
-  p.setBrush(QColor("#DE914C"));p.drawEllipse(QPointF(16,16),1.7,1.7);
+  rect(3,3,26,26);p.setPen(QPen(accent,1.3,Qt::DashLine));
+  line(16,4,16,28);line(4,16,28,16);p.setPen(normal);rect(12,12,8,8);
  }else if(id=="flip_h"||id=="flip_v"){
   if(id=="flip_h"){
-   p.setPen(QPen(QColor("#F1B575"),1.3,Qt::DashLine));p.drawLine(16,3,16,29);p.setPen(pen);
-   p.drawPolyline(QPolygonF()<<QPointF(5,9)<<QPointF(13,5)<<QPointF(13,24)<<QPointF(5,9));
-   p.drawPolyline(QPolygonF()<<QPointF(27,9)<<QPointF(19,5)<<QPointF(19,24)<<QPointF(27,9));
+   p.setPen(QPen(accent,1.3,Qt::DashLine));line(16,3,16,29);p.setPen(normal);
+   p.drawPolygon(QPolygonF()<<QPointF(5,16)<<QPointF(13,7)<<QPointF(13,25));
+   p.drawPolygon(QPolygonF()<<QPointF(27,16)<<QPointF(19,7)<<QPointF(19,25));
   }else{
-   p.setPen(QPen(QColor("#F1B575"),1.3,Qt::DashLine));p.drawLine(3,16,29,16);p.setPen(pen);
-   p.drawPolyline(QPolygonF()<<QPointF(9,5)<<QPointF(5,13)<<QPointF(24,13)<<QPointF(9,5));
-   p.drawPolyline(QPolygonF()<<QPointF(9,27)<<QPointF(5,19)<<QPointF(24,19)<<QPointF(9,27));
+   p.setPen(QPen(accent,1.3,Qt::DashLine));line(3,16,29,16);p.setPen(normal);
+   p.drawPolygon(QPolygonF()<<QPointF(16,5)<<QPointF(7,13)<<QPointF(25,13));
+   p.drawPolygon(QPolygonF()<<QPointF(16,27)<<QPointF(7,19)<<QPointF(25,19));
   }
  }else if(id=="rotate_90"){
-  p.drawArc(QRectF(6,5,21,21),30*16,275*16);
-  p.drawLine(25,5,28,14);p.drawLine(28,14,20,11);
+  p.drawArc(QRectF(5,5,22,22),55*16,265*16);
+  p.setBrush(accent);p.drawPolygon(QPolygonF()<<QPointF(28,15)<<QPointF(20,13)<<QPointF(24,21));
  }else if(id=="preview"){
-  p.drawRect(4,7,24,17);p.drawLine(10,28,22,28);
-  p.setBrush(QColor("#DE914C"));p.drawEllipse(QPointF(16,15),4,4);
- }else if(id=="save"||id=="save_as"){
-  p.drawRect(6,5,20,22);p.drawRect(10,6,12,7);p.drawRect(11,20,10,7);
-  if(id=="save_as"){
-   p.setPen(QPen(QColor("#FFFFFF"),1.8));
-   p.setBrush(QColor("#AD5B18"));p.drawEllipse(QPointF(25,25),6,6);
-   p.drawLine(22,25,28,25);p.drawLine(25,22,25,28);
-  }
+  p.drawEllipse(QRectF(3,9,26,14));
+  p.setBrush(accent);p.drawEllipse(QPointF(16,16),4.2,4.2);
  }else if(id=="open"||id=="open_other"){
-  p.drawPolyline(QPolygonF()<<QPointF(5,12)<<QPointF(5,7)<<QPointF(15,7)<<QPointF(19,11));
-  p.drawPolyline(QPolygonF()<<QPointF(5,27)<<QPointF(10,14)<<QPointF(28,14)<<QPointF(23,27)<<QPointF(5,27));
-  if(id=="open_other"){
-   p.setPen(QPen(QColor("#FFFFFF"),1.8));
-   p.setBrush(QColor("#AD5B18"));p.drawEllipse(QPointF(25,8),6,6);
-   p.drawLine(22,8,28,8);p.drawLine(25,5,25,11);
-  }
+  p.drawPolyline(QPolygonF()<<QPointF(4,13)<<QPointF(4,7)<<QPointF(14,7)<<QPointF(19,12));
+  p.drawPolygon(QPolygonF()<<QPointF(4,14)<<QPointF(28,14)<<QPointF(24,27)<<QPointF(5,27));
+  if(id=="open_other"){p.setPen(QPen(accent,2.));line(22,4,22,12);line(18,8,26,8);}
+ }else if(id=="save"||id=="save_as"){
+  rect(6,4,20,24);rect(10,5,12,9);rect(11,20,10,8);
+  p.setPen(QPen(accent,2.));line(11,20,21,20);
+  if(id=="save_as"){line(26,20,26,28);line(22,24,30,24);}
  }else if(id=="undo"||id=="redo"){
   const bool redo=id=="redo";
-  p.drawArc(QRectF(7,8,19,17),redo?(-10*16):(10*16),redo?(225*16):(-225*16));
-  if(redo){p.drawLine(25,7,28,15);p.drawLine(28,15,19,12);}
-  else{p.drawLine(7,7,4,15);p.drawLine(4,15,13,12);}
- }else if(id=="pause"){
-  p.drawRect(8,6,5,20);p.drawRect(19,6,5,20);
+  p.drawArc(QRectF(6,7,20,20),redo?(-30*16):(30*16),
+            redo?(245*16):(-245*16));
+  p.setBrush(accent);
+  if(redo)p.drawPolygon(QPolygonF()<<QPointF(27,8)<<QPointF(18,8)<<QPointF(25,16));
+  else p.drawPolygon(QPolygonF()<<QPointF(5,8)<<QPointF(14,8)<<QPointF(7,16));
  }else if(id=="play"){
-  p.drawPolygon(QPolygonF()<<QPointF(8,6)<<QPointF(25,16)<<QPointF(8,26));
+  p.setPen(QPen(accent,2.));p.setBrush(accent);
+  p.drawPolygon(QPolygonF()<<QPointF(8,5)<<QPointF(27,16)<<QPointF(8,27));
+ }else if(id=="pause"){
+  p.setPen(Qt::NoPen);p.setBrush(accent);
+  p.drawRoundedRect(QRectF(7,5,7,22),1,1);
+  p.drawRoundedRect(QRectF(19,5,7,22),1,1);
  }else if(id=="stop"){
-  p.drawRect(8,8,16,16);
+  p.setPen(Qt::NoPen);p.setBrush(accent);p.drawRoundedRect(QRectF(7,7,18,18),2,2);
  }else if(id=="fit"){
-  p.drawLine(5,12,5,5);p.drawLine(5,5,12,5);
-  p.drawLine(20,5,27,5);p.drawLine(27,5,27,12);
-  p.drawLine(5,20,5,27);p.drawLine(5,27,12,27);
-  p.drawLine(20,27,27,27);p.drawLine(27,27,27,20);
- }else if(id=="settings"){
-  p.drawEllipse(QPointF(16,16),10,10);p.drawEllipse(QPointF(16,16),4,4);
-  for(int k=0;k<8;++k){double a=k*3.14159265358979323846/4.;
-    p.drawLine(QPointF(16+10*std::cos(a),16+10*std::sin(a)),
-               QPointF(16+13*std::cos(a),16+13*std::sin(a)));}
- }else if(id=="scissors"){
-  p.drawEllipse(QPointF(9,23),4,4);p.drawEllipse(QPointF(23,23),4,4);
-  p.drawLine(11,20,25,5);p.drawLine(21,20,7,5);
- }else if(id=="pencil"){
-  p.drawLine(7,24,24,7);p.drawLine(5,27,12,25);
-  QPolygonF tip;tip<<QPointF(24,7)<<QPointF(28,11)<<QPointF(12,27)<<QPointF(7,23);
-  p.drawPolyline(tip);
- }else if(id=="text"){
-  QFont f=p.font();f.setBold(true);f.setPixelSize(25);p.setFont(f);
-  p.drawText(QRectF(4,2,24,28),Qt::AlignCenter,"T");
- }else if(id=="line")p.drawLine(5,26,27,5);
- else if(id=="rectangle")p.drawRect(QRectF(6,7,20,18));
- else if(id=="ellipse")p.drawEllipse(QRectF(5,7,22,18));
- else if(id=="polygon"){
-  QPolygonF poly;poly<<QPointF(16,4)<<QPointF(28,13)<<QPointF(23,27)<<QPointF(9,27)<<QPointF(4,13);p.drawPolygon(poly);
+  for(const auto& lineSeg:std::array<std::array<double,4>,8>{
+   {{4,11,4,4}},{{4,4,11,4}},{{21,4,28,4}},{{28,4,28,11}},
+   {{4,21,4,28}},{{4,28,11,28}},{{21,28,28,28}},{{28,21,28,28}}})
+   line(lineSeg[0],lineSeg[1],lineSeg[2],lineSeg[3]);
+ }else if(id=="settings"||id=="mechanism"){
+  const double pi=3.14159265358979323846;
+  QPolygonF gear;
+  for(int i=0;i<24;++i){
+   const double theta=i*pi/12.;
+   const double radius=(i%3==0||i%3==1)?13.:10.;
+   gear<<QPointF(16+radius*std::cos(theta),16+radius*std::sin(theta));
+  }
+  p.drawPolygon(gear);p.setBrush(accent);p.drawEllipse(QPointF(16,16),4.5,4.5);
+ }else{
+  // Icone nao implementado NUNCA vira caixa vazia/fragmento incompreensivel.
+  p.drawRoundedRect(QRectF(4,4,24,24),4,4);
+  p.setPen(QPen(accent,2.));line(11,11,21,21);line(21,11,11,21);
  }
- p.end();return QIcon(pix);
+ p.end();return pix;
 }
+inline QIcon toolGlyph(const QString& id){
+ QIcon icon;icon.addPixmap(renderAlencarGlyph(id,false),QIcon::Normal,QIcon::Off);
+ icon.addPixmap(renderAlencarGlyph(id,true),QIcon::Disabled,QIcon::Off);
+ return icon;
 }
+} // namespace alaser
