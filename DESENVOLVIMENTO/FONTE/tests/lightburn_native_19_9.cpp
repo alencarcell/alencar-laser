@@ -1,0 +1,114 @@
+#include "../src/lightburn_native_import_19_9.hpp"
+#include <QCoreApplication>
+#include <QFile>
+#include <QTemporaryDir>
+#include <cmath>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+using namespace alaser;
+static void need(bool condition,const char* error){
+ if(!condition)throw std::runtime_error(error);
+}
+static QString fileWithShapes(const QString& path,const QString& shapes){
+ QFile f(path);
+ if(!f.open(QIODevice::WriteOnly|QIODevice::Truncate))
+  throw std::runtime_error("Could not create local fixture");
+ const QByteArray xml=(QStringLiteral("<LightBurnProject MirrorX=\"False\" MirrorY=\"False\">")+
+                       shapes+QStringLiteral("</LightBurnProject>")).toUtf8();
+ need(f.write(xml)==xml.size(),"Failed to write local fixture");
+ return path;
+}
+static void near(double a,double b,const char* reason){
+ need(std::abs(a-b)<1e-8,reason);
+}
+int main(int argc,char** argv){
+ QCoreApplication app(argc,argv);
+ try{
+  QTemporaryDir dir;need(dir.isValid(),"No temporary test directory");
+  const QString cubic=QStringLiteral(
+    "<Shape Type=\"Path\" CutIndex=\"2\" VertID=\"1\" PrimID=\"1\">"
+    "<XForm>2 0 0 2 10 20</XForm>"
+    "<VertList>"
+    "V0 0c0x1c0y0c1x-1c1y0"
+    "V3 0c0x3c0y1c1x2c1y0"
+    "V3 3c0x2c0y3c1x4c1y3"
+    "</VertList><PrimList>B0 1B1 2B2 0</PrimList></Shape>");
+  const QString lines=QStringLiteral(
+    "<Shape Type=\"Path\" CutIndex=\"0\" VertID=\"2\" PrimID=\"2\">"
+    "<XForm>1 0 0 1 0 0</XForm>"
+    "<VertList>V0 0V1 0V1 1V0 1</VertList>"
+    "<PrimList>LineClosed</PrimList></Shape>");
+  const QString ellipse=QStringLiteral(
+    "<Shape Type=\"Ellipse\" CutIndex=\"1\" Rx=\"1\" Ry=\"2\">"
+    "<XForm>1 0 0 1 30 40</XForm></Shape>");
+  const auto synthetic=fileWithShapes(dir.filePath("native.lbrn2"),cubic+lines+ellipse);
+  auto imported=lightburn::readNativeGeometry199(synthetic);
+  need(imported.sourceShapes==3&&imported.sourcePaths==2&&imported.sourceEllipses==1,
+       "Source shape count changed");
+  need(imported.curves.contours.size()==3,"Native curve contours missing");
+  need(imported.nativeAnchors==23,"Expected 3+4+16 native nodes");
+  need(imported.cubicEdges==19&&imported.linearEdges==4,
+       "Native edge counts changed");
+  validateCurve(imported.curves);
+  const auto& c=imported.curves.contours.at(0);
+  need(c.closed&&c.layer==2&&c.nodes.size()==3&&c.edgeKind.size()==3,
+       "Closed native cubic topology changed");
+  near(c.nodes[0].anchor.x,10.,"XForm anchor.x failed");
+  near(c.nodes[0].anchor.y,20.,"XForm anchor.y failed");
+  near(c.nodes[0].handleOut.x,12.,"XForm outgoing handle failed");
+  near(c.nodes[1].handleIn.x,14.,"XForm incoming handle failed");
+  const auto mid=cubicPoint(edgeAt(c,0),.5);
+  near(mid.x,13.,"Exact Bezier evaluation changed");
+  const auto& e=imported.curves.contours.at(2);
+  need(e.closed&&e.nodes.size()==16&&e.layer==1,"Ellipse approximation invalid");
+  near(e.nodes[0].anchor.x,31.,"Ellipse Rx failed");
+  near(e.nodes[0].anchor.y,40.,"Ellipse translated center failed");
+
+  // Shared PrimID and VertID may be defined on a later Shape; resolve after
+  // parsing the ENTIRE file, never create artificial connections.
+  const QString shared=fileWithShapes(dir.filePath("shared.lbrn2"),
+    QStringLiteral("<Shape Type=\"Path\" CutIndex=\"0\" VertID=\"4\" PrimID=\"5\">"
+      "<XForm>1 0 0 1 0 0</XForm></Shape>"
+      "<Shape Type=\"Path\" CutIndex=\"0\" VertID=\"4\" PrimID=\"5\">"
+      "<VertList>V0 0V1 0V1 1V0 1</VertList>"
+      "<PrimList>LineClosed</PrimList></Shape>"));
+  const auto reused=lightburn::readNativeGeometry199(shared);
+  need(reused.curves.contours.size()==2&&reused.linearEdges==8,
+       "Forward-shared geometry references are not preserved");
+
+  const QString group=fileWithShapes(dir.filePath("group.lbrn2"),
+    QStringLiteral("<Shape Type=\"Group\" CutIndex=\"0\">"
+      "<Children><Shape Type=\"Ellipse\" CutIndex=\"0\" Rx=\"1\" Ry=\"1\"/>"
+      "</Children></Shape>"));
+  bool refusedGroup=false;
+  try{(void)lightburn::readNativeGeometry199(group);}
+  catch(const std::exception& ex){
+   refusedGroup=std::string(ex.what()).find("group hierarchy")!=std::string::npos;
+  }
+  need(refusedGroup,"Unsafe flattening of native group was accepted");
+
+  if(argc>1){
+   const QString original=QString::fromLocal8Bit(argv[1]);
+   auto actual=lightburn::readNativeGeometry199(original);
+   validateCurve(actual.curves);
+   need(actual.sourceShapes==2134&&actual.sourcePaths==2133&&actual.sourceEllipses==1,
+        "Original LightBurn shape count unexpected");
+   need(actual.nativeAnchors<250000,
+        "Native conversion exceeded existing 250k anchor budget");
+   need(actual.cubicEdges>16000&&actual.linearEdges>1200,
+        "Original LightBurn source cubic/line edges missing");
+   std::cout<<"REAL LBRN2: sourceShapes="<<actual.sourceShapes
+            <<" nativeContours="<<actual.curves.contours.size()
+            <<" nativeAnchors="<<actual.nativeAnchors
+            <<" cubicEdges="<<actual.cubicEdges
+            <<" straightEdges="<<actual.linearEdges
+            <<" ellipsesApproximated="<<actual.ellipseApproximated<<"\n";
+  }
+  std::cout<<"PASS native LBRN2 19.9: cubic control points, transforms, shared references, topology, no laser\n";
+  return 0;
+ }catch(const std::exception& ex){
+  std::cerr<<"FAIL native LBRN2 19.9: "<<ex.what()<<"\n";
+  return 1;
+ }
+}
