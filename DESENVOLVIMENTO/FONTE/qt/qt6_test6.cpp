@@ -8722,8 +8722,54 @@ static QJsonObject rasterObject198Test(){
          {"image_position_scale_preserved",true},{"sha256_guard",true},
          {"legacy_without_bitmap",true},{"hardware_commands_sent",false}};
 }
+
+QJsonObject groupedDrag199Test(){
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ auto& v=w.view;
+ v.setTransform(QTransform::fromScale(4.,4.));v.centerOn(QPointF(85,65));
+ for(int i=0;i<40;++i)v.editor.rectangle(Pt{30.+12.*(i%8),30.+12.*(i/8)},8.,8.);
+ v.rebuild();QApplication::processEvents();
+ check(v.editor.state().doc.contours.size()==40,"Fixture: 40 contours missing");
+ const auto before=stateText(v.editor.state());
+ const Pt original=v.editor.state().doc.contours.front().nodes.front().p;
+ v.selectAllVisible();check(v.selected.size()==40,"Fixture: selection missing");
+ const QPoint origin=v.mapFromScene(QPointF(70.,54.)),finish=v.mapFromScene(QPointF(74.,57.));
+ const QPointF delta=v.mapToScene(finish)-v.mapToScene(origin);
+ QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,origin);
+ QApplication::processEvents();
+ check(v.groupedDragStarts()==1,"40-object drag did not group preview");
+ QTest::mouseMove(v.viewport(),finish);QApplication::processEvents();
+ check(v.groupedDragFrameUpdates()>0,"Grouped preview did not move");
+ check(stateText(v.editor.state())==before,"Preview altered canonical state");
+ QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,finish);
+ QApplication::processEvents();checkRendered(w);
+ const Pt moved=v.editor.state().doc.contours.front().nodes.front().p;
+ check(std::abs(moved.x-original.x-delta.x())<1e-6&&std::abs(moved.y-original.y-delta.y())<1e-6,
+       "Grouped drag committed wrong delta");
+ check(v.editor.undoCount()==40,"Drag did not create atomic history");
+ pressKey(w,Qt::Key_Z,Qt::ControlModifier);
+ check(stateText(v.editor.state())==before,"Undo of grouped drag mismatch");
+ checkRendered(w);pressKey(w,Qt::Key_Y,Qt::ControlModifier);checkRendered(w);
+ const Pt redo=v.editor.state().doc.contours.front().nodes.front().p;
+ check(std::abs(redo.x-moved.x)<1e-6&&std::abs(redo.y-moved.y)<1e-6,
+       "Redo of grouped drag mismatch");
+ return QJsonObject{{"status","PASS"},{"selected_objects",40},
+                    {"grouped_starts",v.groupedDragStarts()},
+                    {"grouped_frames",v.groupedDragFrameUpdates()},
+                    {"undo_redo_preserved",true},{"hardware_commands_sent",false}};
+}
+
 int main(int argc,char** argv){
  QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";
+ if(mode=="--grouped-drag-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=groupedDrag199Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile file(out+"/RESULTADO_ARRASTE_AGRUPADO_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
  if(mode=="--icon-pack-19-9-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=sketchIcons199Audit(out);}
