@@ -8851,6 +8851,17 @@ QJsonObject nativeImportGui199Test(){
  LabWindow w(Document{});w.show();QApplication::processEvents();
  w.view.editor.rectangle({2.,3.},5.,5.);w.view.rebuild();
  check(w.view.editor.state().doc.contours.size()==1,"native GUI initial polygon fixture missing");
+ const auto before=stateText(w.view.editor.state());
+ const QString invalidPath=temp.filePath("bad_native_gui.lbrn2");
+ QFile invalid(invalidPath);check(invalid.open(QIODevice::WriteOnly),"native GUI invalid fixture unavailable");
+ const QByteArray invalidXml=R"XML(<LightBurnProject><Shape Type="Ellipse" CutIndex="2" Rx="-1" Ry="3"/></LightBurnProject>)XML";
+ check(invalid.write(invalidXml)==invalidXml.size(),"native GUI invalid fixture incomplete");
+ invalid.close();
+ bool refused=false;
+ try{w.importNativeLightBurn199(invalidPath,false);}
+ catch(const std::exception&){refused=true;}
+ check(refused&&stateText(w.view.editor.state())==before,
+       "Native GUI parser failure destroyed unsaved current project");
  w.importNativeLightBurn199(file,false);QApplication::processEvents();
  check(w.view.editor.state().doc.contours.empty(),"native GUI imported polylines instead of native cubics");
  check(w.curves&&w.curves->committed().contours.size()==2,"native GUI curve document mismatch");
@@ -8871,7 +8882,7 @@ QJsonObject nativeImportGui199Test(){
        "native GUI saved project not reopened");
  check(serialize(encodeCurves(reopened.curves))==serialize(encodeCurves(imported)),
        "native GUI saved geometry not identical");
- const auto original=QFile(file).size();
+ const auto original=QFileInfo(file).size();
  check(original==xml.size(),"native GUI modified original LightBurn file");
  return QJsonObject{{"status","PASS"},{"shapes",2},{"native_nodes",int(imported.contours[0].nodes.size()+imported.contours[1].nodes.size())},
                     {"alaser_v5_zip_roundtrip",true},{"original_lbrn2_unchanged",true},
