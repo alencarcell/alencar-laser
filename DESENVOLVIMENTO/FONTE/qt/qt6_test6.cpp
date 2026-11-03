@@ -831,6 +831,7 @@ class QtEditorLab final:public QGraphicsView{
  }
  void updateSelectionTransform(QPointF pointer,Qt::KeyboardModifiers mods){
   if(!transformDragging_)return;
+  QElapsedTimer transformProfiler;transformProfiler.start();
   QTransform t;
   if(transformHandle_==12){
    const QPointF pivot=middle(transformQuad_[0],transformQuad_[2]);
@@ -913,6 +914,7 @@ class QtEditorLab final:public QGraphicsView{
   }else{
    for(auto* item:transformItems_)item->setTransform(t);
   }
+  sample(transformPreviewMs,transformProfiler.nsecsElapsed()/1e6);
   viewport()->update();
  }
  void finishSelectionTransform(){
@@ -1189,7 +1191,7 @@ public:
  Tool tool=Tool::Select;
  Editor editor;
  std::set<int> selected;
- std::vector<double> paintMs,inputToPaintMs,hitTestMs,styleApplyMs,rebuildMs,wheelMs;
+ std::vector<double> paintMs,inputToPaintMs,hitTestMs,styleApplyMs,rebuildMs,transformPreviewMs,wheelMs;
  static void sample(std::vector<double>& measurements,double duration){
   if(measurements.size()>=10000)measurements.erase(measurements.begin(),measurements.begin()+5000);
   measurements.push_back(duration);
@@ -2946,6 +2948,9 @@ public:
       {"grouped_drag_frame_updates",view.groupedDragFrameUpdates()},
       {"grouped_transform_starts",view.groupedTransformStarts()},
       {"grouped_transform_frame_updates",view.groupedTransformFrameUpdates()},
+      {"transform_preview_samples",int(view.transformPreviewMs.size())},
+      {"transform_preview_p95_ms",percentile(view.transformPreviewMs,.95)},
+      {"transform_preview_max_ms",view.transformPreviewMs.empty()?0:*std::max_element(view.transformPreviewMs.begin(),view.transformPreviewMs.end())},
       {"rebuild_samples",int(view.rebuildMs.size())},
       {"rebuild_p95_ms",percentile(view.rebuildMs,.95)},
       {"rebuild_max_ms",view.rebuildMs.empty()?0:*std::max_element(view.rebuildMs.begin(),view.rebuildMs.end())},
