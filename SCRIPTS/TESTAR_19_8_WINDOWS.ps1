@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteIcones, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteIcones, [switch]$SomenteHistorico, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -103,6 +103,19 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+    if ($SomenteHistorico) {
+        Write-Host 'HISTORICO 19.9: copia unica e Undo/Redo; teste local offline.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test19_9_history_memory
+        Checar-Saida 'Compilacao do teste de historico'
+        $exe = Join-Path $build 'alencar_test19_9_history_memory.exe'
+        if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw "Executavel do historico ausente: $exe"
+        }
+        & $exe
+        Checar-Saida 'Regressao de memoria do historico'
+        Write-Host 'HISTORICO 19.9 PASS (offline). Qt Windows e performance real ainda exigem validacao.' -ForegroundColor Green
+        return
+    }
     if ($SomenteIcones) {
         Write-Host 'ICONES ALENCAR 19.9: glifos reais Qt em 1x/2x, sem hardware.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test7_qt6
@@ -394,6 +407,7 @@ try {
         'alencar_test19_9_rotary_offline',
         'alencar_test19_9_gear_offline',
         'alencar_test19_9_mechanisms_offline',
+        'alencar_test19_9_history_memory',
         'alencar_test_v5_codec_regression'
     )
     & $cmake --build $build --parallel 2 --target $alvos
