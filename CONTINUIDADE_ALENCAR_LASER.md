@@ -1054,3 +1054,10 @@ Registrar mudanças, testes e pendências.
 - Teste portatil especifico para roundtrip Undo/Redo e estimativa de historico; script de desempenho Windows com CSV.
 - Especificacao: `DESENVOLVIMENTO/ESPECIFICACOES/MEMORIA_HISTORICO_19_9.md`.
 - PENDENTE: compilacao e teste Windows, medicao no arquivo de 120 mil nos; sem nova liberacao fisica.
+
+
+## 03/11/2026 — Otimizacao experimental do arraste de selecao em massa
+- A partir de 32 itens selecionados, usa um `QGraphicsItemGroup` temporario de previsualizacao: um movimento de pai por evento de mouse, em vez de centenas de setPos. Restaura posicao de cada item e desfaz grupo na liberacao/cancelamento, sem alterar o documento ate o commit unico.
+- Instrumentacao no JSON: `grouped_drag_starts`, `grouped_drag_frame_updates`; teste GUI `--grouped-drag-19-9-test`, executavel via `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteFluidez`. Falha deve interromper o teste, nao liberar main.
+- Opt-out: variavel de ambiente `ALENCAR_DISABLE_GROUPED_DRAG=1` para comparar caminho antigo/novo sem recompilar; o grupo de previsualizacao usa Z=9 para preservar a ordem visual sobre objetos nao selecionados.
+- Ainda **nao medido** com 122 mil nos; requer Qt Windows PASS, inspeção visual, comparacao no mesmo arquivo e Undo/Redo. Branch PR #13 draft; main/APLICATIVO/hardware preservados.
