@@ -1124,3 +1124,10 @@ Registrar mudanças, testes e pendências.
 - **Escopo do PASS:** testes sinteticos de interpretacao Rx/Ry e rejeicao do excesso de nos; **sem `-ArquivoLbrn2`**, portanto nao significa que `ampulheita do tempo.lbrn2` foi validado no executavel, nem prova estabilidade do editor ou solucao do `map::at` historico.
 - Proxima implementacao prioritaria: importador de Bezier cubicas nativas (preservando vertices, controles, primitivas desconectadas e integridade), com fase de parsing desacoplada da GUI e limite de recursos. Nao elevar artificialmente limite de 250 mil nos, nao fazer tesselação fixa de 24 subdivisoes por curva; registrar testes de equivalencia de geometria, undo/redo e carga.
 - PR #13 draft, main, APLICATIVO e maquina sem modificacoes.
+
+
+## 03/11/2026 — Primeira etapa de importação Bézier nativa (SEM GUI)
+- Novo leitor `DESENVOLVIMENTO/FONTE/src/lightburn_native_import_19_9.hpp`: lê Path B/L e LineOpen/LineClosed diretamente em `CurveDocument`, preservando âncoras, handles e `XForm`, camadas e fechamento, sem tesselação fixa de 24 retas por cúbica.
+- Auditoria independente do arquivo `ampulheita do tempo(1).lbrn2` (SHA256 `65638a6fd7425fa69e1af47d02182eee57e372f42fd46e1608b7de0cdffbe86d`): 2.134 Shapes (2.133 Path, 1 Ellipse), **17.947 âncoras** e **16.417 arestas cúbicas** (16 da elipse representada por aproximação cúbica), **1.530 arestas retas**. Exige-se equivalência exata de contagens no teste nativo Windows; o esquema anterior geraria cerca de 397 mil pontos poligonais. Nenhuma forma do usuário foi enviada ao repositório.
+- Adicionados `tests/lightburn_native_19_9.cpp`, alvo CMake `alencar_test19_9_lbrn2_native`, comando `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteBezierNativo` (opcional `-ArquivoLbrn2 <arquivo_real>`), e especificação `DESENVOLVIMENTO/ESPECIFICACOES/IMPORTADOR_BEZIER_NATIVO_19_9_20261103.md`.
+- **Ainda não compilado no Qt Windows nem integrado à interface.** O usuário não deve tentar importar seu arquivo grande pela UI antiga; o fluxo de importação novo é apenas de leitura até comprovar integridade e desempenho. Sem merge nem alterações em main/APLICATIVO/hardware.
