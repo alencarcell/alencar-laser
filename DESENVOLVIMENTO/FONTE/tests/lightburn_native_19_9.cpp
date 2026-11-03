@@ -1,8 +1,12 @@
 #include "../src/lightburn_native_import_19_9.hpp"
+#include "../src/bezier_package.hpp"
 #include <QCoreApplication>
 #include <QFile>
 #include <QTemporaryDir>
 #include <cmath>
+#include <bit>
+#include <cstdint>
+#include <chrono>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -21,6 +25,32 @@ static QString fileWithShapes(const QString& path,const QString& shapes){
 }
 static void near(double a,double b,const char* reason){
  need(std::abs(a-b)<1e-8,reason);
+}
+static bool exactPoint(Pt a,Pt b){
+ return std::bit_cast<std::uint64_t>(a.x)==std::bit_cast<std::uint64_t>(b.x)&&
+        std::bit_cast<std::uint64_t>(a.y)==std::bit_cast<std::uint64_t>(b.y);
+}
+static void verifyNativeCodecRoundTrip(const CurveDocument& source){
+ // The deployed .alaser v5 uses encodeCurves()/decodeCurves(): exercise the
+ // actual serialized schema, not only a shallow copy of C++ objects.
+ const auto wire=serialize(encodeCurves(source));
+ const auto restored=decodeCurves(parse(wire).as_object());
+ need(restored.nextId==source.nextId,"Bezier v5 next-id lost in codec");
+ need(restored.contours.size()==source.contours.size(),
+      "Bezier v5 contour count lost in codec");
+ for(size_t i=0;i<source.contours.size();++i){
+  const auto& a=source.contours[i];const auto& b=restored.contours[i];
+  need(a.key==b.key&&a.closed==b.closed&&a.layer==b.layer,
+       "Bezier v5 contour identity, closure or layer lost");
+  need(a.edgeKind==b.edgeKind&&a.nodes.size()==b.nodes.size(),
+       "Bezier v5 edge types or node count changed");
+  for(size_t j=0;j<a.nodes.size();++j){
+   const auto& x=a.nodes[j];const auto& y=b.nodes[j];
+   need(x.id==y.id&&exactPoint(x.anchor,y.anchor)&&
+        exactPoint(x.handleIn,y.handleIn)&&exactPoint(x.handleOut,y.handleOut),
+        "Bezier v5 floating point geometry modified by codec");
+  }
+ }
 }
 int main(int argc,char** argv){
  QCoreApplication app(argc,argv);
@@ -51,6 +81,7 @@ int main(int argc,char** argv){
   need(imported.cubicEdges==19&&imported.linearEdges==4,
        "Native edge counts changed");
   validateCurve(imported.curves);
+  verifyNativeCodecRoundTrip(imported.curves);
   const auto& c=imported.curves.contours.at(0);
   need(c.closed&&c.layer==2&&c.nodes.size()==3&&c.edgeKind.size()==3,
        "Closed native cubic topology changed");
@@ -90,22 +121,26 @@ int main(int argc,char** argv){
 
   if(argc>1){
    const QString original=QString::fromLocal8Bit(argv[1]);
+   const auto start=std::chrono::steady_clock::now();
    auto actual=lightburn::readNativeGeometry199(original);
+   const auto parseMs=std::chrono::duration<double,std::milli>(
+      std::chrono::steady_clock::now()-start).count();
    validateCurve(actual.curves);
+   verifyNativeCodecRoundTrip(actual.curves);
    need(actual.sourceShapes==2134&&actual.sourcePaths==2133&&actual.sourceEllipses==1,
         "Original LightBurn shape count unexpected");
    need(actual.curves.contours.size()==2134&&actual.nativeAnchors==17947,
         "Original LightBurn contour/anchor count mismatch");
    need(actual.cubicEdges==16417&&actual.linearEdges==1530,
         "Original LightBurn cubic/line edge count mismatch");
-   std::cout<<"REAL LBRN2: sourceShapes="<<actual.sourceShapes
+   std::cout<<"REAL LBRN2: parse_ms="<<parseMs<<" roundtrip_exact=true sourceShapes="<<actual.sourceShapes
             <<" nativeContours="<<actual.curves.contours.size()
             <<" nativeAnchors="<<actual.nativeAnchors
             <<" cubicEdges="<<actual.cubicEdges
             <<" straightEdges="<<actual.linearEdges
             <<" ellipsesApproximated="<<actual.ellipseApproximated<<"\n";
   }
-  std::cout<<"PASS native LBRN2 19.9: cubic control points, transforms, shared references, topology, no laser\n";
+  std::cout<<"PASS native LBRN2 19.9: cubic controls, transforms, shared refs, exact bezier-1 codec roundtrip, no laser\n";
   return 0;
  }catch(const std::exception& ex){
   std::cerr<<"FAIL native LBRN2 19.9: "<<ex.what()<<"\n";
