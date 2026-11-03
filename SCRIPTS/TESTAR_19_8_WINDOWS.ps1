@@ -116,6 +116,8 @@ try {
         New-Item -ItemType Directory -Path $dirFluidez -Force | Out-Null
         & $app --grouped-drag-19-9-test '-' $dirFluidez
         Checar-ResultadoQt 'Arraste agrupado Qt (40 objetos)' (Join-Path $dirFluidez 'RESULTADO_ARRASTE_AGRUPADO_19_9.json')
+        & $app --grouped-center-transform-19-9-test '-' $dirFluidez
+        Checar-ResultadoQt 'Transformacao central agrupada Qt (40 objetos)' (Join-Path $dirFluidez 'RESULTADO_TRANSFORMACAO_CENTRAL_19_9.json')
         Write-Host 'FLUIDEZ 19.9: PASS funcional. Performance real de 120 mil nos ainda precisa ser medida.' -ForegroundColor Green
         return
     }
@@ -511,6 +513,8 @@ try {
     New-Item -ItemType Directory -Path $dirFluidez -Force | Out-Null
     & $app --grouped-drag-19-9-test '-' $dirFluidez
     Checar-ResultadoQt 'Arraste agrupado Qt 19.9' (Join-Path $dirFluidez 'RESULTADO_ARRASTE_AGRUPADO_19_9.json')
+    & $app --grouped-center-transform-19-9-test '-' $dirFluidez
+    Checar-ResultadoQt 'Transformacao central agrupada Qt 19.9' (Join-Path $dirFluidez 'RESULTADO_TRANSFORMACAO_CENTRAL_19_9.json')
     Write-Host 'BUILD E REGRESSOES AUTOMATIZADAS PASSARAM. AVALIACAO VISUAL AINDA NECESSARIA.' -ForegroundColor Green
     if ($Abrir) {
         Write-Host 'Abrindo editor em modo de desenvolvimento; mantenha o laser desconectado.' -ForegroundColor Yellow
