@@ -94,10 +94,10 @@ int main(int argc,char** argv){
    validateCurve(actual.curves);
    need(actual.sourceShapes==2134&&actual.sourcePaths==2133&&actual.sourceEllipses==1,
         "Original LightBurn shape count unexpected");
-   need(actual.nativeAnchors<250000,
-        "Native conversion exceeded existing 250k anchor budget");
-   need(actual.cubicEdges>16000&&actual.linearEdges>1200,
-        "Original LightBurn source cubic/line edges missing");
+   need(actual.curves.contours.size()==2134&&actual.nativeAnchors==17947,
+        "Original LightBurn contour/anchor count mismatch");
+   need(actual.cubicEdges==16417&&actual.linearEdges==1530,
+        "Original LightBurn cubic/line edge count mismatch");
    std::cout<<"REAL LBRN2: sourceShapes="<<actual.sourceShapes
             <<" nativeContours="<<actual.curves.contours.size()
             <<" nativeAnchors="<<actual.nativeAnchors
