@@ -342,3 +342,16 @@ target_include_directories(alencar_test19_9_history_memory PRIVATE src)
 if(NOT MSVC)
  target_compile_options(alencar_test19_9_history_memory PRIVATE -O2 -Wall -Wextra -Wpedantic)
 endif()
+
+# 19.9 — LightBurn conservative parser: Rx/Ry, strict dimensions, and
+# node-budget preflight. Offline; no Windows UI or machine communication.
+if(Qt6_FOUND)
+ add_executable(alencar_test19_9_lbrn2_safe_import tests/lightburn_safe_import_19_9.cpp)
+ target_include_directories(alencar_test19_9_lbrn2_safe_import PRIVATE src)
+ target_link_libraries(alencar_test19_9_lbrn2_safe_import PRIVATE Qt6::Core Qt6::Gui)
+ if(MSVC)
+  target_compile_options(alencar_test19_9_lbrn2_safe_import PRIVATE /O2 /W4 /utf-8)
+ else()
+  target_compile_options(alencar_test19_9_lbrn2_safe_import PRIVATE -O2 -Wall -Wextra -Wpedantic)
+ endif()
+endif()
