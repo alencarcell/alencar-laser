@@ -30,6 +30,7 @@
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QGraphicsPathItem>
+#include <QGraphicsItemGroup>
 #include <QGraphicsRectItem>
 #include <QGraphicsPixmapItem>
 #include <QImageReader>
@@ -348,6 +349,9 @@ class QtEditorLab final:public QGraphicsView{
  QPointF shapePreviewDelta_{};
  std::optional<QRectF> shapePreviewBounds_;
  std::vector<QGraphicsPathItem*> shapePreviewItems_;
+ QGraphicsItemGroup* shapePreviewGroup_=nullptr; // transient preview only, never document geometry
+ static constexpr std::size_t kGroupedDragThreshold=32;
+ int groupedDragStarts_=0,groupedDragFrameUpdates_=0;
  // Alcas independentes dos dados; commit unico no mouseRelease.
  bool transformDragging_=false;
  int transformHandle_=-1; // 0..7 tamanho; 8..11 rotacao; 12 move pelo centro
@@ -926,7 +930,15 @@ class QtEditorLab final:public QGraphicsView{
   if(stateChanged)stateChanged();
  }
  void clearShapePreview(){
-  for(auto* item:shapePreviewItems_)item->setPos(0,0);
+  if(shapePreviewGroup_){
+   // Reset before ungrouping: QGraphicsScene::destroyItemGroup preserves scene
+   // coordinates. No preview translation may leak into canonical items.
+   shapePreviewGroup_->setPos(QPointF{});
+   scene_.destroyItemGroup(shapePreviewGroup_);
+   shapePreviewGroup_=nullptr;
+  }else{
+   for(auto* item:shapePreviewItems_)item->setPos(0,0);
+  }
   shapePreviewItems_.clear();shapeDragging_=false;
   shapePreviewDelta_={};shapePreviewBounds_.reset();
   viewport()->update();
@@ -948,7 +960,20 @@ class QtEditorLab final:public QGraphicsView{
   shapePreviewBounds_=selectedBounds();
   if(!shapePreviewBounds_){clearShapePreview();return;}
   shapePreviewDelta_={};
-  shapeDragStart_=origin;shapeDragging_=true;
+  shapeDragStart_=origin;
+  // For large selections, one temporary parent transform replaces hundreds
+  // of per-item setPos() calls on EVERY mouse move. Small selections use the
+  // established path to avoid introducing overhead.
+  if(shapePreviewItems_.size()>=kGroupedDragThreshold){
+   QList<QGraphicsItem*> members;
+   members.reserve(qsizetype(shapePreviewItems_.size()));
+   for(auto* item:shapePreviewItems_)members.append(item);
+   shapePreviewGroup_=scene_.createItemGroup(members);
+   shapePreviewGroup_->setAcceptedMouseButtons(Qt::NoButton);
+   shapePreviewGroup_->setFlag(QGraphicsItem::ItemIsSelectable,false);
+   ++groupedDragStarts_;
+  }
+  shapeDragging_=true;
  }
  void drawRasterOverlay(){
   rasterOverlay_=nullptr;rasterFrame_=nullptr;rasterHandle_=nullptr;
@@ -1342,6 +1367,8 @@ public:
  int chunkPathsUpdated()const{return chunkPathsUpdated_;}
  int fullDragPathUpdates()const{return fullDragPathUpdates_;}
  int previewChunkCount()const{return previewChunkCount_;}
+ int groupedDragStarts()const noexcept{return groupedDragStarts_;}
+ int groupedDragFrameUpdates()const noexcept{return groupedDragFrameUpdates_;}
  bool previewMatches(const Document& expected)const{
   if(!dragChunkKey_)return false;
   const auto* c=get(expected,*dragChunkKey_);if(!c)return false;
@@ -2201,7 +2228,12 @@ void mouseMoveEvent(QMouseEvent* e)override{
    if(marqueeActive_){showMarquee(e->position());e->accept();return;}
   if(shapeDragging_){
    shapePreviewDelta_=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
-   for(auto* item:shapePreviewItems_)item->setPos(shapePreviewDelta_);
+   if(shapePreviewGroup_){
+    shapePreviewGroup_->setPos(shapePreviewDelta_);
+    ++groupedDragFrameUpdates_;
+   }else{
+    for(auto* item:shapePreviewItems_)item->setPos(shapePreviewDelta_);
+   }
    // drawForeground desenha moldura/alcas; invalida tambem essa camada.
    viewport()->update();
    ++frameUpdates;e->accept();return;
@@ -2875,6 +2907,8 @@ public:
     {"bezier_undo_available",int(curves?curves->undoCount():0)},
     {"bezier_redo_available",int(curves?curves->redoCount():0)}}},
    {"performance",QJsonObject{{"render_rebuild_count",double(view.fullRebuilds)},
+      {"grouped_drag_starts",view.groupedDragStarts()},
+      {"grouped_drag_frame_updates",view.groupedDragFrameUpdates()},
       {"rebuild_samples",int(view.rebuildMs.size())},
       {"rebuild_p95_ms",percentile(view.rebuildMs,.95)},
       {"rebuild_max_ms",view.rebuildMs.empty()?0:*std::max_element(view.rebuildMs.begin(),view.rebuildMs.end())},
