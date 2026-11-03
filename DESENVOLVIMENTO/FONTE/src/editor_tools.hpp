@@ -36,6 +36,13 @@ struct EditorState {
  Document doc;std::map<int,Meta> objects;std::map<int,Layer> layers;
  int nextGroup=1;std::map<int,EditableText> editableTexts;
 };
+// History memory is an estimate of NODE ARRAY PAYLOAD only, not complete RSS.
+// Measured on manual diagnostics export; never in mouse/paint callbacks.
+struct HistoryNodeFootprint {
+ size_t currentNodes=0,undoNodes=0,redoNodes=0;
+ size_t currentNodeBytes=0,undoNodeBytes=0,redoNodeBytes=0;
+ size_t undoStates=0,redoStates=0;
+};
 inline size_t countNodes(const Document& d){size_t n=0;for(auto& c:d.contours)n+=c.nodes.size();return n;}
 inline void validate(const EditorState& s){
  std::set<Key> keys;std::set<int64_t> ids;std::set<int> objs;int64_t maxId=0;
@@ -149,7 +156,8 @@ class Editor{
    if(!intact)it=next.editableTexts.erase(it);else ++it;
   }
   validate(next);
-  past.push_back(current);if(past.size()>maxHistory)past.erase(past.begin());
+  // next already owns the validated copy; retain old state by MOVE, not a second deep copy.
+  past.push_back(std::move(current));if(past.size()>maxHistory)past.erase(past.begin());
   current=std::move(next);future.clear();++generation;if(changesGeometry)++geometryGeneration;
  }
  static int nextObjectId(const Document& d){int maxObj=0;for(auto& c:d.contours)maxObj=std::max(maxObj,c.key.object);if(maxObj>=INT32_MAX)throw std::runtime_error("object ID exhausted");return maxObj+1;}
@@ -174,8 +182,23 @@ public:
  const EditorState& state()const{return current;}
  size_t undoCount()const{return past.size();}
  size_t redoCount()const{return future.size();}
- bool undo(){if(past.empty())return false;future.push_back(current);current=std::move(past.back());past.pop_back();++generation;++geometryGeneration;return true;}
- bool redo(){if(future.empty())return false;past.push_back(current);current=std::move(future.back());future.pop_back();++generation;++geometryGeneration;return true;}
+ HistoryNodeFootprint historyNodeFootprint()const noexcept{
+  HistoryNodeFootprint out;
+  out.undoStates=past.size();out.redoStates=future.size();
+  const auto scan=[](const EditorState& st,size_t& nodes,size_t& bytes){
+   for(const auto& contour:st.doc.contours){
+    nodes+=contour.nodes.size();
+    // sizeof is unevaluated even when the vector is empty.
+    bytes+=contour.nodes.capacity()*sizeof(contour.nodes[0]);
+   }
+  };
+  scan(current,out.currentNodes,out.currentNodeBytes);
+  for(const auto& state:past)scan(state,out.undoNodes,out.undoNodeBytes);
+  for(const auto& state:future)scan(state,out.redoNodes,out.redoNodeBytes);
+  return out;
+ }
+ bool undo(){if(past.empty())return false;future.push_back(std::move(current));current=std::move(past.back());past.pop_back();++generation;++geometryGeneration;return true;}
+ bool redo(){if(future.empty())return false;past.push_back(std::move(current));current=std::move(future.back());future.pop_back();++generation;++geometryGeneration;return true;}
  int addContour(std::vector<Pt> points,bool closed,int layerId=0){
   if(points.size()<(closed?3U:2U))throw std::runtime_error("not enough nodes");
   int obj=nextObjectId(current.doc);

@@ -334,3 +334,11 @@ target_include_directories(alencar_test19_9_mechanisms_offline PRIVATE src)
 if(NOT MSVC)
  target_compile_options(alencar_test19_9_mechanisms_offline PRIVATE -O2 -Wall -Wextra -Wpedantic)
 endif()
+
+# TESTE_19.9 — Undo/Redo com transferência de snapshot sem cópia dupla.
+# Consolida as métricas estimadas de memória (apenas payload dos nós).
+add_executable(alencar_test19_9_history_memory tests/history_memory_19_9_standalone.cpp)
+target_include_directories(alencar_test19_9_history_memory PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_9_history_memory PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()

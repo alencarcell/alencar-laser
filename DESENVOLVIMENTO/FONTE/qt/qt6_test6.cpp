@@ -2854,6 +2854,7 @@ public:
    .arg(collector_.elapsedMs()/1000));
  }
  QJsonObject captureDocument()const{
+  const auto historyFootprint=view.editor.historyNodeFootprint();
   QJsonObject counters;for(const auto& [name,n]:collector_.counters())counters[QString::fromStdString(name)]=n;
   QJsonArray events;for(const auto& e:collector_.records())events.append(QJsonObject{
    {"event",QString::fromStdString(e.type)},{"objects",e.objects},{"elapsed_ms",double(e.elapsedMs)}});
@@ -2871,7 +2872,14 @@ public:
     {"undo_available",int(view.editor.undoCount())},{"redo_available",int(view.editor.redoCount())},
     {"bezier_undo_available",int(curves?curves->undoCount():0)},
     {"bezier_redo_available",int(curves?curves->redoCount():0)}}},
-   {"performance",QJsonObject{{"fast_dense_display",view.fastDenseDisplay()},
+   {"performance",QJsonObject{{"history_undo_states",double(historyFootprint.undoStates)},
+      {"history_redo_states",double(historyFootprint.redoStates)},
+      {"history_undo_nodes",double(historyFootprint.undoNodes)},
+      {"history_redo_nodes",double(historyFootprint.redoNodes)},
+      {"history_retained_node_bytes_lower_bound",double(historyFootprint.undoNodeBytes+historyFootprint.redoNodeBytes)},
+      {"history_active_node_bytes_lower_bound",double(historyFootprint.currentNodeBytes)},
+      {"history_memory_metric","capacity_based_node_payload_only"},
+      {"fast_dense_display",view.fastDenseDisplay()},
       {"viewport_update_strategy","bounding_rect"},
       {"paint_samples",int(view.paintMs.size())},
       {"paint_p50_ms",percentile(view.paintMs,.5)},

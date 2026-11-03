@@ -1046,3 +1046,11 @@ Registrar mudanças, testes e pendências.
 - Plano tecnico detalhado: `DESENVOLVIMENTO/ESPECIFICACOES/PRIORIDADE_FLUIDEZ_19_9.md`. Baseline de 120 mil nos; medir `rebuild()`, `pathOf`, paint, hit-test, selecao, Tesoura e Undo. Implementar correcoes incrementais reversiveis e exigir A/B real no Windows.
 - O commit de modo visual adaptativo `7ae2ef9` esta publicado, mas seu ganho ainda nao foi confirmado no Windows. Nao afirmar sucesso de performance nem trabalhos em segundo plano.
 - PR #13 permanece draft, `main`, `APLICATIVO` e comunicacao fisica do laser preservados/bloqueados.
+
+
+## 02/11/2026 — Inicio da implementacao da otimizacao do historico
+- Otimizacao experimental das operacoes de `Editor::change/undo/redo`: remover copia profunda extra usando movimentacao de estados, mantendo limite original de 40 passos e sem mexer em arquivos do usuario.
+- Diagnostico Qt adicionado para quantificar payload de nos retidos no historico (limite inferior, diferente de RSS) e script Windows de medicao RAM/CPU por processo.
+- Teste portatil especifico para roundtrip Undo/Redo e estimativa de historico; script de desempenho Windows com CSV.
+- Especificacao: `DESENVOLVIMENTO/ESPECIFICACOES/MEMORIA_HISTORICO_19_9.md`.
+- PENDENTE: compilacao e teste Windows, medicao no arquivo de 120 mil nos; sem nova liberacao fisica.
