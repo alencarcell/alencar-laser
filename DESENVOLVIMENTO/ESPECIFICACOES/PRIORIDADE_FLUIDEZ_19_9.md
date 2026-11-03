@@ -55,3 +55,13 @@ Interromper a expansao de recursos e concentrar as proximas intervencoes na flui
 ## Estado de retomada
 Ultima revisao publicada antes deste plano: `7ae2ef9`.
 A proxima acao nao e redesenhar icones nem ampliar LightBurn: e medir os gargalos do Qt com os projetos do usuario, depois corrigir `rebuild()`, pintura e hit-test conforme evidencias.
+
+
+## Atualizacao 03/11/2026 — Arraste agrupado de selecao numerosa
+- **Novo codigo experimental Qt:** para 32 ou mais itens de contorno no arraste de selecao, o `QtEditorLab` usa `QGraphicsScene::createItemGroup` temporariamente e move somente o pai via `setPos` em cada movimento do mouse, em vez de iterar por centenas de `QGraphicsPathItem`. Selecao menor segue caminho antigo. Durante a previa, a geometria do `EditorState` nao muda.
+- Ao soltar/cancelar, o grupo e zerado e destruido com `destroyItemGroup`, seus itens retornam ao pai original sem translacao; a operacao canonica continua com `editor.moveObjects` uma unica vez.
+- Contadores novos no JSON: `grouped_drag_starts` e `grouped_drag_frame_updates`; nao representam ganho de velocidade, somente exercicio desse caminho.
+- **Regressao GUI nova:** `--grouped-drag-19-9-test` verifica 40 objetos, agrupamento transitorio, ausencia de transformacao residual, commit geometrico exato, Undo e Redo. `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteFluidez` compila apenas o necessario e roda esse teste + a regressao do historico; a suite integral tambem o invoca.
+- Commits: `4179bfe`, `42ad599`, `f8f6d51`, `feec727`. **Sem Qt Windows PASS ate nova execucao**; nao homologar antes de compilacao e teste real.
+- Comparar no Windows com o mesmo arquivo de ~122.390 nos: selecionar 417, arrastar repetidamente, observar responsividade, `paint_p95_ms`, `hit_test_p95_ms`, `rebuild_p95_ms`, memoria e novos contadores. Comparar com baseline anterior em igualdade de zoom e gestos.
+- Risco sob avaliacao: agrupamento temporario altera a arvore de itens somente durante a previa. Por isso a regressao exige zero pais ou posicao residual e renderizacao exata apos soltar e Undo/Redo. Se falhar, reverter a mudanca de grupo na branch experimental. Nao mexer em `main`, `APLICATIVO` ou no hardware.
