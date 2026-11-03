@@ -4,9 +4,14 @@ Diagnostico nao destrutivo do fechamento do editor Alencar Laser 19.9.
 Captura stack C++ se MSYS2/UCRT64 gdb estiver disponivel.
 Nao instala dependencias, altera QSettings ou envia comandos a laser.
 A sessao pode abrir a janela: reproduza o problema e feche normalmente se funcionar.
+Para parar na excecao: -CapturarExcecao
 #>
 [CmdletBinding()]
-param()
+param(
+ # Stop on std::out_of_range in the C++ runtime when it is thrown.
+ # GDB type filtering depends on supported libstdc++ exception probes.
+ [switch]$CapturarExcecao
+)
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $ucrt = 'C:\msys64\ucrt64\bin'
@@ -33,21 +38,36 @@ try {
  Set-Location -LiteralPath $root
  Write-Host "Reproduza o encerramento da janela Alencar Laser. Nenhuma emissao laser sera habilitada." -ForegroundColor Yellow
  Write-Host "Captura GDB: $log"
+ if ($CapturarExcecao) {
+    Write-Host "Captura direcionada a std::out_of_range: ativa. Reproduza a falha no aplicativo." -ForegroundColor Yellow
+ }
  # PowerShell 5.1 promotes native stderr to NativeCommandError under
  # ErrorActionPreference=Stop. GDB may emit harmless auto-load warnings on
  # stderr; capture stdout/stderr as OS file redirects without pipelines.
  $stdoutFile = [System.IO.Path]::ChangeExtension($log, '.stdout.tmp')
  $stderrFile = [System.IO.Path]::ChangeExtension($log, '.stderr.tmp')
  $quote = { param([string]$v) '"' + $v.Replace('"','\\"') + '"' }
- $gdbArgs = @(
-   '--quiet', '--batch', '--nx',
-   '-ex', (& $quote 'set pagination off'),
-   '-ex', (& $quote 'set confirm off'),
-   '-ex', (& $quote 'set auto-load python-scripts off'),
-   '-ex', (& $quote 'run'),
-   '-ex', (& $quote 'thread apply all bt 35'),
-   '--args', (& $quote $program), '--interactive', (& $quote $fixture), (& $quote $session)
- ) -join ' '
+
+ # A batch-mode exception catchpoint stops on the targeted exception, before
+ # std::terminate(). A normal user-driven exit produces no stack (not a PASS).
+ # Keep old path for generic crash/exit diagnostics.
+ $commandSequence = @(
+     'set pagination off',
+     'set confirm off',
+     'set print thread-events off',
+     'set auto-load python-scripts off'
+ )
+ if ($CapturarExcecao) {
+     $commandSequence += 'catch throw std::out_of_range'
+ }
+ $commandSequence += @('run','bt 45','thread apply all bt 15')
+ $parts = @('--quiet','--batch','--nx')
+ foreach ($command in $commandSequence) {
+     $parts += '-ex'
+     $parts += (& $quote $command)
+ }
+ $parts += @('--args',(& $quote $program),'--interactive',(& $quote $fixture),(& $quote $session))
+ $gdbArgs = $parts -join ' '
  $proc = Start-Process -FilePath $gdb -ArgumentList $gdbArgs `
    -NoNewWindow -Wait -PassThru `
    -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
@@ -59,6 +79,15 @@ try {
  Remove-Item -LiteralPath $stdoutFile,$stderrFile -ErrorAction SilentlyContinue
  Write-Host "Relatorio: $log" -ForegroundColor Cyan
  Write-Host "GDB encerrou com codigo: $($proc.ExitCode)"
+ if ($CapturarExcecao) {
+     if ($reportText -match '(?i)Catchpoint [0-9]+.*exception thrown') {
+         Write-Host 'Excecao capturada. Confira as funcoes bt no TXT.' -ForegroundColor Green
+     } elseif ($reportText -match '(?i)(Function.*catch throw|no catchpoints|does not support|not supported|regexp)') {
+         Write-Warning 'GDB pode nao suportar o filtro por tipo: confira os avisos no TXT.'
+     } else {
+         Write-Warning 'Nao foi registrada uma std::out_of_range nesta execucao; o erro pode nao ter se repetido.'
+     }
+ }
  Write-Host "Envie o TXT mesmo se aparecerem avisos do GDB."
 }
 finally {
