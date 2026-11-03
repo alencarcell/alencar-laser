@@ -67,3 +67,15 @@ A proxima acao nao e redesenhar icones nem ampliar LightBurn: e medir os gargalo
 - Risco sob avaliacao: agrupamento temporario altera a arvore de itens somente durante a previa. Por isso a regressao exige zero pais ou posicao residual e renderizacao exata apos soltar e Undo/Redo. Se falhar, reverter a mudanca de grupo na branch experimental. Nao mexer em `main`, `APLICATIVO` ou no hardware.
 
 - Atualizacao de seguranca: variavel `ALENCAR_DISABLE_GROUPED_DRAG=1` restaura o caminho anterior de translacao individual no inicio do processo, sem alterar documentos. Codigo atualizado nos commits `2bb4e5a` e `6fa366a`; o pai temporario recebe Z=9 para manter os objetos selecionados acima dos demais durante o movimento. Continuar sem homologar ate teste Qt Windows.
+
+
+## 03/11/2026 — Diagnostico real (417 contornos / 122.390 nos) e correção do caminho de arraste
+- Arquivo de diagnostico enviado pelo proprietario em 03/11/2026 (schema diagnostics-4), ambiente Windows 11 e Qt 6.12.0, maquina desconectada, sem probes.
+- Dados medidos: paint p50 55.3875 ms, p95 1569.4323 ms, p99 2000.7158 ms, max 3119.7382 ms; input-to-paint p95 886.319 ms; hit-test p95 180.9861 ms; rebuild p95 32.1031 ms e max 63.2177 ms (10 amostras); style-apply p95 3.0168 ms; RSS 151982080 bytes (snapshot).
+- Eventos registrados: 2 `shapes_moved` (417 e 263 objetos), 3 `marquee_selected`, 3 `undo`, 2 `redo`; nenhum descarte.
+- Descoberta importante: `grouped_drag_starts=0`, `grouped_drag_frame_updates=0` apesar de movimentos. No codigo, `beginShapePreview()` agrupava somente o arraste a partir do contorno; `beginSelectionTransform()/updateSelectionTransform()` para o manipulador central (h=12) aplicava `setTransform(t)` em todos os QGraphicsPathItems, independentemente da quantidade. Este era um caminho nao coberto na otimizacao inicial.
+- Correção experimental commit `5036605`: o manipulador central com >=32 itens agora usa pai `QGraphicsItemGroup` temporario, com um `setTransform` por frame, desmontado com transformacao identidade ao soltar ou cancelar. Preserva caminhos nativos e transformacoes de rotacao/escala no codigo anterior.
+- Contadores novos: `grouped_transform_starts` e `grouped_transform_frame_updates`. A flag `ALENCAR_DISABLE_GROUPED_DRAG` continua permitindo comparacao A/B com a implementacao antiga.
+- Teste GUI obrigatorio `--grouped-center-transform-19-9-test` (commit `2075a16`), integrado a `-SomenteFluidez` e suite inteira (commit `dc9d727`). Regressao com 40 objetos: exige pai presente durante o arraste, geometria canonica intacta antes de soltar, ausencia de grupo e transforms residuais apos soltar, coordenadas corretas e Undo/Redo. **Ainda sem execucao Windows desta revisao; nao declarar PASS.**
+- O dado mais preocupante permanece o tempo de pintura, muito acima do rebuild e do estilo; esta alteracao pode reduzir invalidações por gesto, mas **nao e prova de que o custo de pintura de 122 mil nos foi solucionado**. Exigir novo JSON e comparacao controlada antes de outro ajuste de render.
+- Gate: nao fazer merge, nao modificar `APLICATIVO`, nao usar maquina fisica.
