@@ -70,6 +70,24 @@ inline ParseNode readShape(QXmlStreamReader& xml,int depth,int& seen){
  node.w=attrDouble(attrs,"W");
  node.h=attrDouble(attrs,"H");
  node.radius=attrDouble(attrs,"Cr");
+ // LightBurn 2.x also serializes ellipses using positive Rx/Ry radii,
+ // rather than W/H diameters. Do not silently assume dimensions.
+ if(node.type=="Ellipse"){
+  const bool hasRx=!attrs.value("Rx").isEmpty(),hasRy=!attrs.value("Ry").isEmpty();
+  if(hasRx!=hasRy)
+   throw std::runtime_error("Ellipse LightBurn exige ambos Rx e Ry");
+  if(hasRx){
+   const double rx=attrDouble(attrs,"Rx"),ry=attrDouble(attrs,"Ry");
+   if(!(rx>0)||!(ry>0)||!std::isfinite(rx*2)||!std::isfinite(ry*2))
+    throw std::runtime_error("Ellipse Rx/Ry devem ser positivos e finitos");
+   const double width=2*rx,height=2*ry;
+   const bool hasW=!attrs.value("W").isEmpty(),hasH=!attrs.value("H").isEmpty();
+   if((hasW&&std::abs(node.w-width)>1e-6*std::max(1.,width))||
+      (hasH&&std::abs(node.h-height)>1e-6*std::max(1.,height)))
+    throw std::runtime_error("Ellipse W/H conflitantes com Rx/Ry");
+   node.w=width;node.h=height;
+  }
+ }
  bool validLayer=false;
  node.cutIndex=attrs.value("CutIndex").toString().toInt(&validLayer);
  if(!validLayer)node.cutIndex=0;
@@ -272,6 +290,30 @@ inline std::vector<std::pair<std::vector<Pt>,bool>> decodePathPieces(const Parse
  return result;
 }
 
+// A strict, intentionally conservative lower bound: each explicit B emits
+// at least 24 points and each explicit L emits at least one. Closed runs can
+// remove only their initial duplicate; we do not count that initial point.
+// No geometry is built during this guard.
+inline std::size_t minimumExplicitPathNodes(const ParseNode& n){
+ std::size_t minNodes=0;
+ if(n.type=="Path"){
+  const QString encoded=n.primList.trimmed();
+  if(encoded!="LineOpen"&&encoded!="LineClosed"){
+   static const QRegularExpression prim(R"(([LB])(\d+)\s+(\d+))");
+   auto it=prim.globalMatch(encoded);
+   while(it.hasNext()){
+    const auto m=it.next();
+    minNodes+=m.captured(1)=="B"?24U:1U;
+    if(minNodes>250000U)return minNodes;
+   }
+  }
+ }
+ for(const auto& child:n.children){
+  minNodes+=minimumExplicitPathNodes(child);
+  if(minNodes>250000U)break;
+ }
+ return minNodes;
+}
 inline void flatten(const ParseNode& n,const QTransform& parent,
                     std::vector<GeometryShape>& result,
                     int& nextGroup,int inheritedGroup=0){
@@ -357,9 +399,26 @@ inline ImportResult readGeometry(const QString& path){
  std::map<int,QString> sharedVertices,sharedPrimitives;
  for(const auto& root:roots)gatherSharedGeometry(root,sharedVertices,sharedPrimitives);
  for(auto& root:roots)resolveSharedGeometry(root,sharedVertices,sharedPrimitives);
+ // Abort before 24x cubic tessellation and creation of hundreds of thousands
+ // of QPainterPath nodes. This never alters the current editor document.
+ std::size_t minimumNodes=0;
+ for(const auto& root:roots){
+  minimumNodes+=minimumExplicitPathNodes(root);
+  if(minimumNodes>250000U)
+   throw std::runtime_error("LightBurn exige mais de 250 mil nos para importacao vetorial integral; o arquivo original foi preservado. Use simplificacao no LightBurn ou um importador de curvas nativas.");
+ }
  std::vector<GeometryShape> shapes;
  int nextGroup=1;
- for(const auto& root:roots)flatten(root,QTransform(),shapes,nextGroup);
+ std::size_t flattenedNodes=0;
+ for(const auto& root:roots){
+  const auto before=shapes.size();
+  flatten(root,QTransform(),shapes,nextGroup);
+  for(std::size_t i=before;i<shapes.size();++i){
+   flattenedNodes+=shapes[i].points.size();
+   if(flattenedNodes>250000U)
+    throw std::runtime_error("Limite de 250 mil nos excedido durante importacao LightBurn; nenhum desenho foi substituido.");
+  }
+ }
  if(shapes.empty())throw std::runtime_error("Projeto sem formas vetoriais compativeis");
  if(shapes.size()>30000)throw std::runtime_error("Limite de objetos excedido");
  // Construir documento isolado diretamente, sem registrar uma copia integral
