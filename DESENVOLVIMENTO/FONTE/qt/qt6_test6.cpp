@@ -370,6 +370,8 @@ class QtEditorLab final:public QGraphicsView{
         transformAffineC_=0.,transformAffineD_=1.;
  std::vector<int> transformIds_;
  std::vector<QGraphicsPathItem*> transformItems_;
+ QGraphicsItemGroup* transformPreviewGroup_=nullptr; // center-handle preview only
+ int groupedTransformStarts_=0,groupedTransformFrameUpdates_=0;
  bool nativeContourPressing_=false;
  bool nativeTransformDragging_=false;
  Key nativeTransformKey_{};
@@ -757,7 +759,15 @@ class QtEditorLab final:public QGraphicsView{
   p->restore();
  }
  void cancelSelectionTransform(){
-  for(auto* item:transformItems_)item->setTransform(QTransform());
+  if(transformPreviewGroup_){
+   // Remove the temporary parent with an identity transform. Qt preserves
+   // every child scene transform during destroyItemGroup().
+   transformPreviewGroup_->setTransform(QTransform());
+   scene_.destroyItemGroup(transformPreviewGroup_);
+   transformPreviewGroup_=nullptr;
+  }else{
+   for(auto* item:transformItems_)item->setTransform(QTransform());
+  }
   transformItems_.clear();transformIds_.clear();
   transformDragging_=false;transformHandle_=-1;
   nativeTransformDragging_=false;nativeTransformKey_={};
@@ -803,6 +813,20 @@ class QtEditorLab final:public QGraphicsView{
   transformQuad_=*quad;
   transformAnchor_=h>=8?middle((*quad)[0],(*quad)[2]):QPointF{};
   transformSx_=transformSy_=1.;transformAngle_=0.;
+  // Real operator sessions commonly move multi-selection using center handle.
+  // Keep native Bezier and rotate/scale on the established path; only
+  // translation (h=12) uses one temporary Qt parent for >=32 items.
+  if(!native&&h==12&&transformItems_.size()>=kGroupedDragThreshold&&
+     !qEnvironmentVariableIsSet("ALENCAR_DISABLE_GROUPED_DRAG")){
+   QList<QGraphicsItem*> members;
+   members.reserve(qsizetype(transformItems_.size()));
+   for(auto* item:transformItems_)members.append(item);
+   transformPreviewGroup_=scene_.createItemGroup(members);
+   transformPreviewGroup_->setZValue(9);
+   transformPreviewGroup_->setAcceptedMouseButtons(Qt::NoButton);
+   transformPreviewGroup_->setFlag(QGraphicsItem::ItemIsSelectable,false);
+   ++groupedTransformStarts_;
+  }
   return true;
  }
  void updateSelectionTransform(QPointF pointer,Qt::KeyboardModifiers mods){
@@ -883,7 +907,12 @@ class QtEditorLab final:public QGraphicsView{
                 pivot.y()-c*pivot.x()-d*pivot.y(),1.);
   }
   selectionPreviewTransform_=t;
-  for(auto* item:transformItems_)item->setTransform(t);
+  if(transformPreviewGroup_){
+   transformPreviewGroup_->setTransform(t);
+   ++groupedTransformFrameUpdates_;
+  }else{
+   for(auto* item:transformItems_)item->setTransform(t);
+  }
   viewport()->update();
  }
  void finishSelectionTransform(){
@@ -1373,6 +1402,8 @@ public:
  int previewChunkCount()const{return previewChunkCount_;}
  int groupedDragStarts()const noexcept{return groupedDragStarts_;}
  int groupedDragFrameUpdates()const noexcept{return groupedDragFrameUpdates_;}
+ int groupedTransformStarts()const noexcept{return groupedTransformStarts_;}
+ int groupedTransformFrameUpdates()const noexcept{return groupedTransformFrameUpdates_;}
  bool previewMatches(const Document& expected)const{
   if(!dragChunkKey_)return false;
   const auto* c=get(expected,*dragChunkKey_);if(!c)return false;
@@ -2913,6 +2944,8 @@ public:
    {"performance",QJsonObject{{"render_rebuild_count",double(view.fullRebuilds)},
       {"grouped_drag_starts",view.groupedDragStarts()},
       {"grouped_drag_frame_updates",view.groupedDragFrameUpdates()},
+      {"grouped_transform_starts",view.groupedTransformStarts()},
+      {"grouped_transform_frame_updates",view.groupedTransformFrameUpdates()},
       {"rebuild_samples",int(view.rebuildMs.size())},
       {"rebuild_p95_ms",percentile(view.rebuildMs,.95)},
       {"rebuild_max_ms",view.rebuildMs.empty()?0:*std::max_element(view.rebuildMs.begin(),view.rebuildMs.end())},
