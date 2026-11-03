@@ -8831,6 +8831,53 @@ static QJsonObject rasterObject198Test(){
          {"legacy_without_bitmap",true},{"hardware_commands_sent",false}};
 }
 
+QJsonObject nativeImportGui199Test(){
+ // Test the actual LabWindow experimental integration with synthetic geometry.
+ // No confirmation dialog, no QSettings persistence, no laser hardware.
+ QTemporaryDir temp;check(temp.isValid(),"native GUI temporary directory unavailable");
+ const QString file=temp.filePath("native_gui_19_9.lbrn2");
+ QFile fixture(file);check(fixture.open(QIODevice::WriteOnly),"native GUI fixture unavailable");
+ const QByteArray xml=R"XML(<?xml version="1.0"?>
+<LightBurnProject MirrorX="False" MirrorY="False">
+<Shape Type="Path" CutIndex="1" VertID="1" PrimID="1">
+<XForm>1 0 0 1 0 0</XForm>
+<VertList>V0 0V10 0V10 10V0 10</VertList>
+<PrimList>LineClosed</PrimList></Shape>
+<Shape Type="Ellipse" CutIndex="2" Rx="2" Ry="3">
+<XForm>1 0 0 1 20 25</XForm></Shape>
+</LightBurnProject>)XML";
+ check(fixture.write(xml)==xml.size(),"native GUI fixture write incomplete");
+ fixture.close();
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ w.view.editor.rectangle({2.,3.},5.,5.);w.view.rebuild();
+ check(w.view.editor.state().doc.contours.size()==1,"native GUI initial polygon fixture missing");
+ w.importNativeLightBurn199(file,false);QApplication::processEvents();
+ check(w.view.editor.state().doc.contours.empty(),"native GUI imported polylines instead of native cubics");
+ check(w.curves&&w.curves->committed().contours.size()==2,"native GUI curve document mismatch");
+ check(w.view.nativeItemCount()==2&&w.view.hasNativeDocument(),
+       "native GUI scene native curves were not rendered");
+ check(w.view.nativeModeActive(),"native GUI mode was not enabled");
+ check(w.projectPath.isEmpty(),"native GUI import could overwrite LBRN2 original");
+ const auto& imported=w.curves->committed();
+ check(imported.contours.at(0).edgeKind.size()==4&&
+       imported.contours.at(1).edgeKind.size()==16,
+       "native GUI line and ellipse edges missing");
+ check(w.view.nativeItemPath(imported.contours.at(1).key).elementCount()>16,
+       "native GUI cubic paths were not rendered");
+ const QString copy=temp.filePath("native_gui_roundtrip.alaser");
+ (void)saveNative(copy,w.view.editor.state(),imported);
+ const auto reopened=openNative(copy);
+ check(reopened.version==5&&reopened.curves.contours.size()==imported.contours.size(),
+       "native GUI saved project not reopened");
+ check(serialize(encodeCurves(reopened.curves))==serialize(encodeCurves(imported)),
+       "native GUI saved geometry not identical");
+ const auto original=QFile(file).size();
+ check(original==xml.size(),"native GUI modified original LightBurn file");
+ return QJsonObject{{"status","PASS"},{"shapes",2},{"native_nodes",int(imported.contours[0].nodes.size()+imported.contours[1].nodes.size())},
+                    {"alaser_v5_zip_roundtrip",true},{"original_lbrn2_unchanged",true},
+                    {"hardware_commands_sent",false}};
+}
+
 QJsonObject groupedDrag199Test(){
  LabWindow w(Document{});w.show();QApplication::processEvents();
  auto& v=w.view;
@@ -8937,6 +8984,15 @@ int main(int argc,char** argv){
   try{report=groupedCenterTransform199Test();}
   catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TRANSFORMACAO_CENTRAL_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--native-import-gui-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=nativeImportGui199Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile file(out+"/RESULTADO_IMPORTACAO_NATIVA_GUI_19_9.json");
   if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
   return pass?0:1;
