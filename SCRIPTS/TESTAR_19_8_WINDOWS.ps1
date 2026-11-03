@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteIcones, [switch]$SomenteHistorico, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteIcones, [switch]$SomenteHistorico, [switch]$SomenteFluidez, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -103,6 +103,22 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+
+    if ($SomenteFluidez) {
+        Write-Host 'FLUIDEZ 19.9: teste GUI de arraste agrupado e regressao do historico.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 1 --target alencar_test19_9_history_memory alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt e historico 19.9'
+        $core = Join-Path $build 'alencar_test19_9_history_memory.exe'
+        & $core
+        Checar-Saida 'Historico Undo/Redo'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $dirFluidez = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\fluidez_19_9'
+        New-Item -ItemType Directory -Path $dirFluidez -Force | Out-Null
+        & $app --grouped-drag-19-9-test '-' $dirFluidez
+        Checar-ResultadoQt 'Arraste agrupado Qt (40 objetos)' (Join-Path $dirFluidez 'RESULTADO_ARRASTE_AGRUPADO_19_9.json')
+        Write-Host 'FLUIDEZ 19.9: PASS funcional. Performance real de 120 mil nos ainda precisa ser medida.' -ForegroundColor Green
+        return
+    }
     if ($SomenteHistorico) {
         Write-Host 'HISTORICO 19.9: copia unica e Undo/Redo; teste local offline.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test19_9_history_memory
@@ -491,6 +507,10 @@ try {
     New-Item -ItemType Directory -Path $refino -Force | Out-Null
     & $app --refine-curves-trace-19-8-test $fixture $refino
     Checar-ResultadoQt 'Curvas de texto, P&B, coleta Tesoura' (Join-Path $refino 'RESULTADO_REFINO_19_8.json')
+    $dirFluidez = Join-Path $destino 'fluidez_19_9'
+    New-Item -ItemType Directory -Path $dirFluidez -Force | Out-Null
+    & $app --grouped-drag-19-9-test '-' $dirFluidez
+    Checar-ResultadoQt 'Arraste agrupado Qt 19.9' (Join-Path $dirFluidez 'RESULTADO_ARRASTE_AGRUPADO_19_9.json')
     Write-Host 'BUILD E REGRESSOES AUTOMATIZADAS PASSARAM. AVALIACAO VISUAL AINDA NECESSARIA.' -ForegroundColor Green
     if ($Abrir) {
         Write-Host 'Abrindo editor em modo de desenvolvimento; mantenha o laser desconectado.' -ForegroundColor Yellow
