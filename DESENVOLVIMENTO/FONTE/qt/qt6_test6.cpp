@@ -4,6 +4,7 @@
 #include "workspace_dimensions.hpp"
 #include "lightburn_reference_inspector.hpp"
 #include "lightburn_geometry_import.hpp"
+#include "lightburn_native_import_19_9.hpp"
 #include "diagnostics_collector.hpp"
 #include "persistent_session_store.hpp"
 #include "recovery_policy.hpp"
@@ -5699,6 +5700,58 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   save();
   if(recoveryPolicy_.dirty())throw std::runtime_error("Salvamento cancelado: projeto atual preservado");
  }
+ // EXPERIMENTAL: enabled for humans ONLY via
+ // ALENCAR_NATIVE_LBRN2_PREVIEW_19_9=1; no G-code / laser configuration.
+ // The importer validates the entire file and builds a native session BEFORE
+ // prompting to replace the current document. The old file is never written.
+ void importNativeLightBurn199(const QString& path,bool askBeforeReplace=true){
+  const auto imported=lightburn::readNativeGeometry199(path);
+  check(imported.sourceShapes>0&&!imported.curves.contours.empty(),
+        "LBRN2 nativo sem formas validas");
+  const int shapes=int(imported.sourceShapes);
+  const int contours=int(imported.curves.contours.size());
+  const int anchors=int(imported.nativeAnchors);
+  const int cubics=int(imported.cubicEdges);
+  const bool approximate=imported.ellipseApproximated;
+  auto nextSession=std::make_unique<CurveDragSession>(imported.curves);
+  auto emptyEditor=Editor(fromDocument(Document{}));
+  if(askBeforeReplace){
+   const auto choice=QMessageBox::question(this,"Importar LightBurn — modo Bézier experimental",
+     QString("Leitura concluida sem modificar o trabalho atual.\n\n"
+       "%1 formas da origem, %2 contornos nativos, %3 ancoras e %4 curvas cubicas.\n\n"
+       "Deseja substituir o desenho atual por uma COPIA editavel experimental?\n"
+       "O original .lbrn2 nao sera alterado. O desenho anterior so pode ser "
+       "restaurado pelo arquivo salvo; importar nao cria um Undo global.\n"
+       "%5\n\n"
+       "Nenhuma configuracao ou emissao de laser sera importada.")
+      .arg(shapes).arg(contours).arg(anchors).arg(cubics)
+      .arg(approximate?"Observacao: a elipse e aproximada por 16 curvas cubicas.":""),
+     QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
+   if(choice!=QMessageBox::Yes)return;
+   ensureSafeToReplace();
+  }
+  // Commit: no parsing or curve-package validation happens after this point.
+  // Clear previous native items before releasing their backing session.
+  view.attachNative(nullptr);
+  curves.reset();
+  view.editor=std::move(emptyEditor);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  curves=std::move(nextSession);
+  view.attachNative(curves.get());
+  view.enableNative(true);
+  view.clearRasterImage();
+  bezierToolActive_=false;
+  loadedProject_.reset();
+  projectPath.clear(); // NEVER write on top of original LBRN2
+  buttons.at("select")->setChecked(true);
+  recoveryPolicy_.edited();
+  captureEvent("lightburn_native_imported",shapes);
+  refresh();
+  view.setFocus();
+  status->setText(QString("LBRN2 nativo experimental: %1 contornos / %2 ancoras. "
+      "Salve como .alaser v5; laser bloqueado.").arg(contours).arg(anchors));
+ }
+
  void openFilePath(const QString& path){
   const QString suffix=QFileInfo(path).suffix().toLower();
   if(suffix=="alaser"){
@@ -5708,6 +5761,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    return;
   }
   if(suffix!="lbrn2")throw std::runtime_error("Use .alaser ou .lbrn2");
+  // Not enabled by default: operator must explicitly opt in to the
+  // experimental native cubic preview via process environment variable.
+  if(qEnvironmentVariable("ALENCAR_NATIVE_LBRN2_PREVIEW_19_9")=="1"){
+   try{importNativeLightBurn199(path,true);}
+   catch(const std::exception& e){
+    QMessageBox::warning(this,"LightBurn nativo — arquivo preservado",
+     QString("Leitura nativa recusada: %1\n\n"
+             "O arquivo .lbrn2 original nao foi alterado. "
+             "Nao utilize este arquivo para corte.").arg(QString::fromUtf8(e.what())));
+    status->setText("LBRN2 nativo experimental recusado");
+   }
+   return;
+  }
   // Read-only preflight. Many LightBurn Scan projects store thousands of
   // disconnected strokes inside ONE Path. Converting them as a single line
   // would invent cutting links or drop zero-length marks. Refuse atomically.
