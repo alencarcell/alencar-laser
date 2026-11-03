@@ -6,12 +6,14 @@ No rebuild, no machine connection, no persistence of PATH changes.
 Usage (from repo root):
  powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1"
  powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -VerificarSomente
+ powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -ModoCompatibilidade
 #>
 [CmdletBinding()]
-param([switch]$VerificarSomente)
+param([switch]$VerificarSomente, [switch]$ModoCompatibilidade)
 
 $ErrorActionPreference = 'Stop'
 $originalPath = $env:PATH
+$originalGroupedDrag = [Environment]::GetEnvironmentVariable('ALENCAR_DISABLE_GROUPED_DRAG','Process')
 $didPush = $false
 try {
     $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -37,6 +39,12 @@ try {
     }
     [void](New-Item -ItemType Directory -Path $sessionDir -Force)
     $env:PATH = $ucrtBin + ';' + $originalPath
+    if ($ModoCompatibilidade) {
+        # Disable only transient grouped-drag optimization. Files, history
+        # and canonical shapes remain untouched.
+        $env:ALENCAR_DISABLE_GROUPED_DRAG = '1'
+        Write-Warning 'MODO COMPATIBILIDADE: arraste agrupado experimental desativado nesta sessao.'
+    }
     Push-Location -LiteralPath $root
     $didPush = $true
     Write-Host 'Abrindo editor experimental. Mantenha o laser desconectado.' -ForegroundColor Yellow
@@ -51,5 +59,10 @@ catch {
 }
 finally {
     $env:PATH = $originalPath
+    if ($null -eq $originalGroupedDrag) {
+        [Environment]::SetEnvironmentVariable('ALENCAR_DISABLE_GROUPED_DRAG',$null,'Process')
+    } else {
+        [Environment]::SetEnvironmentVariable('ALENCAR_DISABLE_GROUPED_DRAG',$originalGroupedDrag,'Process')
+    }
     if ($didPush) { Pop-Location }
 }
