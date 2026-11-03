@@ -1092,3 +1092,10 @@ Registrar mudanças, testes e pendências.
 - Codificacao atual: `finishSelectionTransform` continua chamando `rebuild()`, que recria a `QGraphicsScene` inteira; pintura continua com P95 > 1 s. O arquivo LightBurn `ampulheita do tempo.lbrn2` tambem expôs suporte ausente a elipse com `Rx/Ry`; falha de importação separada.
 - Script `SCRIPTS/ABRIR_19_9_WINDOWS.ps1` atualizado com `-ModoCompatibilidade` para desligar somente o agrupamento experimental nesta sessao (rollback dinamico, sem alterar projeto). Nao garante resolucao de congelamento; seguir com comparacao controlada.
 - Plano consolidado: `DESENVOLVIMENTO/ESPECIFICACOES/PLANO_ESTABILIZACAO_19_9_20261103.md`. A branch continua draft; main, APLICATIVO, instalador e hardware sem modificacoes. Nenhum ganho definitivo afirmado. Evitar novas mudancas de desempenho sem testes Qt Windows e evidencia de latencia.
+
+
+## 03/11/2026 — Analise dos dois TXT GDB enviados
+- `FECHAMENTO_GDB_19_9_20261103_144436.txt`: incompleto; registra apenas 3 mensagens `New Thread`, sem backtrace.
+- `FECHAMENTO_GDB_19_9_20261103_145204.txt`: `GDB exit code: 0`, processo Windows `Inferior 1 (process 9700) exited normally`, nenhuma pilha de falha. Aviso OLEAUT32 `Biblioteca não registrada` sem correlação comprovada com `map::at`. O fechamento anormal anterior **não se repetiu nesta captura**; não declarar erro solucionado.
+- Nova opcao experimental `-CapturarExcecao` no script `SCRIPTS/DIAGNOSTICAR_FECHAMENTO_19_9_WINDOWS.ps1` (commit `e76b72b`): usa catchpoint `catch throw std::out_of_range` e tenta gerar backtrace antes do terminate se a excecao ocorrer. O suporte ao filtro tipado depende das capacidades do GDB/libstdc++; ainda nao validado no Windows. Modo normal original preservado.
+- Se fechar normalmente ou nao reproduzir a excecao, relatorio continua inconclusivo; nenhuma alteracao na `main`, instalador, controle laser ou projetos. Prioridade estabilizacao full rebuild e pintura permanece.
