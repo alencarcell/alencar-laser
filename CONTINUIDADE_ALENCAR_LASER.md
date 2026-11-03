@@ -1039,3 +1039,10 @@ Registrar mudanças, testes e pendências.
 - Teste C++ portatil `tests/test_dense_render_policy_19_9.cpp` para limites 80.000/80.001 e 31/32; compilacao Qt Windows e benchmark real **AINDA PENDENTES**.
 - Baseline real: 415 contornos, 120.081 nos, paint p50 73,8873 ms, p95 1062,0717 ms, p99 1125,2906 ms, max 1615,7267 ms, hit-test p95 159,6687 ms. Repetir com mesma copia e gestos; manter original e registrar memoria. Se a performance regredir, reverter commit; nao habilitar laser.
 - Nao habilitar comunicacao fisica, movimento, G-code ou laser. PR #13 segue draft; main e APLICATIVO intactos.
+
+
+## 02/11/2026 — Mudanca de prioridade do proprietario: OTIMIZACAO E FLUIDEZ
+- O proprietario encerrou os testes do dia e determinou que a proxima fase seja **exclusivamente performance, responsividade e estabilidade do Qt Windows**, antes de novas funcionalidades, iconografia e integracoes.
+- Plano tecnico detalhado: `DESENVOLVIMENTO/ESPECIFICACOES/PRIORIDADE_FLUIDEZ_19_9.md`. Baseline de 120 mil nos; medir `rebuild()`, `pathOf`, paint, hit-test, selecao, Tesoura e Undo. Implementar correcoes incrementais reversiveis e exigir A/B real no Windows.
+- O commit de modo visual adaptativo `7ae2ef9` esta publicado, mas seu ganho ainda nao foi confirmado no Windows. Nao afirmar sucesso de performance nem trabalhos em segundo plano.
+- PR #13 permanece draft, `main`, `APLICATIVO` e comunicacao fisica do laser preservados/bloqueados.
