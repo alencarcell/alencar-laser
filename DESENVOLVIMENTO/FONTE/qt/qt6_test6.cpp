@@ -8738,11 +8738,22 @@ QJsonObject groupedDrag199Test(){
  QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,origin);
  QApplication::processEvents();
  check(v.groupedDragStarts()==1,"40-object drag did not group preview");
+ int groupsDuringPreview=0;
+ for(auto* item:v.scene()->items())if(item->type()==QGraphicsItemGroup::Type)++groupsDuringPreview;
+ check(groupsDuringPreview==1,"Drag preview must use exactly one temporary graphics group");
  QTest::mouseMove(v.viewport(),finish);QApplication::processEvents();
  check(v.groupedDragFrameUpdates()>0,"Grouped preview did not move");
  check(stateText(v.editor.state())==before,"Preview altered canonical state");
  QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,finish);
  QApplication::processEvents();checkRendered(w);
+ for(const auto& contour:v.editor.state().doc.contours){
+  auto* item=v.pathItem(contour.key);
+  check(!item->parentItem()&&item->pos()==QPointF{},
+        "Transient drag transform leaked into a canonical shape item");
+ }
+ for(auto* item:v.scene()->items())
+  check(item->type()!=QGraphicsItemGroup::Type,
+        "Transient graphics group leaked after release");
  const Pt moved=v.editor.state().doc.contours.front().nodes.front().p;
  check(std::abs(moved.x-original.x-delta.x())<1e-6&&std::abs(moved.y-original.y-delta.y())<1e-6,
        "Grouped drag committed wrong delta");
