@@ -1154,3 +1154,15 @@ Registrar mudanças, testes e pendências.
 - Adicionado `SCRIPTS/VALIDAR_LBRN2_REAL_19_9.ps1`: abre seletor de arquivos Windows quando `-ArquivoLbrn2` está ausente, exige arquivo `.lbrn2`, registra SHA256 antes e depois e invoca o gate **offline** `-SomenteBezierNativo -ArquivoLbrn2 <caminho>`. Não usa a GUI do editor e não altera o arquivo original nem conecta laser. Requer teste na máquina do operador; sem prova real de PASS ainda.
 - Próxima ação após atualizar a branch (preservando mudanças locais): `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\VALIDAR_LBRN2_REAL_19_9.ps1"`, escolher uma cópia do arquivo LightBurn real. Exigir `REAL LBRN2: sourceShapes=2134 nativeContours=2134 nativeAnchors=17947 cubicEdges=16417 straightEdges=1530` e `AUDITORIA LBRN2 REAL 19.9: PASS offline`, senão investigar parser. Não habilitar a variável da GUI real até a auditoria passar.
 - PR #13 draft, sem merge na main nem alterações em instalador/APLICATIVO, sem emissão fisica.
+
+
+## 03/11/2026 — Retomada 19.9: ampulheta real, camadas e pintura Qt
+- **PASS no Windows — LBRN2 real:** 2.134 shapes/contornos nativos, 17.947 âncoras, 16.417 cúbicas, 1.530 retas, roundtrip_exact=true e SHA256 preservado.
+- **PASS Windows — SomenteBezierNativoUI:** regressão sintética de GUI e arquivo .alaser v5. A abertura real posterior foi comprovada por screenshot, arquivo ampulheta.alaser e relatórios.
+- **Medição real GUI:** Qt 6.12.0, paint P95=496.693 ms, input-to-paint P95=452.9751 ms, RSS=155820032 bytes e hit-test P95=0.0061 ms; Tesoura, mover nó/contorno e undo registrados. Lentidão da pintura P0, ainda não solucionada.
+- **Falha real de metadados:** 2.130 curvas Bezier layerId=1, 4 layerId=0; design/layers.json tinha somente camada 0. A prévia aplicava 2.130 fallbacks de camada.
+- **Correções experimentais na PR #13 draft:** cb0ce7a (Layer.parametersVerified), fc4b6b4 (reconstrução não destrutiva dos IDs de camada no importador e nos projetos v5 antigos), 831c149 (contador de parâmetros não verificados), 28758e6 (aviso de prévia), 086e7ca (construção Qt e teste GUI estendidos). Essas mudanças NÃO possuem PASS Windows nesta nova revisão.
+- **Diagnóstico e segurança:** as camadas recriadas não importam velocidade/potência/Fill de máquina; parâmetros permanecem virtuais e sinalizados. Geometria, ID, histórico, edição e fabricação física separados. Não mexer na main, APLICATIVO, instalador ou emissão laser.
+- Especificação detalhada: DESENVOLVIMENTO/ESPECIFICACOES/AUDITORIA_CAMADAS_BEZIER_E_PINTURA_19_9_20261103.md; issue GitHub #18.
+- **Próximo gate, quando operador voltar:** fechar editor, conferir git status --short, preservar alterações locais, git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030, executar SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteBezierNativoUI. Se PASS, importar somente COPIA do projeto real e comparar renderizações e metadados; nunca sobrescrever o original.
+- **CI remoto:** ações em GitHub aparecem como falha sem logs acessíveis; não declarar compilação/homologação nem deduzir causa.
