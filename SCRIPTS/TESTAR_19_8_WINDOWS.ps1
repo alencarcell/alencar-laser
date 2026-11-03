@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteIcones, [switch]$SomenteHistorico, [switch]$SomenteFluidez, [switch]$SomenteImportacaoSegura, [switch]$SomenteBezierNativo, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteIcones, [switch]$SomenteHistorico, [switch]$SomenteFluidez, [switch]$SomenteImportacaoSegura, [switch]$SomenteBezierNativo, [switch]$SomenteBezierNativoUI, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -105,6 +105,21 @@ try {
 
 
 
+    if ($SomenteBezierNativoUI) {
+        Write-Host 'BEZIER NATIVO GUI 19.9: compilacao isolada e teste de importacao sem operador/hardware.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 1 --target alencar_test19_9_lbrn2_native alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt do importador nativo e editor'
+        $nativo = Join-Path $build 'alencar_test19_9_lbrn2_native.exe'
+        & $nativo
+        Checar-Saida 'Teste do codec Bezier nativo'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $dest = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\native_gui_19_9'
+        New-Item -ItemType Directory -Path $dest -Force | Out-Null
+        & $app --native-import-gui-19-9-test '-' $dest
+        Checar-ResultadoQt 'Importacao nativa GUI com ZIP v5 e arquivo original intacto' (Join-Path $dest 'RESULTADO_IMPORTACAO_NATIVA_GUI_19_9.json')
+        Write-Host 'BEZIER NATIVO GUI 19.9: PASS sintetico. Arquivo real e fluidez ainda pendentes.' -ForegroundColor Green
+        return
+    }
     if ($SomenteBezierNativo) {
         Write-Host 'BEZIER NATIVO 19.9: parser LBRN2 offline, sem conversao 24x.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test19_9_lbrn2_native
