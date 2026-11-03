@@ -359,9 +359,9 @@ endif()
 # 19.9 — exact native cubic LBRN2 read-only parser. No GUI/hardware, no
 # 24-segment polygonal expansion. Full app import remains behind validation.
 if(Qt6_FOUND)
- add_executable(alencar_test19_9_lbrn2_native tests/lightburn_native_19_9.cpp)
- target_include_directories(alencar_test19_9_lbrn2_native PRIVATE src)
- target_link_libraries(alencar_test19_9_lbrn2_native PRIVATE Qt6::Core Qt6::Gui)
+ add_executable(alencar_test19_9_lbrn2_native tests/lightburn_native_19_9.cpp src/boost_json_impl.cpp)
+ target_include_directories(alencar_test19_9_lbrn2_native PRIVATE src ${BOOST_JSON_INCLUDE_DIR} ${MINIZIP_INCLUDE_DIR})
+ target_link_libraries(alencar_test19_9_lbrn2_native PRIVATE Qt6::Core Qt6::Gui ${MINIZIP_LIBRARY} ZLIB::ZLIB)
  if(MSVC)
   target_compile_options(alencar_test19_9_lbrn2_native PRIVATE /O2 /W4 /utf-8)
  else()
