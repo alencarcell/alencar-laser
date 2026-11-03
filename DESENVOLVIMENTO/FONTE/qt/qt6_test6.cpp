@@ -964,7 +964,9 @@ class QtEditorLab final:public QGraphicsView{
   // For large selections, one temporary parent transform replaces hundreds
   // of per-item setPos() calls on EVERY mouse move. Small selections use the
   // established path to avoid introducing overhead.
-  if(shapePreviewItems_.size()>=kGroupedDragThreshold){
+  // Emergency opt-out for A/B tests and Qt-driver-specific regressions.
+  if(shapePreviewItems_.size()>=kGroupedDragThreshold &&
+     !qEnvironmentVariableIsSet("ALENCAR_DISABLE_GROUPED_DRAG")){
    QList<QGraphicsItem*> members;
    members.reserve(qsizetype(shapePreviewItems_.size()));
    for(auto* item:shapePreviewItems_)members.append(item);
