@@ -22,6 +22,7 @@ struct Layer {
  std::string powerMode="M4"; // M4=dinamica / M3=constante (somente metadados)
  bool optimizeTravel=true; // reordenacao VIRTUAL na previa apenas
  double lineIntervalMm=0.20; // distancia entre linhas Fill (metadado offline)
+ bool parametersVerified=true; // false: imported layer has no confirmed simulation/fabrication settings
 };
 struct Meta {int layer=0,group=0;};
 struct EditableText {
@@ -950,7 +951,7 @@ inline boost::json::object metadata(const EditorState& s){
  for(auto&[id,l]:s.layers)layers.push_back(object{{"id",id},{"name",l.name},{"visible",l.visible},{"locked",l.locked},{"mode",l.mode},{"output",l.output},{"air",l.air},
    {"speedMmMin",l.speedMmMin},{"powerPercent",l.powerPercent},
    {"passes",l.passes},{"powerMode",l.powerMode},{"optimizeTravel",l.optimizeTravel},
-   {"lineIntervalMm",l.lineIntervalMm}});
+   {"lineIntervalMm",l.lineIntervalMm},{"parametersVerified",l.parametersVerified}});
  m["layers"]=std::move(layers);array objects;
  for(auto&[id,o]:s.objects)objects.push_back(object{{"id",id},{"layer",o.layer},{"group",o.group}});
  m["objects"]=std::move(objects);
@@ -980,7 +981,8 @@ inline EditorState fromMetadata(Document d,const boost::json::value& v){
     x.if_contains("passes")?int(x.at("passes").as_int64()):1,
     x.if_contains("powerMode")?std::string(x.at("powerMode").as_string()):"M4",
     x.if_contains("optimizeTravel")?x.at("optimizeTravel").as_bool():true,
-    x.if_contains("lineIntervalMm")?x.at("lineIntervalMm").to_number<double>():0.20};}
+    x.if_contains("lineIntervalMm")?x.at("lineIntervalMm").to_number<double>():0.20,
+    x.if_contains("parametersVerified")?x.at("parametersVerified").as_bool():true};}
  for(const auto& item:m.at("objects").as_array()){const auto& x=item.as_object();int id=int(x.at("id").as_int64());if(s.objects.count(id))throw std::runtime_error("duplicate object meta");s.objects[id]={int(x.at("layer").as_int64()),int(x.at("group").as_int64())};}
  if(const auto* texts=m.if_contains("editableTexts")){
   for(const auto& item:texts->as_array()){
