@@ -40,3 +40,13 @@ O operador relatou piora importante nos travamentos, mesmo após várias tentati
 
 ## Estado
 Contenção implementada na branch no commit `6478944`; script revisado estruturalmente, **não executado no Windows**. Esta fase não reverte nem substitui a versão aprovada. O próximo foco técnico é mensurar o full rebuild e a pintura; nenhuma mudança física na máquina laser.
+
+
+## 03/11/2026 — GDB capturou nova exceção ao abrir arquivo real
+- Captura da janela Windows confirma `GDB exit code=0` da ferramenta, mas **"Excecao capturada"** na sessão de depuração: isso **não significa que o aplicativo terminou normalmente**. A pilha está no TXT local `RELATORIOS/DIAGNOSTICOS/FECHAMENTO_GDB_19_9_20261103_160816.txt`, ainda **não enviado**; não afirmar qual função lançou `std::out_of_range` até examinar o backtrace.
+- Arquivo original inspecionado somente leitura: `ampulheita do tempo.lbrn2` (enviado também como `ampulheita do tempo(1).lbrn2`, SHA256 idêntico). É XML LightBurn 2.1.02, 2.134 shapes: 2.133 `Path` e 1 `Ellipse` com raio `Rx=1.7500045, Ry=1.7500045` e `XForm`. Nenhuma Shape tem W/H. O erro anterior `Dimensoes ausentes para Rect/Ellipse` estava relacionado ao parser que só aceita W/H.
+- Arquivo tem 16.401 primitivas Bézier `B` e 1.275 segmentos de linha `L` além de 3 caminhos `LineClosed`; com tesselação fixa de 24 segmentos por Bézier, produz **aproximadamente 397 mil nós**. Isso excede o limite do importador, 250 mil; não é sinal de corrupção do arquivo.
+- Patch experimental `lightburn_geometry_import.hpp`: interpretar Rx/Ry como raios, validar valores positivos e conflito com W/H; calcular limite inferior de nós após resolver as referências compartilhadas e **bloquear antes de tesselação massiva** qualquer arquivo que já exceda 250 mil, sem tocar no documento aberto; conferir total após cada raiz. **Não aumenta o limite, não simplifica curvas silenciosamente e não gera G-code**.
+- Regressão offline Qt `alencar_test19_9_lbrn2_safe_import`: elipse Rx/Ry com transformação, W/H conflitantes e arquivo sintético acima do limite; execução específica pelo script `TESTAR_19_8_WINDOWS.ps1 -SomenteImportacaoSegura`, opcionalmente `-ArquivoLbrn2 <caminho local>`. **Ainda sem compilação Windows desta revisão.**
+- Importação fiel do arquivo real exigirá trabalho separado no importador de curvas Bézier nativas (ou simplificação autorizada pelo usuário). Bloquear cedo com explicação é preferível a travar a UI ou importar incompletamente.
+- **P0 seguinte:** usuário enviar `FECHAMENTO_GDB_19_9_20261103_160816.txt` para identificar exatamente o `map::at` da exceção; então reparar com teste reproduzível. Não pedir novos testes pesados antes de ler o TXT.
