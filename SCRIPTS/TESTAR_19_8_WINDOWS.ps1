@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteIcones, [switch]$SomenteHistorico, [switch]$SomenteFluidez, [switch]$SomenteImportacaoSegura, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteIcones, [switch]$SomenteHistorico, [switch]$SomenteFluidez, [switch]$SomenteImportacaoSegura, [switch]$SomenteBezierNativo, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -104,6 +104,25 @@ try {
     Checar-Saida 'Configuracao CMake'
 
 
+
+    if ($SomenteBezierNativo) {
+        Write-Host 'BEZIER NATIVO 19.9: parser LBRN2 offline, sem conversao 24x.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test19_9_lbrn2_native
+        Checar-Saida 'Compilacao Qt parser Bezier nativo'
+        $nativo = Join-Path $build 'alencar_test19_9_lbrn2_native.exe'
+        if (-not (Test-Path -LiteralPath $nativo -PathType Leaf)) { throw "Teste de curvas nativas ausente: $nativo" }
+        if (-not [string]::IsNullOrWhiteSpace($ArquivoLbrn2)) {
+            if (-not (Test-Path -LiteralPath $ArquivoLbrn2 -PathType Leaf)) {
+                throw "Arquivo LightBurn nao encontrado: $ArquivoLbrn2"
+            }
+            & $nativo $ArquivoLbrn2
+        } else {
+            & $nativo
+        }
+        Checar-Saida 'Regressoes da importacao nativa Bezier'
+        Write-Host 'BEZIER NATIVO 19.9: PASS offline. GUI, leitura e salvamento no editor continuam pendentes.' -ForegroundColor Green
+        return
+    }
     if ($SomenteImportacaoSegura) {
         Write-Host 'LBRN2 SAFE 19.9: Rx/Ry, limite antecipado e rejeicao integral.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 2 --target alencar_test19_9_lbrn2_safe_import
@@ -446,6 +465,7 @@ try {
         'alencar_test19_9_mechanisms_offline',
         'alencar_test19_9_history_memory',
         'alencar_test19_9_lbrn2_safe_import',
+        'alencar_test19_9_lbrn2_native',
         'alencar_test_v5_codec_regression'
     )
     & $cmake --build $build --parallel 2 --target $alvos
