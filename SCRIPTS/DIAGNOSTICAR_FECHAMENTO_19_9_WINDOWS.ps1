@@ -33,9 +33,33 @@ try {
  Set-Location -LiteralPath $root
  Write-Host "Reproduza o encerramento da janela Alencar Laser. Nenhuma emissao laser sera habilitada." -ForegroundColor Yellow
  Write-Host "Captura GDB: $log"
- & $gdb --quiet --batch --nx -ex "set pagination off" -ex "set confirm off" -ex "run" -ex "thread apply all bt 35" --args $program --interactive $fixture $session 2>&1 | Tee-Object -FilePath $log
+ # PowerShell 5.1 promotes native stderr to NativeCommandError under
+ # ErrorActionPreference=Stop. GDB may emit harmless auto-load warnings on
+ # stderr; capture stdout/stderr as OS file redirects without pipelines.
+ $stdoutFile = [System.IO.Path]::ChangeExtension($log, '.stdout.tmp')
+ $stderrFile = [System.IO.Path]::ChangeExtension($log, '.stderr.tmp')
+ $quote = { param([string]$v) '"' + $v.Replace('"','\\"') + '"' }
+ $gdbArgs = @(
+   '--quiet', '--batch', '--nx',
+   '-ex', (& $quote 'set pagination off'),
+   '-ex', (& $quote 'set confirm off'),
+   '-ex', (& $quote 'set auto-load python-scripts off'),
+   '-ex', (& $quote 'run'),
+   '-ex', (& $quote 'thread apply all bt 35'),
+   '--args', (& $quote $program), '--interactive', (& $quote $fixture), (& $quote $session)
+ ) -join ' '
+ $proc = Start-Process -FilePath $gdb -ArgumentList $gdbArgs `
+   -NoNewWindow -Wait -PassThru `
+   -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
+ $stdoutText = if (Test-Path -LiteralPath $stdoutFile) { Get-Content -LiteralPath $stdoutFile -Raw } else { '' }
+ $stderrText = if (Test-Path -LiteralPath $stderrFile) { Get-Content -LiteralPath $stderrFile -Raw } else { '' }
+ $header = "Alencar Laser 19.9 | GDB exit code: $($proc.ExitCode)`r`n"
+ $reportText = $header + "[STDOUT / BACKTRACE]`r`n" + $stdoutText + "`r`n[STDERR / WARNINGS]`r`n" + $stderrText
+ [System.IO.File]::WriteAllText($log, $reportText, (New-Object System.Text.UTF8Encoding($false)))
+ Remove-Item -LiteralPath $stdoutFile,$stderrFile -ErrorAction SilentlyContinue
  Write-Host "Relatorio: $log" -ForegroundColor Cyan
- Write-Host "Envie este TXT para identificar a funcao e a linha que originaram map::at."
+ Write-Host "GDB encerrou com codigo: $($proc.ExitCode)"
+ Write-Host "Envie o TXT mesmo se aparecerem avisos do GDB."
 }
 finally {
  $env:PATH = $oldPath
