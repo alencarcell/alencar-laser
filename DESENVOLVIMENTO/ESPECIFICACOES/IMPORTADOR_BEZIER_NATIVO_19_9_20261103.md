@@ -48,3 +48,12 @@ A aprovação exige `PASS native LBRN2 19.9` e `REAL LBRN2: sourceShapes=2134 na
 4. Somente depois decidir se importador nativo pode substituir conversão legada, com rollback e revisão manual.
 
 Versão homologada, `main`, `APLICATIVO`, instalador e máquina não foram alterados.
+
+
+## 03/11/2026 — Gate adicional de persistência (ainda sem GUI)
+- O teste offline `alencar_test19_9_lbrn2_native` passou no Windows na etapa anterior (captura do operador). **A versão nova do teste abaixo ainda não foi executada**.
+- O teste foi ampliado para converter `CurveDocument` no esquema de persistência real `bezier-1` com `encodeCurves()/decodeCurves()`; compara, em todos os contornos e nós, IDs, camada, estado fechado, tipos de aresta e os bits exatos dos doubles de âncoras e alças.
+- Também constrói um projeto `.alaser` v5 **temporário**, via `buildEditedIntegratedProject`/`writeIntegratedProject`, reabre com `readIntegratedProject`, e exige igualdade estrita do `bezier-1`; nenhuma geometria poligonal artificial pode aparecer; `fabricationEnabled=false` obrigatório.
+- O arquivo de exemplo nativo convertido é criado em diretório temporário do Windows, não substitui `.lbrn2` nem grava nada no diretório de trabalho do cliente. O processo não inicializa hardware.
+- CMake recebeu `src/boost_json_impl.cpp` e dependências de Boost JSON/MiniZip/ZLIB para exercitar o formato v5 real. Teste sintético e teste do `.lbrn2` real devem produzir `PASS native LBRN2 19.9`; no caso real, linha `REAL LBRN2: ... roundtrip_exact=true` com 2134 Shapes/17947 âncoras/16417 cubicas/1530 linhas.
+- **A integração do menu Arquivo continua bloqueada até validação Windows desse ZIP roundtrip**, dos contornos do arquivo original e medição. A máquina permanece fisicamente desconectada.
