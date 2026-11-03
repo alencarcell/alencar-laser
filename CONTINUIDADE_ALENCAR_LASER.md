@@ -1116,3 +1116,11 @@ Registrar mudanças, testes e pendências.
 - O arquivo LightBurn fornecido está íntegro: 2.133 Path, 1 Ellipse Rx/Ry; compartilhamentos resolvidos indicam 16.401 comandos B e 1.275 L, gerando **no mínimo 394.899 pontos** antes de certos pontos iniciais, acima do limite de 250 mil. O patch preventivo `8ff890f` evita conversão excessiva antes da recusa e lê Rx/Ry, porém **não permite importação integral do arquivo de grande dimensão**; requer importação Bézier nativa para preservar a geometria.
 - Alteração no depurador: commit `1415eb6` oferece `-CapturarEncerramento` (alias `-CapturarExcecao` agora equivalente) parando em `std::terminate` ou `abort`, não mais na primeira exceção tratada. Não testado em Windows; pode falhar por ausência de símbolos. NÃO pedir repetição do mesmo teste sem necessidade.
 - Próximo gate de segurança: executar `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteImportacaoSegura -ArquivoLbrn2 <caminho_local_copia>`; o teste deve produzir PASS de recusa ANTECIPADA com arquivo grande, sem abrir GUI. Não declarar editor estável ou importação bem-sucedida.
+
+
+## 03/11/2026 — PASS no Windows: teste seguro LBRN2 19.9
+- Evidencia do operador via captura do VS Code: `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteImportacaoSegura` compilou `alencar_test19_9_lbrn2_safe_import.exe` com Qt e executou o teste focado.
+- Saida registrada: `PASS LightBurn 19.9: Rx/Ry, strict dimensions, early node budget, no laser` e `LBRN2 SAFE: PASS para validacoes de leitura e recusa antecipada.`
+- **Escopo do PASS:** testes sinteticos de interpretacao Rx/Ry e rejeicao do excesso de nos; **sem `-ArquivoLbrn2`**, portanto nao significa que `ampulheita do tempo.lbrn2` foi validado no executavel, nem prova estabilidade do editor ou solucao do `map::at` historico.
+- Proxima implementacao prioritaria: importador de Bezier cubicas nativas (preservando vertices, controles, primitivas desconectadas e integridade), com fase de parsing desacoplada da GUI e limite de recursos. Nao elevar artificialmente limite de 250 mil nos, nao fazer tesselação fixa de 24 subdivisoes por curva; registrar testes de equivalencia de geometria, undo/redo e carga.
+- PR #13 draft, main, APLICATIVO e maquina sem modificacoes.
