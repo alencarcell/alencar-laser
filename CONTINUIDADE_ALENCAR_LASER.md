@@ -1061,3 +1061,11 @@ Registrar mudanças, testes e pendências.
 - Instrumentacao no JSON: `grouped_drag_starts`, `grouped_drag_frame_updates`; teste GUI `--grouped-drag-19-9-test`, executavel via `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteFluidez`. Falha deve interromper o teste, nao liberar main.
 - Opt-out: variavel de ambiente `ALENCAR_DISABLE_GROUPED_DRAG=1` para comparar caminho antigo/novo sem recompilar; o grupo de previsualizacao usa Z=9 para preservar a ordem visual sobre objetos nao selecionados.
 - Ainda **nao medido** com 122 mil nos; requer Qt Windows PASS, inspeção visual, comparacao no mesmo arquivo e Undo/Redo. Branch PR #13 draft; main/APLICATIVO/hardware preservados.
+
+
+## 03/11/2026 — Diagnostico 122.390 nos e fix do manipulador central
+- JSON real confirmou `paint_p95_ms=1569.4323`, `paint_max_ms=3119.7382`, `hit_test_p95_ms=180.9861`, `rebuild_p95_ms=32.1031`, `style_apply_p95_ms=3.0168`. As 2 movimentacoes (417 e 263 objetos) ocorreram com `grouped_drag_starts=0`.
+- Caminho Qt antes nao otimizado: `updateSelectionTransform()` (controle central, h=12) aplicava `setTransform` a todos os itens por evento. Corrigido na branch experimental para uso de grupo temporario a partir de 32 itens e nenhum ajuste em geometria canonica; novo `grouped_transform_starts` e `grouped_transform_frame_updates`.
+- Adicionado teste GUI `--grouped-center-transform-19-9-test` ao comando `-SomenteFluidez`, com validacao de geometria, release, Undo/Redo. `transform_preview_p95_ms` permite comparar custo do gesto; `ALENCAR_DISABLE_GROUPED_DRAG=1` desliga os dois modos otimizados para comparacao.
+- **Nao compilado/testado no Windows nesta rodada**. Nao confundir teste anterior da rota de arraste sobre contorno com validacao do manipulador central. Proxima etapa: atualizar branch com cuidado, compilar `-SomenteFluidez`, testar com copia do projeto pesado e exportar JSON. Prioridade seguinte: custo de pintura Qt (P95 > 1.5 s).
+- main, APLICATIVO, instalador e controle da maquina sem mudancas. PR #13 draft.
