@@ -1131,7 +1131,7 @@ public:
  Tool tool=Tool::Select;
  Editor editor;
  std::set<int> selected;
- std::vector<double> paintMs,inputToPaintMs,hitTestMs,styleApplyMs,wheelMs;
+ std::vector<double> paintMs,inputToPaintMs,hitTestMs,styleApplyMs,rebuildMs,wheelMs;
  static void sample(std::vector<double>& measurements,double duration){
   if(measurements.size()>=10000)measurements.erase(measurements.begin(),measurements.begin()+5000);
   measurements.push_back(duration);
@@ -1475,6 +1475,7 @@ public:
  void invalidateSelectionCache(){picker_.invalidate();}
  bool fastDenseDisplay()const noexcept{return fastDenseDisplay_;}
  void rebuild(){
+  QElapsedTimer rebuildProfiler;rebuildProfiler.start();
   // Adaptive drawing quality: no simplification of geometry or hit-testing.
   // Recalculate only at rebuild (load/edit), not on each paint/mouse move.
   std::size_t displayNodes=0;
@@ -1532,6 +1533,7 @@ public:
   // O índice só deve ser invalidado por uma alteração real na geometria.
   // Mudanças em camadas, agrupamentos ou destaque preservam o cache.
   fullRebuilds++;viewport()->update();
+  sample(rebuildMs,rebuildProfiler.nsecsElapsed()/1e6);
   if(stateChanged)stateChanged();
  }
  int activeObjectId()const{return active_?active_->object:0;}
@@ -2872,7 +2874,13 @@ public:
     {"undo_available",int(view.editor.undoCount())},{"redo_available",int(view.editor.redoCount())},
     {"bezier_undo_available",int(curves?curves->undoCount():0)},
     {"bezier_redo_available",int(curves?curves->redoCount():0)}}},
-   {"performance",QJsonObject{{"history_undo_states",double(historyFootprint.undoStates)},
+   {"performance",QJsonObject{{"render_rebuild_count",double(view.fullRebuilds)},
+      {"rebuild_samples",int(view.rebuildMs.size())},
+      {"rebuild_p95_ms",percentile(view.rebuildMs,.95)},
+      {"rebuild_max_ms",view.rebuildMs.empty()?0:*std::max_element(view.rebuildMs.begin(),view.rebuildMs.end())},
+      {"style_apply_p95_ms",percentile(view.styleApplyMs,.95)},
+      {"style_apply_max_ms",view.styleApplyMs.empty()?0:*std::max_element(view.styleApplyMs.begin(),view.styleApplyMs.end())},
+      {"history_undo_states",double(historyFootprint.undoStates)},
       {"history_redo_states",double(historyFootprint.redoStates)},
       {"history_undo_nodes",double(historyFootprint.undoNodes)},
       {"history_redo_nodes",double(historyFootprint.redoNodes)},
