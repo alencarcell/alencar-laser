@@ -1,5 +1,5 @@
 #include "../src/lightburn_native_import_19_9.hpp"
-#include "../src/bezier_package.hpp"
+#include "../src/integrated_project_edit.hpp"
 #include <QCoreApplication>
 #include <QFile>
 #include <QTemporaryDir>
@@ -52,6 +52,25 @@ static void verifyNativeCodecRoundTrip(const CurveDocument& source){
   }
  }
 }
+static void verifyNativeAlaserZipRoundTrip(const CurveDocument& original,
+                                          const QString& outputFile){
+ // End-to-end package format (.alaser v5): encode into an independent,
+ // temporary, non-fabrication project. Never writes over the user's .lbrn2.
+ const EditorState empty=fromDocument(Document{});
+ const auto project=buildEditedIntegratedProject(empty,original,nullptr);
+ need(project.version==5,"Native package schema incorrect");
+ writeIntegratedProject(outputFile.toStdString(),project);
+ const auto reopened=readIntegratedProject(outputFile.toStdString());
+ need(reopened.version==5,"Native ZIP version was lost");
+ need(reopened.legacy.doc.contours.empty(),
+      "Native ZIP unexpectedly added polygon contours");
+ need(reopened.legacy.operations.is_object()&&
+      reopened.legacy.operations.as_object().at("fabricationEnabled").as_bool()==false,
+      "Machine fabrication was enabled by native ZIP codec");
+ verifyNativeCodecRoundTrip(reopened.curves);
+ need(serialize(encodeCurves(original))==serialize(encodeCurves(reopened.curves)),
+      "Native ZIP exact geometry differs from initial source");
+}
 int main(int argc,char** argv){
  QCoreApplication app(argc,argv);
  try{
@@ -82,6 +101,7 @@ int main(int argc,char** argv){
        "Native edge counts changed");
   validateCurve(imported.curves);
   verifyNativeCodecRoundTrip(imported.curves);
+  verifyNativeAlaserZipRoundTrip(imported.curves,dir.filePath("synthetic_native.alaser"));
   const auto& c=imported.curves.contours.at(0);
   need(c.closed&&c.layer==2&&c.nodes.size()==3&&c.edgeKind.size()==3,
        "Closed native cubic topology changed");
@@ -127,6 +147,7 @@ int main(int argc,char** argv){
       std::chrono::steady_clock::now()-start).count();
    validateCurve(actual.curves);
    verifyNativeCodecRoundTrip(actual.curves);
+   verifyNativeAlaserZipRoundTrip(actual.curves,dir.filePath("real_native_roundtrip.alaser"));
    need(actual.sourceShapes==2134&&actual.sourcePaths==2133&&actual.sourceEllipses==1,
         "Original LightBurn shape count unexpected");
    need(actual.curves.contours.size()==2134&&actual.nativeAnchors==17947,
@@ -140,7 +161,7 @@ int main(int argc,char** argv){
             <<" straightEdges="<<actual.linearEdges
             <<" ellipsesApproximated="<<actual.ellipseApproximated<<"\n";
   }
-  std::cout<<"PASS native LBRN2 19.9: cubic controls, transforms, shared refs, exact bezier-1 codec roundtrip, no laser\n";
+  std::cout<<"PASS native LBRN2 19.9: cubic controls, shared refs, native v5 ZIP exact reopen, fabrication off\n";
   return 0;
  }catch(const std::exception& ex){
   std::cerr<<"FAIL native LBRN2 19.9: "<<ex.what()<<"\n";
