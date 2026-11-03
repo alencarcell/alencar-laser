@@ -4,8 +4,8 @@ Alencar Laser 19.9 - Development Windows launcher.
 Opens the already built Qt editor using MSYS2 UCRT64 runtime DLLs.
 No rebuild, no machine connection, no persistence of PATH changes.
 Usage (from repo root):
- powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\ABRIR_19_9_WINDOWS.ps1"
- powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\ABRIR_19_9_WINDOWS.ps1" -VerificarSomente
+ powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1"
+ powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -VerificarSomente
 #>
 [CmdletBinding()]
 param([switch]$VerificarSomente)
@@ -15,11 +15,11 @@ $originalPath = $env:PATH
 $didPush = $false
 try {
     $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
-    $ucrtBin = 'C:\\msys64\\ucrt64\\bin'
+    $ucrtBin = 'C:\msys64\ucrt64\bin'
     $requiredDll = Join-Path $ucrtBin 'libminizip-1.dll'
-    $exe = Join-Path $root 'DESENVOLVIMENTO\\FONTE\\build_WINDOWS_GIT_19_8\\alencar_test7_qt6.exe'
-    $fixture = Join-Path $root 'DESENVOLVIMENTO\\FONTE\\fixtures\\web_nodes_normalized.csv'
-    $sessionDir = Join-Path $root 'RELATORIOS\\AUDITORIAS\\GITHUB_19_8\\sessao'
+    $exe = Join-Path $root 'DESENVOLVIMENTO\FONTE\build_WINDOWS_GIT_19_8\alencar_test7_qt6.exe'
+    $fixture = Join-Path $root 'DESENVOLVIMENTO\FONTE\fixtures\web_nodes_normalized.csv'
+    $sessionDir = Join-Path $root 'RELATORIOS\AUDITORIAS\GITHUB_19_8\sessao'
     foreach ($file in @($exe, $fixture)) {
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
             throw "Arquivo ausente: $file. Compile a candidata com TESTAR_19_8_WINDOWS.ps1 primeiro."
