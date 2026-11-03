@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteIcones, [switch]$SomenteHistorico, [switch]$SomenteFluidez, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteIcones, [switch]$SomenteHistorico, [switch]$SomenteFluidez, [switch]$SomenteImportacaoSegura, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -104,6 +104,25 @@ try {
     Checar-Saida 'Configuracao CMake'
 
 
+    if ($SomenteImportacaoSegura) {
+        Write-Host 'LBRN2 SAFE 19.9: Rx/Ry, limite antecipado e rejeicao integral.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test19_9_lbrn2_safe_import
+        Checar-Saida 'Compilacao do parser LightBurn seguro'
+        $safe = Join-Path $build 'alencar_test19_9_lbrn2_safe_import.exe'
+        if (-not (Test-Path -LiteralPath $safe -PathType Leaf)) { throw "Teste seguro ausente: $safe" }
+        if (-not [string]::IsNullOrWhiteSpace($ArquivoLbrn2)) {
+            if (-not (Test-Path -LiteralPath $ArquivoLbrn2 -PathType Leaf)) {
+                throw "Arquivo .lbrn2 nao encontrado: $ArquivoLbrn2"
+            }
+            & $safe $ArquivoLbrn2
+        } else {
+            & $safe
+        }
+        Checar-Saida 'Teste de integridade do importador LightBurn'
+        Write-Host 'LBRN2 SAFE: PASS para validacoes de leitura e recusa antecipada.' -ForegroundColor Green
+        Write-Host 'Nao significa que o arquivo real foi importado ou que o editor inteiro esta estabilizado.'
+        return
+    }
     if ($SomenteFluidez) {
         Write-Host 'FLUIDEZ 19.9: teste GUI de arraste agrupado e regressao do historico.' -ForegroundColor Cyan
         & $cmake --build $build --parallel 1 --target alencar_test19_9_history_memory alencar_test7_qt6
@@ -426,6 +445,7 @@ try {
         'alencar_test19_9_gear_offline',
         'alencar_test19_9_mechanisms_offline',
         'alencar_test19_9_history_memory',
+        'alencar_test19_9_lbrn2_safe_import',
         'alencar_test_v5_codec_regression'
     )
     & $cmake --build $build --parallel 2 --target $alvos
