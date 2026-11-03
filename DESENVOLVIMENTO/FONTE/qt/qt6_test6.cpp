@@ -1123,7 +1123,10 @@ private:
   clearNativeItems();
   if(!nativeSession_)return;
   for(const auto& c:nativeSession_->committed().contours){
-   auto* item=scene_.addPath(nativeCurvePath(c));
+   // updateNativePaths(true) builds the canonical QPainterPath exactly once.
+   // Building it here and again below caused duplicate geometry allocation
+   // for every imported cubic contour on each complete scene creation.
+   auto* item=scene_.addPath(QPainterPath());
    item->setAcceptedMouseButtons(Qt::NoButton);
    nativeItems_[c.key]=item;
   }
@@ -5714,7 +5717,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const int cubics=int(imported.cubicEdges);
   const bool approximate=imported.ellipseApproximated;
   auto nextSession=std::make_unique<CurveDragSession>(imported.curves);
-  auto emptyEditor=Editor(fromDocument(Document{}));
+  // CutIndex identities are editor metadata, never inferred machining settings.
+  // The new editor is constructed before the old drawing is replaced.
+  auto emptyEditor=Editor(newEditorStateForNativeLightBurn(imported.curves));
   if(askBeforeReplace){
    const auto choice=QMessageBox::question(this,"Importar LightBurn — modo Bézier experimental",
      QString("Leitura concluida sem modificar o trabalho atual.\n\n"
@@ -8869,6 +8874,11 @@ QJsonObject nativeImportGui199Test(){
        "native GUI scene native curves were not rendered");
  check(w.view.nativeModeActive(),"native GUI mode was not enabled");
  check(w.projectPath.isEmpty(),"native GUI import could overwrite LBRN2 original");
+ const auto& state=w.view.editor.state();
+ check(state.layers.count(1)&&state.layers.count(2)&&
+       !state.layers.at(1).parametersVerified&&
+       !state.layers.at(2).parametersVerified,
+       "native GUI import dropped source CutIndex or trusted unknown settings");
  const auto& imported=w.curves->committed();
  check(imported.contours.at(0).edgeKind.size()==4&&
        imported.contours.at(1).edgeKind.size()==16,
@@ -8882,10 +8892,31 @@ QJsonObject nativeImportGui199Test(){
        "native GUI saved project not reopened");
  check(serialize(encodeCurves(reopened.curves))==serialize(encodeCurves(imported)),
        "native GUI saved geometry not identical");
+ const auto restored=editorStateForIntegratedProject(reopened);
+ check(restored.layers.count(1)&&restored.layers.count(2)&&
+       !restored.layers.at(1).parametersVerified&&
+       !restored.layers.at(2).parametersVerified,
+       "native GUI v5 ZIP lost unverified source CutIndex metadata");
+ const auto withNative=sim198::withNativeCurves(restored,&reopened.curves);
+ check(withNative.missingLayers==0&&withNative.unverifiedLayerParameters==2,
+       "native GUI preview silently trusted unverified LightBurn settings");
+ // Prior v5 files with Bézier layer IDs but no matching layer definitions must
+ // recover their IDs in memory without rewriting or remapping any curves.
+ const auto historical=buildEditedIntegratedProject(fromDocument(Document{}),imported);
+ const auto repaired=editorStateForIntegratedProject(historical);
+ check(repaired.layers.count(1)&&repaired.layers.count(2)&&
+       !repaired.layers.at(1).parametersVerified&&
+       !repaired.layers.at(2).parametersVerified,
+       "legacy v5 native layer references not repaired safely on open");
+ check(serialize(encodeCurves(historical.curves))==serialize(encodeCurves(imported)),
+       "legacy v5 layer repair changed native geometry");
  const auto original=QFileInfo(file).size();
  check(original==xml.size(),"native GUI modified original LightBurn file");
  return QJsonObject{{"status","PASS"},{"shapes",2},{"native_nodes",int(imported.contours[0].nodes.size()+imported.contours[1].nodes.size())},
-                    {"alaser_v5_zip_roundtrip",true},{"original_lbrn2_unchanged",true},
+                    {"alaser_v5_zip_roundtrip",true},{"layer_ids_preserved",true},
+                    {"unverified_parameters_preserved",true},
+                    {"legacy_missing_layers_repaired_in_memory",true},
+                    {"original_lbrn2_unchanged",true},
                     {"hardware_commands_sent",false}};
 }
 
