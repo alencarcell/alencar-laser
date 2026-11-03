@@ -971,6 +971,8 @@ class QtEditorLab final:public QGraphicsView{
    members.reserve(qsizetype(shapePreviewItems_.size()));
    for(auto* item:shapePreviewItems_)members.append(item);
    shapePreviewGroup_=scene_.createItemGroup(members);
+   // Preserve visual precedence of selected paths over unselected contours.
+   shapePreviewGroup_->setZValue(9);
    shapePreviewGroup_->setAcceptedMouseButtons(Qt::NoButton);
    shapePreviewGroup_->setFlag(QGraphicsItem::ItemIsSelectable,false);
    ++groupedDragStarts_;
