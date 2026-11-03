@@ -13,7 +13,7 @@
 namespace alaser::sim198 {
 struct NativePreview {
  EditorState state;
- std::size_t paths=0,closed=0,open=0,segments=0,missingLayers=0;
+ std::size_t paths=0,closed=0,open=0,segments=0,missingLayers=0,unverifiedLayerParameters=0;
 };
 // Native paths are exact in the saved .alaser. The flattened copy exists
 // ONLY for motion, screen preview and even/odd Fill calculations.
@@ -56,10 +56,16 @@ inline NativePreview withNativeCurves(const EditorState& source,
   poly.nodes.reserve(points.size());
   for(const Pt p:points)poly.nodes.push_back({nextNode++,p});
   out.state.doc.contours.push_back(std::move(poly));
-  // Old v5 files have no per-object layer: they default to layer zero.
-  // An unavailable layer falls back safely without altering the .alaser.
+  // Only the offline preview may substitute a missing layer; the editable
+  // native curve remains on its original CutIndex. Unverified metadata is
+  // counted separately, even after a missing layer has been repaired.
   int assigned=c.layer;
-  if(!source.layers.count(assigned)){++out.missingLayers;assigned=source.layers.begin()->first;}
+  const auto layer=source.layers.find(assigned);
+  if(layer==source.layers.end()){
+   ++out.missingLayers;assigned=source.layers.begin()->first;
+  }else if(!layer->second.parametersVerified){
+   ++out.unverifiedLayerParameters;
+  }
   out.state.objects[nextObject]={assigned,0};
   ++out.paths;out.closed+=c.closed?1:0;out.open+=c.closed?0:1;
   out.segments+=points.size()-(c.closed?0:1);
