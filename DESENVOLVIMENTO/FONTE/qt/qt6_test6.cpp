@@ -9013,6 +9013,29 @@ QJsonObject nativeImportGui199Test(){
  catch(const std::exception&){refused=true;}
  check(refused&&stateText(w.view.editor.state())==before,
        "Native GUI parser failure destroyed unsaved current project");
+ // Nested groups must NOT be silently flattened into editable contours.
+ // Guard the current limitation until native group IDs/transforms are saved.
+ const QString groupedFile=temp.filePath("nested_groups_19_9.lbrn2");
+ const QByteArray groupedXml=R"GROUP(<LightBurnProject>
+<Shape Type="Group"><XForm>1 0 0 1 10 20</XForm><Children>
+<Shape Type="Path" CutIndex="1"><XForm>1 0 0 1 0 0</XForm>
+<VertList>V0 0V10 0V10 10V0 10</VertList>
+<PrimList>LineClosed</PrimList></Shape>
+</Children></Shape></LightBurnProject>)GROUP";
+ QFile groupFixture(groupedFile);
+ check(groupFixture.open(QIODevice::WriteOnly),"nested group fixture not writable");
+ check(groupFixture.write(groupedXml)==groupedXml.size(),
+       "nested group fixture incomplete");
+ groupFixture.close();
+ bool groupRefused=false;
+ try{w.importNativeLightBurn199(groupedFile,false);}
+ catch(const std::exception& ex){
+  groupRefused=QString::fromUtf8(ex.what()).contains("group hierarchy");
+ }
+ check(groupRefused&&stateText(w.view.editor.state())==before,
+       "Native GUI silently flattened groups or replaced unsaved work");
+ check(QFileInfo(groupedFile).size()==groupedXml.size(),
+       "Native GUI changed rejected LightBurn group source");
  w.importNativeLightBurn199(file,false);QApplication::processEvents();
  check(w.view.editor.state().doc.contours.empty(),"native GUI imported polylines instead of native cubics");
  check(w.curves&&w.curves->committed().contours.size()==2,"native GUI curve document mismatch");
@@ -9077,6 +9100,7 @@ QJsonObject nativeImportGui199Test(){
                     {"unverified_parameters_preserved",true},
                     {"legacy_missing_layers_repaired_in_memory",true},
                     {"selection_path_rebuild_is_incremental",true},
+                    {"grouped_lbrn2_rejected_without_data_loss",true},
                     {"original_lbrn2_unchanged",true},
                     {"hardware_commands_sent",false}};
 }
