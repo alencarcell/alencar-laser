@@ -1176,3 +1176,10 @@ Registrar mudanças, testes e pendências.
 - Especificação DESENVOLVIMENTO/ESPECIFICACOES/BENCHMARK_FLUIDEZ_BEZIER_19_9_20261104.md (4c0de44) descreve controles A/B e critérios de aceite. Testes locais deste turno apenas revisão estática do código/refs; sem Qt6 Widgets no ambiente, **COMPILAÇÃO WINDOWS E MEDIÇÃO REAL AINDA PENDENTES**.
 - Próximo passo quando operador voltar: fechar editor, preservar git status, git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030 e executar SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteBezierNativoUI. Se PASS e HEAD incluir novos commits, executar BENCHMARK_BEZIER_REAL_19_9.ps1 (selecionar copia .lbrn2), depois -ModoLegado -SemCompilar com mesmo arquivo. Comparar 3 pares, mesmo DPI/viewport; enviar os dois JSONs. Baseline 496.7 ms de sessao manual não é diretamente comparável com 24 repaints sincronizados.
 - Nenhum arquivo do usuário enviado ao GitHub, nenhum merge na main, APLICATIVO ou instalador atualizado, nenhum comando GRBL/G-code/laser habilitado.
+
+
+## 04/11/2026 — Hotfix PowerShell 5.1 no benchmark real
+- Evidencia do VS Code: git pull --ff-only fez fast-forward ate 0f75953; execucao de SCRIPTS/BENCHMARK_BEZIER_REAL_19_9.ps1 falhou ANTES do benchmark com ParserError: string sem terminador na linha 101, chave esperada para try/finally e bloco incompleto.
+- Causa provavel identificada: caractere Unicode travessao U+2014 em Write-Host de script .ps1 em UTF-8 sem BOM, vulneravel ao parser/decoder do Windows PowerShell 5.1.
+- Hotfix no commit d1eb4cd: todo o script em ASCII (verificacao estatica), mensagem em hifen ASCII e tratamento de JSON de erro sem depender da propriedade error quando ausente. Nenhum codigo de laser, geometria, main, APLICATIVO ou instalador alterado.
+- Novo teste pendente no Windows: atualizar branch preservando git status; validar parser PS 5.1; executar benchmark com copia LightBurn, sem hardware; compartilhar JSON. Nenhum PASS de benchmark real registrado ate agora.
