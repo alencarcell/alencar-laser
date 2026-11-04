@@ -104,7 +104,7 @@ foreach ($f in $fontes) {
   status = $status
   source_report_sha256 = $digest
   source_project_sha256_prefix = $shaOriginal.Substring(0,12).ToUpperInvariant()
-  machine_commands_sent = $false
+  machine_commands_sent = $null
   production_homologated = $false
   manual_validation_pending = $true
  }
@@ -139,6 +139,7 @@ foreach ($f in $fontes) {
     visual_pixels_over8_percent = Num $z 'visual_pixels_over8_percent'
    }
   }
+  $record.machine_commands_sent = $false
   $record.metrics = [ordered]@{
    contours = Num $a 'contours'
    p95_uncached_ms = Num $a 'paint_p95_ms'
@@ -158,6 +159,181 @@ foreach ($f in $fontes) {
  $destino = Join-Path $subdir $name
  if (-not (Test-Path -LiteralPath $destino)) { JsonSeguro $record $destino }
  Write-Host "Registro filtrado: $dia/$name" -ForegroundColor Green
+}
+function Validar-Registro($rec, [string]$nome) {
+ $campos = @('schema','event_id','recorded_utc','version','type','status',
+    'source_report_sha256','source_project_sha256_prefix','machine_commands_sent',
+    'production_homologated','manual_validation_pending','metrics')
+ foreach ($p in $rec.PSObject.Properties.Name) {
+  if ($campos -notcontains $p) { throw "Campo nao permitido em $nome : $p" }
+ }
+ $tip = [string](Campo $rec 'type')
+ if ((Campo $rec 'schema') -ne 'alencar-laser-audit-sanitized-v1' -or
+     @('cache_zoom_validation','cache_ab') -notcontains $tip) {
+  throw "Esquema inesperado em $nome"
+ }
+ $sha = [string](Campo $rec 'source_report_sha256')
+ if ($sha -notmatch '^[a-f0-9]{64}
+$items = @()
+$paths = @()
+foreach ($f in @(Get-ChildItem -LiteralPath $registros -Recurse -File -Filter '*.json')) {
+ $rec = Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json
+ Validar-Registro $rec $f.Name
+ $relative = ($f.FullName.Substring($root.Length + 1) -replace '\\','/')
+ $paths += $relative
+ $items += [pscustomobject][ordered]@{
+  date_utc = [string]$rec.recorded_utc
+  path = $relative
+  event_id = [string]$rec.event_id
+  type = [string]$rec.type
+  status = [string]$rec.status
+ }
+}
+$items = @($items | Sort-Object -Property date_utc, path -Descending)
+$mostRecent = if ($items.Count -gt 0) { $items[0].date_utc } else { $null }
+$index = [ordered]@{
+ schema = 'alencar-laser-audit-index-v1'
+ records_count = $items.Count
+ latest_report_utc = $mostRecent
+ records = $items
+ note = 'Only allowlisted technical metrics; manual production validation is pending.'
+}
+$indexPath = Join-Path $base 'INDICE.json'
+JsonSeguro $index $indexPath
+Write-Host "INDICE preparado: $($items.Count) registros." -ForegroundColor Cyan
+Write-Host 'Originais permanecem em RELATORIOS (ignorados pelo Git).'
+if (-not $Publicar) {
+ Write-Host 'SEM ENVIO: revise AUDITORIA_GITHUB e execute novamente com -Publicar para publicar.' -ForegroundColor Yellow
+ return
+}
+# Publicacao opt-in: nunca inclui arquivos fora da lista restrita.
+$stagedBefore = @(& git -C $root diff --cached --name-only)
+if ($LASTEXITCODE -ne 0 -or $stagedBefore.Count -gt 0) {
+ throw 'Ja ha arquivos staged no Git. Nao misturar commits de auditoria.'
+}
+$remote = (& git -C $root remote get-url --push origin) -join ''
+if ($LASTEXITCODE -ne 0 -or $remote -notmatch '(^|[/:])alencarcell/alencar-laser(\.git)?$') {
+ throw 'Remote origin nao corresponde ao repositorio autorizado.'
+}
+$allow = @($paths + @("$baseRel/INDICE.json"))
+& git -C $root add -- @allow
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao preparar os registros para commit.' }
+$stagedNow = @(& git -C $root diff --cached --name-only)
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao conferir staging.' }
+foreach ($p in $stagedNow) {
+ if ($allow -notcontains $p) { throw "Staging inesperado: $p. Envio suspenso." }
+}
+if ($stagedNow.Count -eq 0) {
+ Write-Host 'Nenhum novo registro para publicar.' -ForegroundColor Green
+ return
+}
+& git -C $root commit -m 'audit: registrar evidencias tecnicas filtradas' -- @stagedNow
+if ($LASTEXITCODE -ne 0) { throw 'Commit falhou; nenhum push executado.' }
+& git -C $root push origin "HEAD:refs/heads/$branchEsperada"
+if ($LASTEXITCODE -ne 0) {
+ throw 'Push falhou. Commit local preservado; confira autenticacao e sincronizacao.'
+}
+Write-Host "PUBLICADO somente $($stagedNow.Count) arquivo(s) de AUDITORIA_GITHUB na branch experimental." -ForegroundColor Green
+ -or
+     (Campo $rec 'event_id') -ne $sha.Substring(0,16) -or
+     [string](Campo $rec 'source_project_sha256_prefix') -notmatch '^[A-F0-9]{12}
+$items = @()
+$paths = @()
+foreach ($f in @(Get-ChildItem -LiteralPath $registros -Recurse -File -Filter '*.json')) {
+ $rec = Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json
+ if ((Campo $rec 'schema') -ne 'alencar-laser-audit-sanitized-v1') {
+  throw "Registro inesperado: $($f.Name). Nenhum push."
+ }
+ $relative = ($f.FullName.Substring($root.Length + 1) -replace '\\','/')
+ $paths += $relative
+ $items += [pscustomobject][ordered]@{
+  date_utc = [string]$rec.recorded_utc
+  path = $relative
+  event_id = [string]$rec.event_id
+  type = [string]$rec.type
+  status = [string]$rec.status
+ }
+}
+$items = @($items | Sort-Object -Property date_utc, path -Descending)
+$mostRecent = if ($items.Count -gt 0) { $items[0].date_utc } else { $null }
+$index = [ordered]@{
+ schema = 'alencar-laser-audit-index-v1'
+ records_count = $items.Count
+ latest_report_utc = $mostRecent
+ records = $items
+ note = 'Only allowlisted technical metrics; manual production validation is pending.'
+}
+$indexPath = Join-Path $base 'INDICE.json'
+JsonSeguro $index $indexPath
+Write-Host "INDICE preparado: $($items.Count) registros." -ForegroundColor Cyan
+Write-Host 'Originais permanecem em RELATORIOS (ignorados pelo Git).'
+if (-not $Publicar) {
+ Write-Host 'SEM ENVIO: revise AUDITORIA_GITHUB e execute novamente com -Publicar para publicar.' -ForegroundColor Yellow
+ return
+}
+# Publicacao opt-in: nunca inclui arquivos fora da lista restrita.
+$stagedBefore = @(& git -C $root diff --cached --name-only)
+if ($LASTEXITCODE -ne 0 -or $stagedBefore.Count -gt 0) {
+ throw 'Ja ha arquivos staged no Git. Nao misturar commits de auditoria.'
+}
+$remote = (& git -C $root remote get-url --push origin) -join ''
+if ($LASTEXITCODE -ne 0 -or $remote -notmatch '(^|[/:])alencarcell/alencar-laser(\.git)?$') {
+ throw 'Remote origin nao corresponde ao repositorio autorizado.'
+}
+$allow = @($paths + @("$baseRel/INDICE.json"))
+& git -C $root add -- @allow
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao preparar os registros para commit.' }
+$stagedNow = @(& git -C $root diff --cached --name-only)
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao conferir staging.' }
+foreach ($p in $stagedNow) {
+ if ($allow -notcontains $p) { throw "Staging inesperado: $p. Envio suspenso." }
+}
+if ($stagedNow.Count -eq 0) {
+ Write-Host 'Nenhum novo registro para publicar.' -ForegroundColor Green
+ return
+}
+& git -C $root commit -m 'audit: registrar evidencias tecnicas filtradas' -- @stagedNow
+if ($LASTEXITCODE -ne 0) { throw 'Commit falhou; nenhum push executado.' }
+& git -C $root push origin "HEAD:refs/heads/$branchEsperada"
+if ($LASTEXITCODE -ne 0) {
+ throw 'Push falhou. Commit local preservado; confira autenticacao e sincronizacao.'
+}
+Write-Host "PUBLICADO somente $($stagedNow.Count) arquivo(s) de AUDITORIA_GITHUB na branch experimental." -ForegroundColor Green
+) {
+  throw "Identidade SHA incorreta em $nome"
+ }
+ if ((Campo $rec 'production_homologated') -ne $false -or
+     (Campo $rec 'manual_validation_pending') -ne $true -or
+     (Campo $rec 'machine_commands_sent') -eq $true) {
+  throw "Registro sem travas de producao em $nome"
+ }
+ $metricas = Campo $rec 'metrics'
+ if ($null -eq $metricas) { throw "Sem metricas: $nome" }
+ $permitidos = if ($tip -eq 'cache_ab') {
+  @('contours','p95_uncached_ms','p95_cached_ms','reduction_percent',
+    'cached_items','cache_estimated_bytes','process_rss_bytes',
+    'visual_pixels_over8_percent','zoom')
+ } else { @('checks_failed_count') }
+ foreach ($p in $metricas.PSObject.Properties.Name) {
+  if ($permitidos -notcontains $p) { throw "Metrica inesperada em $nome : $p" }
+  $v = Campo $metricas $p
+  if ($p -eq 'zoom') {
+   foreach ($z in @($v)) {
+    if ($null -eq $z) { continue }
+    $cols = @('factor','visible_contours','cache_items','p95_uncached_ms',
+       'p95_cached_ms','visual_pixels_over8_percent')
+    foreach ($zp in $z.PSObject.Properties.Name) {
+     if ($cols -notcontains $zp) { throw "Campo zoom inesperado em $nome : $zp" }
+     $n = Campo $z $zp
+     if ($null -ne $n -and $n -isnot [ValueType]) {
+      throw "Valor zoom nao numerico em $nome : $zp"
+     }
+    }
+   }
+  } elseif ($null -ne $v -and $v -isnot [ValueType]) {
+   throw "Metrica nao numerica em $nome : $p"
+  }
+ }
 }
 # Indice gerado apenas a partir dos registros com esquema conhecido.
 $items = @()
