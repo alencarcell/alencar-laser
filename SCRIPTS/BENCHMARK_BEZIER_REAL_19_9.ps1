@@ -123,8 +123,12 @@ try {
  Write-Host "Cache device Qt: $($report.native_device_cache_items) itens; estimativa $($report.native_device_cache_estimated_bytes) bytes"
  if ($AuditarZoom) {
   $report.native_cache_zoom_audit | ForEach-Object {
-   Write-Host ("Zoom {0}x: cache {1} itens, P95 {2} ms, diferenca visual >8 {3}%" -f
-    $_.relative_zoom_factor,$_.cache_items,$_.cached_paint_p95_ms,$_.visual_pixels_over8_percent)
+   Write-Host ("Zoom {0}x: visiveis {1}, pixels da arte {2}, cache {3} itens, P95 sem {4} ms / com {5} ms, diferenca visual >8 {6}%" -f
+    $_.relative_zoom_factor,$_.visible_native_items,$_.native_ink_pixels,$_.cache_items,
+    $_.no_cache_paint_p95_ms,$_.cached_paint_p95_ms,$_.visual_pixels_over8_percent)
+   if (-not $_.cache_performance_comparable) {
+    Write-Warning ("Zoom {0}x nao tem itens em cache: desempenho de cache INCONCLUSIVO nesta escala." -f $_.relative_zoom_factor)
+   }
   }
  }
  Write-Host "Full path builds: $($report.native_full_path_builds_delta) / selective: $($report.native_selective_path_builds_delta)"
