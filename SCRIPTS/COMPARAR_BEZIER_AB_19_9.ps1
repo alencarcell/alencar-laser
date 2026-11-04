@@ -116,6 +116,10 @@ try {
    if ((Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash -ne $initialHash) {
     throw "SHA256 de origem mudou apos o modo $mode"
    }
+   $hiddenP95 = $null
+   if ($data.PSObject.Properties.Name -contains 'paint_without_native_items_p95_ms') {
+    $hiddenP95 = [double]$data.paint_without_native_items_p95_ms
+   }
    $recorded[$mode] = [pscustomobject]@{
     mode = $mode
     source_sha256 = $initialHash
@@ -130,7 +134,7 @@ try {
     paint_p99_ms = [double]$data.paint_p99_ms
     background_p95_ms = [double]$data.background_p95_ms
     foreground_p95_ms = [double]$data.foreground_p95_ms
-    paint_without_native_items_p95_ms = if ($data.PSObject.Properties.Name -contains 'paint_without_native_items_p95_ms') { [double]$data.paint_without_native_items_p95_ms } else { $null }
+    paint_without_native_items_p95_ms = $hiddenP95
     selection_total_ms = [double]$data.selection_total_ms
     selection_cycles = [int]$data.selection_cycles
     native_full_path_builds_delta = [double]$data.native_full_path_builds_delta
