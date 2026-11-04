@@ -1,0 +1,49 @@
+{
+    "schema":  "alencar-laser-audit-sanitized-v1",
+    "event_id":  "73c84bfee8f4c41d",
+    "recorded_utc":  "2026-11-04T19:51:23Z",
+    "version":  "19.9-experimental",
+    "type":  "cache_ab",
+    "status":  "PASS",
+    "source_report_sha256":  "73c84bfee8f4c41d13fb67c7eeec9c0deba750eb9798624aef4796341feb7f8f",
+    "source_project_sha256_prefix":  "0DDD1F465F59",
+    "machine_commands_sent":  false,
+    "production_homologated":  false,
+    "manual_validation_pending":  true,
+    "metrics":  {
+                    "contours":  2134,
+                    "p95_uncached_ms":  553.0985,
+                    "p95_cached_ms":  41.522,
+                    "reduction_percent":  92.49,
+                    "cached_items":  2134,
+                    "cache_estimated_bytes":  656992,
+                    "process_rss_bytes":  114749440,
+                    "visual_pixels_over8_percent":  0,
+                    "zoom":  [
+                                 {
+                                     "factor":  1,
+                                     "visible_contours":  2134,
+                                     "cache_items":  2134,
+                                     "p95_uncached_ms":  554.3377,
+                                     "p95_cached_ms":  40.6418,
+                                     "visual_pixels_over8_percent":  0
+                                 },
+                                 {
+                                     "factor":  2,
+                                     "visible_contours":  2134,
+                                     "cache_items":  2134,
+                                     "p95_uncached_ms":  551.4163,
+                                     "p95_cached_ms":  44.6402,
+                                     "visual_pixels_over8_percent":  0
+                                 },
+                                 {
+                                     "factor":  4,
+                                     "visible_contours":  2134,
+                                     "cache_items":  2133,
+                                     "p95_uncached_ms":  585.6641,
+                                     "p95_cached_ms":  56.0588,
+                                     "visual_pixels_over8_percent":  0
+                                 }
+                             ]
+                }
+}

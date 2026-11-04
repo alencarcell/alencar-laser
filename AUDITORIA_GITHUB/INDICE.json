@@ -1,7 +1,22 @@
 {
-  "schema": "alencar-laser-audit-index-v1",
-  "records_count": 0,
-  "latest_report_utc": null,
-  "records": [],
-  "note": "No local JSON has been published yet. Run SCRIPTS/REGISTRAR_AUDITORIA_GITHUB_19_9.ps1 and explicitly opt in with -Publicar."
+    "schema":  "alencar-laser-audit-index-v1",
+    "records_count":  2,
+    "latest_report_utc":  "2026-11-04T20:27:40Z",
+    "records":  [
+                    {
+                        "date_utc":  "2026-11-04T20:27:40Z",
+                        "path":  "AUDITORIA_GITHUB/REGISTROS/2026-11-04/cache_zoom_validation_4224f067e4316f53.json",
+                        "event_id":  "4224f067e4316f53",
+                        "type":  "cache_zoom_validation",
+                        "status":  "PASS_AUTOMATED_MANUAL_PENDING"
+                    },
+                    {
+                        "date_utc":  "2026-11-04T19:51:23Z",
+                        "path":  "AUDITORIA_GITHUB/REGISTROS/2026-11-04/cache_ab_73c84bfee8f4c41d.json",
+                        "event_id":  "73c84bfee8f4c41d",
+                        "type":  "cache_ab",
+                        "status":  "PASS"
+                    }
+                ],
+    "note":  "Only allowlisted technical metrics; manual production validation is pending."
 }
