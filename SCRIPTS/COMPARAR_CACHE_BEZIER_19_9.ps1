@@ -131,6 +131,14 @@ try {
   if ($zoomWanted -and @($j.native_cache_zoom_audit).Count -ne 3) {
    throw 'Auditoria de zoom nao gerou as tres escalas previstas'
   }
+  if ($zoomWanted) {
+   foreach ($z in $j.native_cache_zoom_audit) {
+    if ([int]$z.visible_native_items -le 0 -or
+        [double]$z.native_ink_pixels -lt 32) {
+     throw ("Zoom {0}x sem arte vetorial suficiente na viewport" -f $z.relative_zoom_factor)
+    }
+   }
+  }
   if ((Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash -ne $sourceHash) {
    throw 'Origem alterada depois do teste'
   }
@@ -164,6 +172,12 @@ try {
  if ($b.native_device_cache_items -lt 1) {
   throw 'Nenhum item recebeu cache. Alterar limites somente apos auditar geometria.'
  }
+ $zoomCacheCoverage = $true
+ if ($AuditarZoom) {
+  foreach ($z in $b.zoom_audit) {
+   if ([double]$z.cache_items -le 0) { $zoomCacheCoverage = $false }
+  }
+ }
  $reduction = if ($a.paint_p95_ms -gt 0) {
   100.0 * ($a.paint_p95_ms - $b.paint_p95_ms) / $a.paint_p95_ms
  } else { 0.0 }
@@ -175,6 +189,8 @@ try {
   no_cache = $a
   device_cache = $b
   paint_p95_reduction_percent = [math]::Round($reduction,2)
+  zoom_cache_coverage_complete = [bool]$zoomCacheCoverage
+  zoom_audit_status = if (-not $AuditarZoom) { 'NOT_RUN' } elseif ($zoomCacheCoverage) { 'MEASURED_VISUAL_REVIEW_PENDING' } else { 'INCONCLUSIVE_NO_CACHE_AT_SOME_ZOOMS' }
   source_intact = $true
   machine_commands_sent = $false
  }
@@ -185,11 +201,15 @@ try {
  Write-Host ("CACHE A/B PASS: paint P95 sem {0:N2} ms; com {1:N2} ms; delta {2:N2}%" -f
     $a.paint_p95_ms,$b.paint_p95_ms,$reduction) -ForegroundColor Green
  Write-Host "Itens cacheados: $($b.native_device_cache_items); RSS (bytes) $($b.rss_bytes_after_benchmark)"
+ if ($AuditarZoom -and -not $zoomCacheCoverage) {
+  Write-Warning 'Cache ausente em pelo menos uma escala; nao homologar a fluidez em todos os zooms.'
+ }
  Write-Host "Diferenca visual (pixels >8): $($b.cache_visual_pixels_over8_percent)% ; max canal $($b.cache_visual_max_channel_difference)"
  if ($AuditarZoom) {
   foreach ($z in $b.zoom_audit) {
-   Write-Host ("Zoom {0}x: itens cache {1}, P95 {2} ms, pixels >8 {3}%, revisar imagem {4}" -f
-     $z.relative_zoom_factor,$z.cache_items,$z.cached_paint_p95_ms,
+   Write-Host ("Zoom {0}x: vetores visiveis {1}, arte pixels {2}, cache itens {3}, P95 sem cache {4} ms / com cache {5} ms, pixels >8 {6}%, revisar {7}" -f
+     $z.relative_zoom_factor,$z.visible_native_items,$z.native_ink_pixels,
+     $z.cache_items,$z.no_cache_paint_p95_ms,$z.cached_paint_p95_ms,
      $z.visual_pixels_over8_percent,$z.requires_visual_review)
   }
  }
