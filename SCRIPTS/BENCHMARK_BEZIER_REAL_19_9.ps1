@@ -13,6 +13,7 @@ param(
  [string]$ArquivoLbrn2 = '',
  [switch]$ModoLegado,
  [switch]$CacheDispositivo,
+ [switch]$AuditarZoom,
  [switch]$SemCompilar
 )
 $ErrorActionPreference = 'Stop'
@@ -21,12 +22,17 @@ $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $envPathBefore = $env:PATH
 $cacheBefore = [Environment]::GetEnvironmentVariable(
     'ALENCAR_NATIVE_DEVICE_CACHE_BENCH_19_9','Process')
+$zoomBefore = [Environment]::GetEnvironmentVariable(
+    'ALENCAR_NATIVE_CACHE_ZOOM_AUDIT_19_9','Process')
 $legacyBefore = [Environment]::GetEnvironmentVariable(
     'ALENCAR_NATIVE_LEGACY_SELECTION_REBUILD_19_9','Process')
 $sessionCopy = ''
 $originalSource = ''
 $originalHash = ''
 try {
+ if ($AuditarZoom -and -not $CacheDispositivo) {
+  throw 'A auditoria de zoom exige -CacheDispositivo; cache normal continua desligado.'
+ }
  if ([string]::IsNullOrWhiteSpace($ArquivoLbrn2)) {
   Add-Type -AssemblyName System.Windows.Forms
   $dialog = New-Object System.Windows.Forms.OpenFileDialog
@@ -73,8 +79,10 @@ try {
  $env:PATH = $runtime + ';' + $envPathBefore
  $env:ALENCAR_NATIVE_LEGACY_SELECTION_REBUILD_19_9 = if ($ModoLegado) { '1' } else { '0' }
  $env:ALENCAR_NATIVE_DEVICE_CACHE_BENCH_19_9 = if ($CacheDispositivo) { '1' } else { '0' }
+ $env:ALENCAR_NATIVE_CACHE_ZOOM_AUDIT_19_9 = if ($AuditarZoom) { '1' } else { '0' }
  $mode = if ($ModoLegado) { 'LEGADO' } else { 'OTIMIZADO' }
  $cacheSuffix = if ($CacheDispositivo) { '-CACHE' } else { '-SEM-CACHE' }
+ if ($AuditarZoom) { $cacheSuffix += '-ZOOM' }
  $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
  $dest = Join-Path $root "RELATORIOS\AUDITORIAS\GITHUB_19_8\BEZIER_PERFORMANCE_19_9\$mode$cacheSuffix-$timestamp"
  New-Item -Path $dest -ItemType Directory -Force | Out-Null
@@ -99,6 +107,12 @@ try {
  if ([bool]$report.native_device_cache_benchmark -ne [bool]$CacheDispositivo) {
   throw 'Modo de cache Qt nao corresponde ao solicitado'
  }
+ if ([bool]$report.native_cache_zoom_audit_enabled -ne [bool]$AuditarZoom) {
+  throw 'Auditoria de zoom Qt nao corresponde ao solicitado'
+ }
+ if ($AuditarZoom -and @($report.native_cache_zoom_audit).Count -ne 3) {
+  throw 'Zoom audit deveria registrar tres escalas'
+ }
  if (-not $report.source_sha256_unchanged -or
      -not $report.geometry_unchanged -or
      $report.machine_commands_sent -or $report.fabrication_enabled) {
@@ -107,6 +121,12 @@ try {
  Write-Host "PASS $mode : $($report.contours) contornos, paint P95 $($report.paint_p95_ms) ms" -ForegroundColor Green
  Write-Host "Selecao: $($report.selection_total_ms) ms / $($report.selection_cycles) ciclos"
  Write-Host "Cache device Qt: $($report.native_device_cache_items) itens; estimativa $($report.native_device_cache_estimated_bytes) bytes"
+ if ($AuditarZoom) {
+  $report.native_cache_zoom_audit | ForEach-Object {
+   Write-Host ("Zoom {0}x: cache {1} itens, P95 {2} ms, diferenca visual >8 {3}%" -f
+    $_.relative_zoom_factor,$_.cache_items,$_.cached_paint_p95_ms,$_.visual_pixels_over8_percent)
+  }
+ }
  Write-Host "Full path builds: $($report.native_full_path_builds_delta) / selective: $($report.native_selective_path_builds_delta)"
  Write-Host "Fases Qt: background P95 $($report.background_p95_ms) ms; foreground P95 $($report.foreground_p95_ms) ms"
  if ($report.PSObject.Properties.Name -contains 'paint_without_native_items_p95_ms') {
@@ -121,6 +141,8 @@ finally {
  $env:PATH = $envPathBefore
  [Environment]::SetEnvironmentVariable(
   'ALENCAR_NATIVE_DEVICE_CACHE_BENCH_19_9',$cacheBefore,'Process')
+ [Environment]::SetEnvironmentVariable(
+  'ALENCAR_NATIVE_CACHE_ZOOM_AUDIT_19_9',$zoomBefore,'Process')
  [Environment]::SetEnvironmentVariable(
   'ALENCAR_NATIVE_LEGACY_SELECTION_REBUILD_19_9',$legacyBefore,'Process')
  if ($originalSource -and $originalHash) {
