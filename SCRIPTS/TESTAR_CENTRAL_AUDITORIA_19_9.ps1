@@ -62,10 +62,25 @@ try {
  $rec | Add-Member -NotePropertyName 'cliente_nome' -NotePropertyValue 'CLIENTE_PRIVADO_XYZ'
  [IO.File]::WriteAllText($recordPath,($rec | ConvertTo-Json -Depth 6),
    [Text.UTF8Encoding]::new($false))
- & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $exe *> $null
- if ($LASTEXITCODE -eq 0) {
+ # O processo filho DEVE falhar por seguranca. Em Windows PowerShell 5.1,
+ # a saida stderr redirecionada via 2>&1 pode virar NativeCommandError
+ # com ErrorActionPreference=Stop e interromper o proprio autoteste.
+ # Start-Process captura os dois fluxos sem converter stderr em excecao.
+ $negativeOut = Join-Path $temp 'NEGATIVE_STDOUT.txt'
+ $negativeErr = Join-Path $temp 'NEGATIVE_STDERR.txt'
+ $child = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+   '-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $exe + '"')
+ ) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $negativeOut -RedirectStandardError $negativeErr
+ if ($child.ExitCode -eq 0) {
   throw 'Falha de seguranca: campo inesperado nao foi rejeitado.'
  }
+ $negativeMessage = (Get-Content -LiteralPath $negativeErr -Raw -ErrorAction SilentlyContinue) +
+   (Get-Content -LiteralPath $negativeOut -Raw -ErrorAction SilentlyContinue)
+ if ($negativeMessage -notmatch 'Campo nao permitido' -or
+     $negativeMessage -notmatch 'cliente_nome') {
+  throw 'Autoteste negativo falhou por motivo diferente do bloqueio de privacidade.'
+ }
+ Write-Host 'PASS: campo proibido foi rejeitado corretamente no teste negativo.' -ForegroundColor Green
  Write-Host 'PASS: parser, fixture, indice, privacidade e rejeicao de campo extra.' -ForegroundColor Green
  Write-Host 'Autoteste isolado: nenhum envio ao GitHub ou uso de maquina laser.' -ForegroundColor Green
 } finally {
