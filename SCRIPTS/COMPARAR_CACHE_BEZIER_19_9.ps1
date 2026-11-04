@@ -14,6 +14,44 @@ $runner = Join-Path $PSScriptRoot 'BENCHMARK_BEZIER_REAL_19_9.ps1'
 $gate = Join-Path $PSScriptRoot 'TESTAR_19_8_WINDOWS.ps1'
 $original = ''
 $sourceHash = ''
+# Streaming, read-only topology guard. The editable native importer does NOT
+# preserve nested groups: reject early instead of silently flattening them.
+function Test-Lbrn2Groups199 {
+ param([string]$FilePath)
+ $settings = New-Object System.Xml.XmlReaderSettings
+ $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+ $settings.XmlResolver = $null
+ $settings.MaxCharactersInDocument = [long](32MB)
+ $xmlReader = [System.Xml.XmlReader]::Create($FilePath,$settings)
+ $shapes = 0
+ $groups = 0
+ $nested = 0
+ $insideShapes = 0
+ $validRoot = $false
+ try {
+  while ($xmlReader.Read()) {
+   if ($xmlReader.NodeType -eq [System.Xml.XmlNodeType]::Element) {
+    if ($xmlReader.Depth -eq 0) {
+     if ($xmlReader.LocalName -ne 'LightBurnProject') {
+      throw 'Nao e um LightBurnProject XML valido'
+     }
+     $validRoot = $true
+    }
+    if ($xmlReader.LocalName -eq 'Shape') {
+     $shapes++
+     if ($insideShapes -gt 0) { $nested++ }
+     if ($xmlReader.GetAttribute('Type') -eq 'Group') { $groups++ }
+     if (-not $xmlReader.IsEmptyElement) { $insideShapes++ }
+    }
+   } elseif ($xmlReader.NodeType -eq [System.Xml.XmlNodeType]::EndElement -and
+             $xmlReader.LocalName -eq 'Shape') {
+    $insideShapes--
+   }
+  }
+ } finally { $xmlReader.Dispose() }
+ if (-not $validRoot) { throw 'LightBurnProject XML nao encontrado' }
+ return [pscustomobject]@{ Shapes=$shapes; Groups=$groups; NestedShapes=$nested }
+}
 try {
  if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) {
   throw "Runner Qt ausente: $runner"
@@ -35,9 +73,20 @@ try {
  }
  $original = (Resolve-Path -LiteralPath $ArquivoLbrn2).Path
  if ([IO.Path]::GetExtension($original) -ine '.lbrn2') { throw 'Extensao invalida' }
- if ((Get-Item -LiteralPath $original).Length -gt 64MB) { throw 'Arquivo muito grande' }
+ $size = (Get-Item -LiteralPath $original).Length
+ if ($size -le 0 -or $size -gt 32MB) {
+  throw 'Arquivo fora do limite de 32 MiB do importador nativo'
+ }
  $sourceHash = (Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash
  Write-Host "Origem protegida: $sourceHash" -ForegroundColor Cyan
+ $topology = Test-Lbrn2Groups199 -FilePath $original
+ Write-Host ("Inspecao offline: {0} Shape(s), {1} Group(s), {2} Shape(s) aninhados" -f
+   $topology.Shapes,$topology.Groups,$topology.NestedShapes) -ForegroundColor Cyan
+ if ($topology.Groups -gt 0 -or $topology.NestedShapes -gt 0) {
+  Write-Warning 'Arquivo com grupos: suporte nativo de hierarquia ainda nao homologado.'
+  throw 'Benchmark cancelado antes de compilar. Selecione a mesma copia .lbrn2 SEM grupos usada no teste anterior; NAO desagrupe o original.'
+ }
+ if ($topology.Shapes -lt 1) { throw 'Projeto LightBurn sem Shape para benchmark' }
  if (-not $SemCompilar) {
   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $gate -SomenteBezierNativoUI
   if ($LASTEXITCODE -ne 0) { throw 'Gate Qt sintetico falhou. Teste nao iniciado.' }
