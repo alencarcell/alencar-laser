@@ -77,7 +77,7 @@ try {
  Copy-Item -LiteralPath $originalSource -Destination $sessionCopy -ErrorAction Stop
  $copyHash = (Get-FileHash -LiteralPath $sessionCopy -Algorithm SHA256).Hash
  if ($copyHash -ne $originalHash) { throw 'Copia temporaria nao confere com origem' }
- Write-Host "Benchmark QT offline — modo $mode" -ForegroundColor Cyan
+ Write-Host "Benchmark QT offline - modo $mode" -ForegroundColor Cyan
  Write-Host "Origem protegida por SHA256: $originalHash"
  Write-Host 'Nenhuma conexao com laser sera iniciada.' -ForegroundColor Yellow
  & $exe --native-paint-bench-19-9-test $sessionCopy $dest
@@ -88,7 +88,8 @@ try {
  }
  $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
  if ($exitCode -ne 0 -or $report.status -ne 'PASS') {
-  throw "Benchmark falhou (exit $exitCode): $($report.error)"
+  $reason = if ($report.PSObject.Properties.Name -contains 'error') { $report.error } else { 'sem detalhe no JSON' }
+  throw "Benchmark falhou (exit $exitCode): $reason"
  }
  if (-not $report.source_sha256_unchanged -or
      -not $report.geometry_unchanged -or
