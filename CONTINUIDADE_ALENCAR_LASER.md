@@ -1242,3 +1242,14 @@ Registrar mudanças, testes e pendências.
 - Hotfix 9e7d142: PowerShell mostra visibilidade, arte em pixels, P95 com/sem cache e alerta quando nenhuma curva foi cacheada. Hotfix a36e07b e bccc2f7: comparador reclassifica zoom sem cache como INCONCLUSIVE, preserva SHA e impede suposta homologacao apenas por P95 baixo.
 - Proximo gate: preservar git status, atualizar branch experimental somente se seguro, fechar editor e desconectar laser, rodar `powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\COMPARAR_CACHE_BEZIER_19_9.ps1 -AuditarZoom` usando mesma copia LightBurn. Se zoom 2x/4x nao possuir arte efetivamente visivel, teste deve falhar explicitamente. Se visivel mas cache=0, teste nao deve alegar ganho.
 - Tudo continua experimental na PR #13: sem merge para main, APLICATIVO, instalador, controle fisico. Eficiencia de zoom e qualidade real permanecem pendentes.
+
+
+## 04/11/2026 — Central de Auditoria GitHub filtrada (Issue #20)
+- Objetivo aprovado pelo usuario: registrar evidencias tecnicas de testes Windows no repositorio sem depender de prints, preservando a privacidade e os originais.
+- Infraestrutura adicionada somente na branch experimental \`fix/curvas-tesoura-preflight-19-8-20261030\`:
+  - \`SCRIPTS/REGISTRAR_AUDITORIA_GITHUB_19_9.ps1\` prepara JSON filtrado de dois formatos conhecidos: \`AUDITORIA_CACHE_ZOOM_19_9_*.json\` e \`COMPARACAO_CACHE_19_9_*.json\`. Usa whitelist e verifica SHA de relatorio, identifica apenas prefixo da origem e nunca copia nomes/caminhos, JSON completos, projetos, logs ou fotos. Por padrao nao envia; \`-Publicar\` exige acao explicita e faz commit/push somente de \`AUDITORIA_GITHUB/\`.
+  - \`SCRIPTS/TESTAR_CENTRAL_AUDITORIA_19_9.ps1\` autoteste offline com repo Git temporario, fixture, parser, indice, verificacao de privacidade e rejeicao de campo inesperado. AINDA NAO EXECUTADO NO WINDOWS.
+  - \`AUDITORIA_GITHUB/README.md\` com fluxo e salvaguardas; \`AUDITORIA_GITHUB/INDICE.json\` com ZERO registros ate coleta no PC.
+- \`RELATORIOS/\` permanece ignorada pelo Git; o script nao habilita laser, nao altera main/APLICATIVO/instalador e nao implica homologacao. Primeiro executar o autoteste em Windows; depois preparar, inspecionar e publicar separadamente apenas os dados filtrados.
+- Entrada de continuidade para outros chats: \`AUDITORIA_GITHUB/README.md\`, \`AUDITORIA_GITHUB/INDICE.json\`, Issue #20 e Issue #18 (benchmark Qt). O registro no GitHub ate aqui e codigo/documentacao, nao uma prova de envio dos JSON reais.
+- Comandos Windows seguros, a partir de \`C:\ProjetoAlencarLaser\` e apos \`git status --short\`: \`git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030\`; \`powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\TESTAR_CENTRAL_AUDITORIA_19_9.ps1"\`; apos PASS, \`powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\REGISTRAR_AUDITORIA_GITHUB_19_9.ps1"\`. Publicacao opcional somente apos revisao usando \`-Publicar\`.
