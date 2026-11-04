@@ -178,6 +178,11 @@ try {
    if ([double]$z.cache_items -le 0) { $zoomCacheCoverage = $false }
   }
  }
+ $zoomStatus = 'NOT_RUN'
+ if ($AuditarZoom) {
+  if ($zoomCacheCoverage) { $zoomStatus = 'MEASURED_VISUAL_REVIEW_PENDING' }
+  else { $zoomStatus = 'INCONCLUSIVE_NO_CACHE_AT_SOME_ZOOMS' }
+ }
  $reduction = if ($a.paint_p95_ms -gt 0) {
   100.0 * ($a.paint_p95_ms - $b.paint_p95_ms) / $a.paint_p95_ms
  } else { 0.0 }
@@ -190,7 +195,7 @@ try {
   device_cache = $b
   paint_p95_reduction_percent = [math]::Round($reduction,2)
   zoom_cache_coverage_complete = [bool]$zoomCacheCoverage
-  zoom_audit_status = if (-not $AuditarZoom) { 'NOT_RUN' } elseif ($zoomCacheCoverage) { 'MEASURED_VISUAL_REVIEW_PENDING' } else { 'INCONCLUSIVE_NO_CACHE_AT_SOME_ZOOMS' }
+  zoom_audit_status = $zoomStatus
   source_intact = $true
   machine_commands_sent = $false
  }
