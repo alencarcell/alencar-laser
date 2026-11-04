@@ -625,6 +625,16 @@ class QtEditorLab final:public QGraphicsView{
   }catch(const std::exception& ex){if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));}
  }
 
+ // RAII covers early returns from drawForeground; measurements remain local.
+ struct PaintPhaseProbe199 {
+  QElapsedTimer timer;
+  std::vector<double>& samples;
+  explicit PaintPhaseProbe199(std::vector<double>& target):samples(target){timer.start();}
+  ~PaintPhaseProbe199(){
+   if(samples.size()>=10000)samples.erase(samples.begin(),samples.begin()+5000);
+   samples.push_back(timer.nsecsElapsed()/1e6);
+  }
+ };
  QElapsedTimer clock_;qint64 pendingInput_=-1;
  double nativePxPerMm()const{
   auto m=viewportTransform();return std::max(1e-9,std::min(
@@ -632,6 +642,7 @@ class QtEditorLab final:public QGraphicsView{
  }
  void updateNativePaths(bool all){
   if(!nativeSession_)return;
+  QElapsedTimer nativePathProfiler;nativePathProfiler.start();
   auto selectedKey=nativeSession_->selected();
   // Durante drag, apenas o item ativo recebe setPath; selecao troca estilo
   // somente do item anterior/novo, nunca dos 575 outros contornos.
@@ -654,6 +665,8 @@ class QtEditorLab final:public QGraphicsView{
   }
   nativeStyledKey_=selectedKey;
   if(all||selectionChanged)viewport()->update();
+  sample(all?nativeFullRefreshMs:nativeSelectiveRefreshMs,
+         nativePathProfiler.nsecsElapsed()/1e6);
  }
 
  std::vector<int> expandedSelection()const{
@@ -1206,6 +1219,7 @@ public:
  Editor editor;
  std::set<int> selected;
  std::vector<double> paintMs,inputToPaintMs,hitTestMs,styleApplyMs,rebuildMs,transformPreviewMs,wheelMs;
+ std::vector<double> foregroundMs,backgroundMs,nativeFullRefreshMs,nativeSelectiveRefreshMs;
  static void sample(std::vector<double>& measurements,double duration){
   if(measurements.size()>=10000)measurements.erase(measurements.begin(),measurements.begin()+5000);
   measurements.push_back(duration);
@@ -1461,6 +1475,7 @@ public:
  }
 protected:
  void drawBackground(QPainter* painter,const QRectF& exposed) override{
+  PaintPhaseProbe199 phase(backgroundMs);
   QGraphicsView::drawBackground(painter,exposed);
   if(!workspaceGuides_)return;
   painter->save();
@@ -1881,6 +1896,7 @@ protected:
   if(pendingInput_>=0){sample(inputToPaintMs,(clock_.nsecsElapsed()-pendingInput_)/1e6);pendingInput_=-1;}
  }
  void drawForeground(QPainter* p,const QRectF& exposed)override{
+  PaintPhaseProbe199 phase(foregroundMs);
   // QGraphicsPathItem normalizes a move-only path to empty. Draw isolated
   // anchors separately while keeping canonical path equality exact.
   p->save();p->resetTransform();
@@ -2964,6 +2980,13 @@ public:
    {"performance",QJsonObject{{"render_rebuild_count",double(view.fullRebuilds)},
       {"native_full_path_builds",double(view.nativeFullPathBuilds())},
       {"native_selective_path_builds",double(view.nativeSelectivePathBuilds())},
+      {"native_full_refresh_samples",int(view.nativeFullRefreshMs.size())},
+      {"native_full_refresh_p95_ms",percentile(view.nativeFullRefreshMs,.95)},
+      {"native_selective_refresh_samples",int(view.nativeSelectiveRefreshMs.size())},
+      {"native_selective_refresh_p95_ms",percentile(view.nativeSelectiveRefreshMs,.95)},
+      {"background_p95_ms",percentile(view.backgroundMs,.95)},
+      {"foreground_p95_ms",percentile(view.foregroundMs,.95)},
+      {"foreground_samples",int(view.foregroundMs.size())},
       {"grouped_drag_starts",view.groupedDragStarts()},
       {"grouped_drag_frame_updates",view.groupedDragFrameUpdates()},
       {"grouped_transform_starts",view.groupedTransformStarts()},
