@@ -9278,6 +9278,13 @@ QJsonObject nativePaintBench199(const QString& source){
    sourceAfter.readAll(),QCryptographicHash::Sha256)==originalHash;
  sourceAfter.close();
  check(originalPreserved,"Bezier benchmark source file was modified");
+ quint64 rssBytes=0;
+#ifdef Q_OS_WIN
+ PROCESS_MEMORY_COUNTERS_EX memory{};
+ if(GetProcessMemoryInfo(GetCurrentProcess(),
+    reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),sizeof(memory)))
+   rssBytes=quint64(memory.WorkingSetSize);
+#endif
  return QJsonObject{
   {"status","PASS"},{"experiment","native-bezier-real-paint-19.9"},
   {"contours",contourCount},{"paint_samples",nativePaintSamples},
@@ -9288,6 +9295,7 @@ QJsonObject nativePaintBench199(const QString& source){
   {"native_device_cache_benchmark",deviceCacheBenchmark199},
   {"native_device_cache_items",double(v.nativeDeviceCacheItemsForBenchmark199())},
   {"native_device_cache_estimated_bytes",double(v.nativeDeviceCacheBudgetEstimateForBenchmark199())},
+  {"rss_bytes_after_benchmark",double(rssBytes)},
   {"background_p95_ms",backgroundP95},
   {"foreground_p95_ms",foregroundP95},
   {"selection_cycles",kSelectionCycles},
