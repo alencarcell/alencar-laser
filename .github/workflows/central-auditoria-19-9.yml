@@ -1,0 +1,21 @@
+name: "Alencar Laser — auditoria filtrada (offline)"
+on:
+  push:
+    branches:
+      - fix/curvas-tesoura-preflight-19-8-20261030
+    paths:
+      - "SCRIPTS/REGISTRAR_AUDITORIA_GITHUB_19_9.ps1"
+      - "SCRIPTS/TESTAR_CENTRAL_AUDITORIA_19_9.ps1"
+      - ".github/workflows/central-auditoria-19-9.yml"
+  workflow_dispatch:
+jobs:
+  audit-sanitization:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Validar parser PowerShell 5.1 e sanitizacao em repo temporario"
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\TESTAR_CENTRAL_AUDITORIA_19_9.ps1"
