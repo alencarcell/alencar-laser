@@ -1,0 +1,7 @@
+{
+  "schema": "alencar-laser-audit-index-v1",
+  "records_count": 0,
+  "latest_report_utc": null,
+  "records": [],
+  "note": "No local JSON has been published yet. Run SCRIPTS/REGISTRAR_AUDITORIA_GITHUB_19_9.ps1 and explicitly opt in with -Publicar."
+}
