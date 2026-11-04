@@ -8,7 +8,8 @@ All user geometry remains local; no controller, GRBL or laser commands.
 [CmdletBinding()]
 param(
  [string]$ArquivoLbrn2 = '',
- [ValidateRange(1,5)][int]$Repeticoes = 1
+ [ValidateRange(1,5)][int]$Repeticoes = 1,
+ [switch]$SemCompilar
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -45,6 +46,25 @@ try {
   throw 'Origem fora do limite de 64 MiB'
  }
  Write-Host "Fonte A/B fixada. SHA256: $initialHash" -ForegroundColor Cyan
+ if (-not $SemCompilar) {
+  $gate = Join-Path $PSScriptRoot 'TESTAR_19_8_WINDOWS.ps1'
+  if (-not (Test-Path -LiteralPath $gate -PathType Leaf)) {
+   throw "Gate de compilacao nao encontrado: $gate"
+  }
+  $previousLegacy = [Environment]::GetEnvironmentVariable(
+      'ALENCAR_NATIVE_LEGACY_SELECTION_REBUILD_19_9','Process')
+  try {
+   $env:ALENCAR_NATIVE_LEGACY_SELECTION_REBUILD_19_9 = '0'
+   & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $gate -SomenteBezierNativoUI
+   if ($LASTEXITCODE -ne 0) {
+    throw "Compilacao/teste sintetico falhou (codigo $LASTEXITCODE)"
+   }
+  }
+  finally {
+   [Environment]::SetEnvironmentVariable(
+     'ALENCAR_NATIVE_LEGACY_SELECTION_REBUILD_19_9',$previousLegacy,'Process')
+  }
+ }
  $allPairs = New-Object System.Collections.Generic.List[object]
  $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
  $rootReports = Join-Path $root 'RELATORIOS\AUDITORIAS\GITHUB_19_8\BEZIER_PERFORMANCE_19_9'
@@ -108,6 +128,9 @@ try {
     paint_p50_ms = [double]$data.paint_p50_ms
     paint_p95_ms = [double]$data.paint_p95_ms
     paint_p99_ms = [double]$data.paint_p99_ms
+    background_p95_ms = [double]$data.background_p95_ms
+    foreground_p95_ms = [double]$data.foreground_p95_ms
+    paint_without_native_items_p95_ms = if ($data.PSObject.Properties.Name -contains 'paint_without_native_items_p95_ms') { [double]$data.paint_without_native_items_p95_ms } else { $null }
     selection_total_ms = [double]$data.selection_total_ms
     selection_cycles = [int]$data.selection_cycles
     native_full_path_builds_delta = [double]$data.native_full_path_builds_delta
@@ -143,8 +166,13 @@ try {
     selection_time_reduction_percent = [math]::Round($selectionSaved,2)
     paint_p95_reduction_percent = [math]::Round($paintSaved,2)
   })
-  Write-Host ("PAR {0} PASS: selecao {1:N1}% menor; pintura P95 {2:N1}% menor" -f
-              $round,$selectionSaved,$paintSaved) -ForegroundColor Green
+  Write-Host ("PAR {0} PASS: selecao otimizada {1:N2} ms vs legado {2:N2} ms (reducao {3:N2}%); pintura P95 otimizada {4:N2} ms vs legado {5:N2} ms (reducao {6:N2}%)" -f
+              $round,$a.selection_total_ms,$b.selection_total_ms,$selectionSaved,
+              $a.paint_p95_ms,$b.paint_p95_ms,$paintSaved) -ForegroundColor Green
+  if ($null -ne $a.paint_without_native_items_p95_ms) {
+   Write-Host ("PAR {0} viewport sem curvas: otimizado {1:N2} ms; legado {2:N2} ms" -f
+                $round,$a.paint_without_native_items_p95_ms,$b.paint_without_native_items_p95_ms)
+  }
  }
  $result = [pscustomobject]@{
   status = 'PASS'
