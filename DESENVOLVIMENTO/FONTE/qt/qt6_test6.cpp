@@ -339,6 +339,8 @@ class QtEditorLab final:public QGraphicsView{
  // No paths, coordinates, or project data leave the local process.
  quint64 nativeFullPathBuilds_=0,nativeSelectivePathBuilds_=0;
  quint64 nativeSelectionLocalRepaints_=0,nativeSelectionFullRepaints_=0;
+ // Benchmark-only cache experiment. Never enabled in production/editor by default.
+ quint64 nativeDeviceCacheItems199_=0,nativeDeviceCacheEstimateBytes199_=0;
  const bool nativeLegacyFullViewportOnSelect_=
    qEnvironmentVariable("ALENCAR_NATIVE_LEGACY_FULL_VIEWPORT_ON_SELECT_19_9")=="1";
  // A/B rollback: only pure-selection operations rebuild all native paths
@@ -1322,6 +1324,41 @@ public:
  void setNativeItemsVisibleForBenchmark199(bool visible){
   for(auto& [key,item]:nativeItems_){(void)key;item->setVisible(visible);}
   viewport()->update();
+ }
+ // Opt-in, read-only BENCHMARK only. Qt DeviceCoordinateCache recalculates
+ // at display resolution on zoom; it does NOT modify canonical Bezier paths.
+ // Budget is an estimate; Qt may allocate more. Keep item bounds conservative.
+ void setNativeDeviceCacheForBenchmark199(bool enabled){
+  nativeDeviceCacheItems199_=0;nativeDeviceCacheEstimateBytes199_=0;
+  for(auto& [key,item]:nativeItems_){(void)key;
+   if(item->cacheMode()!=QGraphicsItem::NoCache)
+    item->setCacheMode(QGraphicsItem::NoCache);
+  }
+  if(!enabled)return;
+  constexpr quint64 kCacheBudgetBytes=24ULL*1024*1024;
+  constexpr double kMaxItemSidePx=256.;
+  const auto tx=viewportTransform();
+  const double dpr=viewport()->devicePixelRatioF();
+  const QRectF viewportPx(viewport()->rect());
+  for(auto& [key,item]:nativeItems_){
+   if(nativeSession_&&nativeSession_->selected()==key)continue;
+   const QRectF bbox=tx.mapRect(item->sceneBoundingRect());
+   if(!bbox.intersects(viewportPx))continue;
+   const double w=std::ceil(std::abs(bbox.width())*dpr+6.0);
+   const double h=std::ceil(std::abs(bbox.height())*dpr+6.0);
+   if(!std::isfinite(w)||!std::isfinite(h)||w<1||h<1||
+      w>kMaxItemSidePx||h>kMaxItemSidePx)continue;
+   const quint64 estimated=quint64(w*h)*4;
+   if(estimated>kCacheBudgetBytes-nativeDeviceCacheEstimateBytes199_)continue;
+   item->setCacheMode(QGraphicsItem::DeviceCoordinateCache);
+   nativeDeviceCacheEstimateBytes199_+=estimated;
+   ++nativeDeviceCacheItems199_;
+  }
+  viewport()->update();
+ }
+ quint64 nativeDeviceCacheItemsForBenchmark199()const{return nativeDeviceCacheItems199_;}
+ quint64 nativeDeviceCacheBudgetEstimateForBenchmark199()const{
+  return nativeDeviceCacheEstimateBytes199_;
  }
  // Interface somente-leitura para verificar desenho da moldura em teste.
  std::optional<QRectF> selectionPreviewRect()const{return selectionDisplayBounds();}
@@ -9170,6 +9207,10 @@ QJsonObject nativePaintBench199(const QString& source){
  // Fixed workstation reference frame; record actual viewport and DPR.
  v.fitInView(QRectF(0,0,400,400),Qt::KeepAspectRatio);
  QApplication::processEvents();
+ const bool deviceCacheBenchmark199=
+   qEnvironmentVariable("ALENCAR_NATIVE_DEVICE_CACHE_BENCH_19_9")=="1";
+ v.setNativeDeviceCacheForBenchmark199(deviceCacheBenchmark199);
+ QApplication::processEvents();
 
  // Force complete paint frames after warmup to isolate draw time from load.
  for(int i=0;i<3;++i){v.viewport()->repaint();QApplication::processEvents();}
@@ -9244,6 +9285,9 @@ QJsonObject nativePaintBench199(const QString& source){
   {"paint_p99_ms",paintP99},
   {"paint_without_native_items_p95_ms",paintWithoutNativeP95},
   {"paint_without_native_items_samples",kWithoutNativeFrames},
+  {"native_device_cache_benchmark",deviceCacheBenchmark199},
+  {"native_device_cache_items",double(v.nativeDeviceCacheItemsForBenchmark199())},
+  {"native_device_cache_estimated_bytes",double(v.nativeDeviceCacheBudgetEstimateForBenchmark199())},
   {"background_p95_ms",backgroundP95},
   {"foreground_p95_ms",foregroundP95},
   {"selection_cycles",kSelectionCycles},
