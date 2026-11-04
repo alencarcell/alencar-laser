@@ -99,6 +99,10 @@ try {
  Write-Host "PASS $mode : $($report.contours) contornos, paint P95 $($report.paint_p95_ms) ms" -ForegroundColor Green
  Write-Host "Selecao: $($report.selection_total_ms) ms / $($report.selection_cycles) ciclos"
  Write-Host "Full path builds: $($report.native_full_path_builds_delta) / selective: $($report.native_selective_path_builds_delta)"
+ Write-Host "Fases Qt: background P95 $($report.background_p95_ms) ms; foreground P95 $($report.foreground_p95_ms) ms"
+ if ($report.PSObject.Properties.Name -contains 'paint_without_native_items_p95_ms') {
+  Write-Host "Sem itens Bezier visiveis: paint P95 $($report.paint_without_native_items_p95_ms) ms"
+ }
  Write-Host "JSON de diagnostico: $reportPath"
 }
 finally {
