@@ -9193,6 +9193,9 @@ QJsonObject nativePaintBench199(const QString& source){
  const Key firstKey=w.curves->committed().contours.front().key;
  const quint64 fullStart=v.nativeFullPathBuilds();
  const quint64 selectiveStart=v.nativeSelectivePathBuilds();
+ const quint64 localRepaintStart=v.nativeSelectionLocalRepaints();
+ const quint64 fullRepaintStart=v.nativeSelectionFullRepaints();
+ const size_t paintBBoxStart=v.viewportPaintBBoxFractions.size();
  QElapsedTimer selectionTimer;selectionTimer.start();
  constexpr int kSelectionCycles=12;
  for(int i=0;i<kSelectionCycles;++i){
@@ -9202,6 +9205,10 @@ QJsonObject nativePaintBench199(const QString& source){
   QApplication::processEvents();
  }
  const double selectionTotalMs=selectionTimer.nsecsElapsed()/1e6;
+ const auto pixelBboxStart=v.viewportPaintBBoxFractions.begin()+
+   std::min(paintBBoxStart,v.viewportPaintBBoxFractions.size());
+ const std::vector<double> selectionPaintBboxRatios(
+   pixelBboxStart,v.viewportPaintBBoxFractions.end());
  check(serialize(encodeCurves(w.curves->committed()))==unchangedCurves,
        "Bezier benchmark changed canonical geometry during selection");
  // Isolate baseline Qt viewport/scene/background/foreground cost by hiding
@@ -9243,7 +9250,12 @@ QJsonObject nativePaintBench199(const QString& source){
   {"selection_total_ms",selectionTotalMs},
   {"native_full_path_builds_delta",double(v.nativeFullPathBuilds()-fullStart)},
   {"native_selective_path_builds_delta",double(v.nativeSelectivePathBuilds()-selectiveStart)},
+  {"native_local_repaint_requests_delta",double(v.nativeSelectionLocalRepaints()-localRepaintStart)},
+  {"native_full_repaint_requests_delta",double(v.nativeSelectionFullRepaints()-fullRepaintStart)},
+  {"selection_paint_events",int(selectionPaintBboxRatios.size())},
+  {"selection_viewport_paint_bbox_fraction_p95",percentile(selectionPaintBboxRatios,.95)},
   {"legacy_selection_rebuild",v.nativeLegacySelectionRebuild()},
+  {"legacy_full_viewport_on_select",v.nativeLegacyFullViewportOnSelect()},
   {"viewport_width_px",v.viewport()->width()},
   {"viewport_height_px",v.viewport()->height()},
   {"dpr",v.viewport()->devicePixelRatioF()},
