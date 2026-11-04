@@ -1273,6 +1273,12 @@ public:
  quint64 nativeFullPathBuilds()const{return nativeFullPathBuilds_;}
  quint64 nativeSelectivePathBuilds()const{return nativeSelectivePathBuilds_;}
  bool nativeLegacySelectionRebuild()const{return nativeLegacySelectionRebuild_;}
+ // Benchmark-only: temporarily hide scene graphics items without touching
+ // CurveDocument, layers, canvas transforms, history or original files.
+ void setNativeItemsVisibleForBenchmark199(bool visible){
+  for(auto& [key,item]:nativeItems_){(void)key;item->setVisible(visible);}
+  viewport()->update();
+ }
  // Interface somente-leitura para verificar desenho da moldura em teste.
  std::optional<QRectF> selectionPreviewRect()const{return selectionDisplayBounds();}
  // Test-only and UI read access to the oriented frame, not serialized in .alaser.
@@ -9142,6 +9148,24 @@ QJsonObject nativePaintBench199(const QString& source){
  const double selectionTotalMs=selectionTimer.nsecsElapsed()/1e6;
  check(serialize(encodeCurves(w.curves->committed()))==unchangedCurves,
        "Bezier benchmark changed canonical geometry during selection");
+ // Isolate baseline Qt viewport/scene/background/foreground cost by hiding
+ // ONLY the native path items in this temporary off-line benchmark window.
+ // Re-show them before leaving the routine. No geometry data is modified.
+ v.setNativeItemsVisibleForBenchmark199(false);
+ for(int i=0;i<3;++i){v.viewport()->repaint();QApplication::processEvents();}
+ v.paintMs.clear();
+ constexpr int kWithoutNativeFrames=12;
+ for(int i=0;i<kWithoutNativeFrames;++i){
+  v.viewport()->repaint();QApplication::processEvents();
+ }
+ check(v.paintMs.size()>=kWithoutNativeFrames,
+       "Bezier benchmark did not measure hidden-native viewport");
+ const double paintWithoutNativeP95=percentile(v.paintMs,.95);
+ v.setNativeItemsVisibleForBenchmark199(true);
+ QApplication::processEvents();
+ check(v.nativeItemCount()==size_t(contourCount)&&
+       serialize(encodeCurves(w.curves->committed()))==unchangedCurves,
+       "Hidden-native benchmark changed source geometry or item ownership");
 
  QFile sourceAfter(source);
  check(sourceAfter.open(QIODevice::ReadOnly),
@@ -9155,6 +9179,8 @@ QJsonObject nativePaintBench199(const QString& source){
   {"contours",contourCount},{"paint_samples",int(v.paintMs.size())},
   {"paint_p50_ms",paintP50},{"paint_p95_ms",paintP95},
   {"paint_p99_ms",paintP99},
+  {"paint_without_native_items_p95_ms",paintWithoutNativeP95},
+  {"paint_without_native_items_samples",kWithoutNativeFrames},
   {"background_p95_ms",backgroundP95},
   {"foreground_p95_ms",foregroundP95},
   {"selection_cycles",kSelectionCycles},
