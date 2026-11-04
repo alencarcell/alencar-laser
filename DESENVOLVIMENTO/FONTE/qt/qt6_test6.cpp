@@ -335,6 +335,9 @@ class QtEditorLab final:public QGraphicsView{
  std::map<Key,QGraphicsPathItem*> nativeItems_;
  std::optional<CurveHit> nativeSelectedPart_;
  std::optional<Key> nativeStyledKey_;
+ // Diagnostics only: count QPainterPath constructions, not scene repaints.
+ // No paths, coordinates, or project data leave the local process.
+ quint64 nativeFullPathBuilds_=0,nativeSelectivePathBuilds_=0;
  bool nativePressing_=false;
  bool middlePanning_=false;
  QPointF middlePanLast_{};
@@ -637,7 +640,11 @@ class QtEditorLab final:public QGraphicsView{
    auto it=nativeItems_.find(c.key);if(it==nativeItems_.end())continue;
    const bool selected=selectedKey&&*selectedKey==c.key;
    const bool wasSelected=nativeStyledKey_&&*nativeStyledKey_==c.key;
-   if(all||selected)it->second->setPath(nativeCurvePath(c));
+   if(all||selected){
+    it->second->setPath(nativeCurvePath(c));
+    if(all)++nativeFullPathBuilds_;
+    else ++nativeSelectivePathBuilds_;
+   }
    if(all||(selectionChanged&&(selected||wasSelected))){
     QPen pen(selected?QColor(239,109,25):QColor(71,91,105));
     pen.setCosmetic(true);pen.setWidthF(selected?2.0:1.2);
@@ -1143,7 +1150,8 @@ private:
    const auto hits=nativeSession_->pickEdges(click,zoom,dpr,6);
    if(!hits.empty()&&nativeSession_->startContourMove(hits.front().key,click)){
     nativeSelectedPart_.reset();nativeContourPressing_=true;
-    updateNativePaths(true);if(stateChanged)stateChanged();
+    // Mouse press only changes selection; geometry is still untouched.
+    updateNativePaths(false);if(stateChanged)stateChanged();
    }
    e->accept();return;
   }
@@ -1187,7 +1195,9 @@ private:
   }else{
    nativeSession_->select(hit.key);nativeSelectedPart_.reset();
   }
-  updateNativePaths(true);if(stateChanged)stateChanged();e->accept();
+  // At most the selected contour changed when inserting an anchor.
+  // Pure selection never rebuilds all 2,134 native QPainterPaths.
+  updateNativePaths(false);if(stateChanged)stateChanged();e->accept();
  }
 
 public:
@@ -1239,6 +1249,8 @@ public:
   return nativeSelectedPart_->nodeId;
  }
  size_t nativeItemCount()const{return nativeItems_.size();}
+ quint64 nativeFullPathBuilds()const{return nativeFullPathBuilds_;}
+ quint64 nativeSelectivePathBuilds()const{return nativeSelectivePathBuilds_;}
  // Interface somente-leitura para verificar desenho da moldura em teste.
  std::optional<QRectF> selectionPreviewRect()const{return selectionDisplayBounds();}
  // Test-only and UI read access to the oriented frame, not serialized in .alaser.
@@ -1284,7 +1296,8 @@ public:
  void nativeLayerChanged(){
   if(!nativeSession_)return;
   lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
-  updateNativePaths(true);
+  // Layer selection changes metadata, not the geometry of every path.
+  updateNativePaths(false);
   if(stateChanged)stateChanged();
  }
  bool nativeModeActive()const{return nativeMode_;}
@@ -1308,7 +1321,7 @@ public:
   if(startMove){
    nativeContourPressing_=nativeSession_->startContourMove(matches.front().key,click);
   }
-  updateNativePaths(true);
+  updateNativePaths(false);
   if(stateChanged)stateChanged();
   return true;
  }
@@ -1329,7 +1342,8 @@ public:
   clearScissorHover(); // Remove orange preview together with actual edge.
   // Remain in Scissors tool, do not silently switch into selection.
   nativeMode_=false;nativeEditHandles_=false;
-  createNativeItems();updateNativePaths(true);
+  // createNativeItems already builds and styles every remaining path once.
+  createNativeItems();
   lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
   if(diagnosticEvent)diagnosticEvent("bezier_contour_scissor_cut",1);
   if(scissorDetail)scissorDetail("cut_native",cutKey.object,cutEdge);
@@ -1768,7 +1782,7 @@ public:
    rasterRect_=rasterStartRect_;
    rasterDragging_=rasterResizing_=false;updateRasterVisual();
   }
-  if(nativeContourPressing_&&nativeSession_){nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(true);}
+  if(nativeContourPressing_&&nativeSession_){nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(false);}
   if(nativePressing_&&nativeSession_){nativeSession_->cancel();nativePressing_=false;updateNativePaths(false);}
   if(shapeDragging_)clearShapePreview();
   if(transformDragging_)cancelSelectionTransform();
@@ -2017,7 +2031,7 @@ void mousePressEvent(QMouseEvent* e)override{
     }
     nativeMode_=false;
     nativeSession_->clearSelection();
-    updateNativePaths(true);
+    updateNativePaths(false);
    }else if(tool==Tool::Select&&nativeEditHandles_){
     // A click away from native edges/handles returns to ordinary selection.
     const Pt at=fromQt(mapToScene(e->position().toPoint()));
@@ -2028,7 +2042,7 @@ void mousePressEvent(QMouseEvent* e)override{
       at,nativePxPerMm(),viewport()->devicePixelRatioF(),6);
     if(part||!hits.empty()){nativeMousePress(e);return;}
     nativeMode_=false;nativeEditHandles_=false;
-    nativeSession_->clearSelection();updateNativePaths(true);
+    nativeSession_->clearSelection();updateNativePaths(false);
    }else{nativeMousePress(e);return;}
   }
    if(tool==Tool::Select){
@@ -2351,7 +2365,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    if(nativeContourPressing_&&nativeSession_){
     // O ponto inicial está preservado no CurveDragSession.
     const bool moved=nativeSession_->commitContourMove(fromQt(mapToScene(e->position().toPoint())));
-    nativeContourPressing_=false;updateNativePaths(true);
+    nativeContourPressing_=false;updateNativePaths(false);
     if(moved){lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;}
     if(moved&&diagnosticEvent)diagnosticEvent("bezier_contour_moved",1);
     if(stateChanged)stateChanged();
@@ -2602,7 +2616,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
  void keyPressEvent(QKeyEvent* e)override{
   if(nativeMode_&&nativeSession_){
    if(e->key()==Qt::Key_Escape&&nativeContourPressing_){
-    nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(true);e->accept();return;
+    nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(false);e->accept();return;
    }
    if(e->key()==Qt::Key_Escape&&nativePressing_){
     nativeSession_->cancel();nativePressing_=false;updateNativePaths(false);e->accept();return;
@@ -2948,6 +2962,8 @@ public:
     {"bezier_undo_available",int(curves?curves->undoCount():0)},
     {"bezier_redo_available",int(curves?curves->redoCount():0)}}},
    {"performance",QJsonObject{{"render_rebuild_count",double(view.fullRebuilds)},
+      {"native_full_path_builds",double(view.nativeFullPathBuilds())},
+      {"native_selective_path_builds",double(view.nativeSelectivePathBuilds())},
       {"grouped_drag_starts",view.groupedDragStarts()},
       {"grouped_drag_frame_updates",view.groupedDragFrameUpdates()},
       {"grouped_transform_starts",view.groupedTransformStarts()},
@@ -8874,6 +8890,18 @@ QJsonObject nativeImportGui199Test(){
        "native GUI scene native curves were not rendered");
  check(w.view.nativeModeActive(),"native GUI mode was not enabled");
  check(w.projectPath.isEmpty(),"native GUI import could overwrite LBRN2 original");
+ // Selecting a native path must not recreate every other imported curve.
+ const auto secondPathBeforeSelect=w.view.nativeItemPath(w.curves->committed().contours.at(1).key);
+ const auto completeBuildsBeforeSelect=w.view.nativeFullPathBuilds();
+ const auto selectiveBuildsBeforeSelect=w.view.nativeSelectivePathBuilds();
+ check(w.view.selectNativeAt(Pt{5.,0.},false),"native GUI could not select the first closed contour");
+ QApplication::processEvents();
+ check(w.view.nativeFullPathBuilds()==completeBuildsBeforeSelect,
+       "native selection triggered full scene Bézier geometry rebuild");
+ check(w.view.nativeSelectivePathBuilds()-selectiveBuildsBeforeSelect<=1,
+       "native selection rebuilt more than the selected contour");
+ check(w.view.nativeItemPath(w.curves->committed().contours.at(1).key)==secondPathBeforeSelect,
+       "native selection changed an unrelated cubic path");
  const auto& state=w.view.editor.state();
  check(state.layers.count(1)&&state.layers.count(2)&&
        !state.layers.at(1).parametersVerified&&
@@ -8916,6 +8944,7 @@ QJsonObject nativeImportGui199Test(){
                     {"alaser_v5_zip_roundtrip",true},{"layer_ids_preserved",true},
                     {"unverified_parameters_preserved",true},
                     {"legacy_missing_layers_repaired_in_memory",true},
+                    {"selection_path_rebuild_is_incremental",true},
                     {"original_lbrn2_unchanged",true},
                     {"hardware_commands_sent",false}};
 }
