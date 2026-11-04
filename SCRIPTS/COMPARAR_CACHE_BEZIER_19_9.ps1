@@ -92,6 +92,8 @@ try {
    paint_without_native_items_p95_ms = [double]$j.paint_without_native_items_p95_ms
    native_device_cache_items = [double]$j.native_device_cache_items
    native_device_cache_estimated_bytes = [double]$j.native_device_cache_estimated_bytes
+   cache_visual_pixels_over8_percent = [double]$j.cache_visual_pixels_over8_percent
+   cache_visual_max_channel_difference = [int]$j.cache_visual_max_channel_difference
    rss_bytes_after_benchmark = [double]$j.rss_bytes_after_benchmark
   }
  }
@@ -125,6 +127,7 @@ try {
  Write-Host ("CACHE A/B PASS: paint P95 sem {0:N2} ms; com {1:N2} ms; delta {2:N2}%" -f
     $a.paint_p95_ms,$b.paint_p95_ms,$reduction) -ForegroundColor Green
  Write-Host "Itens cacheados: $($b.native_device_cache_items); RSS (bytes) $($b.rss_bytes_after_benchmark)"
+ Write-Host "Diferenca visual (pixels >8): $($b.cache_visual_pixels_over8_percent)% ; max canal $($b.cache_visual_max_channel_difference)"
  Write-Host "Relatorio: $summary"
 }
 finally {
