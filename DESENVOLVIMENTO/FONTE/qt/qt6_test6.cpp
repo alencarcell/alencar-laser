@@ -9126,6 +9126,7 @@ QJsonObject nativePaintBench199(const QString& source){
  }
  check(v.paintMs.size()>=kFrames,
        "Bezier benchmark cannot collect synchronous Qt paint samples");
+ const int nativePaintSamples=int(v.paintMs.size());
  const double paintP50=percentile(v.paintMs,.5);
  const double paintP95=percentile(v.paintMs,.95);
  const double paintP99=percentile(v.paintMs,.99);
@@ -9176,7 +9177,7 @@ QJsonObject nativePaintBench199(const QString& source){
  check(originalPreserved,"Bezier benchmark source file was modified");
  return QJsonObject{
   {"status","PASS"},{"experiment","native-bezier-real-paint-19.9"},
-  {"contours",contourCount},{"paint_samples",int(v.paintMs.size())},
+  {"contours",contourCount},{"paint_samples",nativePaintSamples},
   {"paint_p50_ms",paintP50},{"paint_p95_ms",paintP95},
   {"paint_p99_ms",paintP99},
   {"paint_without_native_items_p95_ms",paintWithoutNativeP95},
