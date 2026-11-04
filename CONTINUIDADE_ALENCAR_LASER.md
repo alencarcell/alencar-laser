@@ -1183,3 +1183,11 @@ Registrar mudanças, testes e pendências.
 - Causa provavel identificada: caractere Unicode travessao U+2014 em Write-Host de script .ps1 em UTF-8 sem BOM, vulneravel ao parser/decoder do Windows PowerShell 5.1.
 - Hotfix no commit d1eb4cd: todo o script em ASCII (verificacao estatica), mensagem em hifen ASCII e tratamento de JSON de erro sem depender da propriedade error quando ausente. Nenhum codigo de laser, geometria, main, APLICATIVO ou instalador alterado.
 - Novo teste pendente no Windows: atualizar branch preservando git status; validar parser PS 5.1; executar benchmark com copia LightBurn, sem hardware; compartilhar JSON. Nenhum PASS de benchmark real registrado ate agora.
+
+
+## 04/11/2026 — Comparação A/B exigindo o mesmo SHA-256
+- Os dois benchmarks reais deram PASS individual com 2.134 contornos, geometria preservada e sem conexão física, mas **não eram mesmo arquivo**: otimizado SHA256 prefixo 0DDD1F, legado prefixo 65638A. NUNCA tratar o resultado como comparação A/B homologada só por contornos iguais.
+- Resultados observados (não comparáveis causalmente): otimizado paint P95 573,6805 ms e seleção 11.413,4883 ms/12 ciclos, builds globais=0 e seletivos=12; legado paint P95 597,272 ms e seleção 18.476,1195 ms/12 ciclos, builds globais=51.216 e seletivos=0.
+- A mudança de política de reconstrução é observável; ganho de tempo A/B ainda não comprovado. Repaint P95 perto de 0,6 s permanece pendência importante.
+- Criado script SCRIPTS/COMPARAR_BEZIER_AB_19_9.ps1 (commit b3c045c) que seleciona a origem LightBurn uma unica vez, fixa SHA-256, roda otimizado e legado com -SemCompilar, garante mesmo DPI, viewport, versao Qt, contornos, amostras e modo, grava JSON agregado e recusa pares divergentes. Parametro opcional -Repeticoes 1..5 alterna ordem. Script ASCII para PowerShell 5.1; ainda nao executado no Windows.
+- Proxima acao local: git status --short, git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030, fechar editor/desconectar hardware e rodar powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\COMPARAR_BEZIER_AB_19_9.ps1". Enviar JSON agregado para avaliar. Manter main e instalador intocados.
