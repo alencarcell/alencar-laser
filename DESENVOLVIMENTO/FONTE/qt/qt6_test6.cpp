@@ -9209,8 +9209,32 @@ QJsonObject nativePaintBench199(const QString& source){
  QApplication::processEvents();
  const bool deviceCacheBenchmark199=
    qEnvironmentVariable("ALENCAR_NATIVE_DEVICE_CACHE_BENCH_19_9")=="1";
+ // Compare viewport pixels in memory ONLY; never export design imagery.
+ // Cache-off screenshot is the visual baseline at the same fixed zoom.
+ const QImage referencePixels=v.viewport()->grab().toImage()
+    .convertToFormat(QImage::Format_ARGB32);
  v.setNativeDeviceCacheForBenchmark199(deviceCacheBenchmark199);
  QApplication::processEvents();
+ const QImage cachePixels=v.viewport()->grab().toImage()
+    .convertToFormat(QImage::Format_ARGB32);
+ check(!referencePixels.isNull()&&referencePixels.size()==cachePixels.size(),
+       "Bezier cache benchmark viewport pixel size changed");
+ quint64 visualDiffOver8=0,visualPixelCount=0;
+ int maxChannelDiff=0;
+ for(int y=0;y<referencePixels.height();++y){
+  const auto* original=referencePixels.constScanLine(y);
+  const auto* rendered=cachePixels.constScanLine(y);
+  for(int x=0;x<referencePixels.width();++x){
+   int biggest=0;
+   for(int channel=0;channel<4;++channel){
+    const int offset=x*4+channel;
+    biggest=std::max(biggest,std::abs(int(original[offset])-int(rendered[offset])));
+   }
+   maxChannelDiff=std::max(maxChannelDiff,biggest);
+   if(biggest>8)++visualDiffOver8;
+   ++visualPixelCount;
+  }
+ }
 
  // Force complete paint frames after warmup to isolate draw time from load.
  for(int i=0;i<3;++i){v.viewport()->repaint();QApplication::processEvents();}
@@ -9295,6 +9319,10 @@ QJsonObject nativePaintBench199(const QString& source){
   {"native_device_cache_benchmark",deviceCacheBenchmark199},
   {"native_device_cache_items",double(v.nativeDeviceCacheItemsForBenchmark199())},
   {"native_device_cache_estimated_bytes",double(v.nativeDeviceCacheBudgetEstimateForBenchmark199())},
+  {"cache_visual_pixels_compared",double(visualPixelCount)},
+  {"cache_visual_pixels_over8",double(visualDiffOver8)},
+  {"cache_visual_pixels_over8_percent",visualPixelCount?100.*visualDiffOver8/visualPixelCount:0.},
+  {"cache_visual_max_channel_difference",maxChannelDiff},
   {"rss_bytes_after_benchmark",double(rssBytes)},
   {"background_p95_ms",backgroundP95},
   {"foreground_p95_ms",foregroundP95},
