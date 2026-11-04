@@ -338,6 +338,9 @@ class QtEditorLab final:public QGraphicsView{
  // Diagnostics only: count QPainterPath constructions, not scene repaints.
  // No paths, coordinates, or project data leave the local process.
  quint64 nativeFullPathBuilds_=0,nativeSelectivePathBuilds_=0;
+ quint64 nativeSelectionLocalRepaints_=0,nativeSelectionFullRepaints_=0;
+ const bool nativeLegacyFullViewportOnSelect_=
+   qEnvironmentVariable("ALENCAR_NATIVE_LEGACY_FULL_VIEWPORT_ON_SELECT_19_9")=="1";
  // A/B rollback: only pure-selection operations rebuild all native paths
  // when explicitly enabled, never by default. Geometry stays canonical.
  const bool nativeLegacySelectionRebuild_=
@@ -644,6 +647,27 @@ class QtEditorLab final:public QGraphicsView{
   auto m=viewportTransform();return std::max(1e-9,std::min(
    std::hypot(m.m11(),m.m12()),std::hypot(m.m21(),m.m22())));
  }
+ // Paint selection overlays only where the former/current native contour
+ // appears. Include Bézier control handles, which may lie outside the curve.
+ QRect nativeSelectionDirtyRect199(const std::optional<Key>& key)const{
+  if(!key)return {};
+  auto item=nativeItems_.find(*key);
+  if(item==nativeItems_.end())return {};
+  const QTransform xform=viewportTransform();
+  QRectF pixels=xform.mapRect(item->second->sceneBoundingRect());
+  if(nativeEditHandles_&&nativeSession_){
+   if(const auto* curve=findNativeCurve(nativeSession_->visible(),*key)){
+    for(const auto& n:curve->nodes){
+     for(const Pt pt:{n.anchor,n.handleIn,n.handleOut}){
+      const QPointF v=xform.map(toQt(pt));
+      pixels=pixels.united(QRectF(v,QSizeF(1,1)));
+     }
+    }
+   }
+  }
+  return pixels.toAlignedRect().adjusted(-20,-20,20,20)
+      .intersected(viewport()->rect());
+ }
  void updateNativePaths(bool all){
   if(!nativeSession_)return;
   QElapsedTimer nativePathProfiler;nativePathProfiler.start();
@@ -651,6 +675,11 @@ class QtEditorLab final:public QGraphicsView{
   // Durante drag, apenas o item ativo recebe setPath; selecao troca estilo
   // somente do item anterior/novo, nunca dos 575 outros contornos.
   bool selectionChanged=nativeStyledKey_!=selectedKey;
+  QRect nativeSelectionDirty;
+  if(selectionChanged&&!all&&!nativeLegacyFullViewportOnSelect_){
+   nativeSelectionDirty=nativeSelectionDirtyRect199(nativeStyledKey_);
+   nativeSelectionDirty=nativeSelectionDirty.united(nativeSelectionDirtyRect199(selectedKey));
+  }
   for(const auto& c:nativeSession_->visible().contours){
    auto it=nativeItems_.find(c.key);if(it==nativeItems_.end())continue;
    const bool selected=selectedKey&&*selectedKey==c.key;
@@ -668,7 +697,18 @@ class QtEditorLab final:public QGraphicsView{
    }
   }
   nativeStyledKey_=selectedKey;
-  if(all||selectionChanged)viewport()->update();
+  if(all)viewport()->update();
+  else if(selectionChanged){
+   if(nativeLegacyFullViewportOnSelect_){
+    ++nativeSelectionFullRepaints_;
+    viewport()->update();
+   }else if(!nativeSelectionDirty.isEmpty()){
+    ++nativeSelectionLocalRepaints_;
+    viewport()->update(nativeSelectionDirty);
+   }
+   // QGraphicsPathItem::setPen/setPath independently invalidates its geometry.
+   // Overlay handles need only the old/new contour rectangle, not the canvas.
+  }
   sample(all?nativeFullRefreshMs:nativeSelectiveRefreshMs,
          nativePathProfiler.nsecsElapsed()/1e6);
  }
@@ -1227,6 +1267,7 @@ public:
  std::set<int> selected;
  std::vector<double> paintMs,inputToPaintMs,hitTestMs,styleApplyMs,rebuildMs,transformPreviewMs,wheelMs;
  std::vector<double> foregroundMs,backgroundMs,nativeFullRefreshMs,nativeSelectiveRefreshMs;
+ std::vector<double> viewportPaintBBoxFractions;
  static void sample(std::vector<double>& measurements,double duration){
   if(measurements.size()>=10000)measurements.erase(measurements.begin(),measurements.begin()+5000);
   measurements.push_back(duration);
@@ -1273,6 +1314,9 @@ public:
  quint64 nativeFullPathBuilds()const{return nativeFullPathBuilds_;}
  quint64 nativeSelectivePathBuilds()const{return nativeSelectivePathBuilds_;}
  bool nativeLegacySelectionRebuild()const{return nativeLegacySelectionRebuild_;}
+ bool nativeLegacyFullViewportOnSelect()const{return nativeLegacyFullViewportOnSelect_;}
+ quint64 nativeSelectionLocalRepaints()const{return nativeSelectionLocalRepaints_;}
+ quint64 nativeSelectionFullRepaints()const{return nativeSelectionFullRepaints_;}
  // Benchmark-only: temporarily hide scene graphics items without touching
  // CurveDocument, layers, canvas transforms, history or original files.
  void setNativeItemsVisibleForBenchmark199(bool visible){
@@ -1906,6 +1950,12 @@ protected:
   reportZoom();viewport()->update();sample(wheelMs,wheelTimer.nsecsElapsed()/1e6);e->accept();
  }
  void paintEvent(QPaintEvent* e)override{
+  const double viewportPixels=double(viewport()->width())*viewport()->height();
+  if(viewportPixels>0){
+   const QRect r=e->rect().intersected(viewport()->rect());
+   const double dirtyPixels=double(r.width())*r.height();
+   sample(viewportPaintBBoxFractions,dirtyPixels/viewportPixels);
+  }
   QElapsedTimer timer;timer.start();QGraphicsView::paintEvent(e);sample(paintMs,timer.nsecsElapsed()/1e6);
   if(pendingInput_>=0){sample(inputToPaintMs,(clock_.nsecsElapsed()-pendingInput_)/1e6);pendingInput_=-1;}
  }
@@ -2995,6 +3045,11 @@ public:
       {"native_full_path_builds",double(view.nativeFullPathBuilds())},
       {"native_selective_path_builds",double(view.nativeSelectivePathBuilds())},
       {"native_legacy_selection_rebuild",view.nativeLegacySelectionRebuild()},
+      {"native_legacy_full_viewport_on_select",view.nativeLegacyFullViewportOnSelect()},
+      {"native_selection_local_repaint_requests",double(view.nativeSelectionLocalRepaints())},
+      {"native_selection_full_repaint_requests",double(view.nativeSelectionFullRepaints())},
+      {"viewport_paint_bbox_fraction_p95",percentile(view.viewportPaintBBoxFractions,.95)},
+      {"viewport_paint_bbox_fraction_samples",int(view.viewportPaintBBoxFractions.size())},
       {"native_full_refresh_samples",int(view.nativeFullRefreshMs.size())},
       {"native_full_refresh_p95_ms",percentile(view.nativeFullRefreshMs,.95)},
       {"native_selective_refresh_samples",int(view.nativeSelectiveRefreshMs.size())},
