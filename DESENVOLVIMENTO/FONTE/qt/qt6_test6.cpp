@@ -9319,6 +9319,68 @@ QJsonObject nativePaintBench199(const QString& source){
        serialize(encodeCurves(w.curves->committed()))==unchangedCurves,
        "Hidden-native benchmark changed source geometry or item ownership");
 
+ // Extra opt-in QA: test 1x, 2x and 4x relative to the original fit.
+ // No screenshots are saved. Device cache is explicitly disabled to capture
+ // the vector reference at each zoom, then enabled for exact same viewport.
+ const bool zoomAudit199=
+   qEnvironmentVariable("ALENCAR_NATIVE_CACHE_ZOOM_AUDIT_19_9")=="1";
+ QJsonArray zoomAuditResults;
+ if(zoomAudit199){
+  for(const double zoomFactor:{1.0,2.0,4.0}){
+   const QRectF viewBounds(0,0,400./zoomFactor,400./zoomFactor);
+   v.fitInView(viewBounds,Qt::KeepAspectRatio);
+   v.setNativeDeviceCacheForBenchmark199(false);
+   QApplication::processEvents();
+   const QImage withoutCache=v.viewport()->grab().toImage()
+      .convertToFormat(QImage::Format_ARGB32);
+   v.setNativeDeviceCacheForBenchmark199(true);
+   QApplication::processEvents();
+   const QImage withCache=v.viewport()->grab().toImage()
+      .convertToFormat(QImage::Format_ARGB32);
+   check(!withoutCache.isNull()&&withoutCache.size()==withCache.size(),
+         "Zoom cache changed the viewport image dimensions");
+   quint64 compared=0,over8=0;
+   int maxDifference=0;
+   for(int y=0;y<withoutCache.height();++y){
+    const auto* original=withoutCache.constScanLine(y);
+    const auto* cached=withCache.constScanLine(y);
+    for(int x=0;x<withoutCache.width();++x){
+     int peak=0;
+     for(int channel=0;channel<4;++channel){
+      const int offset=4*x+channel;
+      peak=std::max(peak,std::abs(int(original[offset])-int(cached[offset])));
+     }
+     maxDifference=std::max(maxDifference,peak);
+     if(peak>8)++over8;
+     ++compared;
+    }
+   }
+   for(int i=0;i<2;++i){v.viewport()->repaint();QApplication::processEvents();}
+   v.paintMs.clear();
+   constexpr int kZoomFrames=12;
+   for(int i=0;i<kZoomFrames;++i){
+    v.viewport()->repaint();QApplication::processEvents();
+   }
+   check(v.paintMs.size()>=kZoomFrames,"Zoom cache paint samples missing");
+   zoomAuditResults.append(QJsonObject{
+    {"relative_zoom_factor",zoomFactor},
+    {"cache_items",double(v.nativeDeviceCacheItemsForBenchmark199())},
+    {"cache_estimated_bytes",double(v.nativeDeviceCacheBudgetEstimateForBenchmark199())},
+    {"paint_samples",kZoomFrames},
+    {"cached_paint_p95_ms",percentile(v.paintMs,.95)},
+    {"visual_pixels_compared",double(compared)},
+    {"visual_pixels_over8_percent",compared?100.*over8/compared:0.},
+    {"visual_max_channel_difference",maxDifference},
+    {"requires_visual_review",over8>0}
+   });
+  }
+  check(serialize(encodeCurves(w.curves->committed()))==unchangedCurves,
+        "Zoom cache audit modified native Bezier geometry");
+  v.fitInView(QRectF(0,0,400,400),Qt::KeepAspectRatio);
+  v.setNativeDeviceCacheForBenchmark199(deviceCacheBenchmark199);
+  QApplication::processEvents();
+ }
+
  QFile sourceAfter(source);
  check(sourceAfter.open(QIODevice::ReadOnly),
        "Bezier benchmark source unavailable after GUI test");
@@ -9341,6 +9403,8 @@ QJsonObject nativePaintBench199(const QString& source){
   {"paint_without_native_items_p95_ms",paintWithoutNativeP95},
   {"paint_without_native_items_samples",kWithoutNativeFrames},
   {"native_device_cache_benchmark",deviceCacheBenchmark199},
+  {"native_cache_zoom_audit_enabled",zoomAudit199},
+  {"native_cache_zoom_audit",zoomAuditResults},
   {"native_device_cache_items",double(v.nativeDeviceCacheItemsForBenchmark199())},
   {"native_device_cache_estimated_bytes",double(v.nativeDeviceCacheBudgetEstimateForBenchmark199())},
   {"cache_visual_pixels_compared",double(visualPixelCount)},
