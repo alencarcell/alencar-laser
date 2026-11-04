@@ -9081,6 +9081,98 @@ QJsonObject groupedCenterTransform199Test(){
                     {"undo_redo_preserved",true},{"hardware_commands_sent",false}};
 }
 
+
+QJsonObject nativePaintBench199(const QString& source){
+ // Offline GUI benchmark: use only a COPY of the operator's .lbrn2.
+ // Never opens serial/TCP, sends G-code or writes to the source file.
+ check(source.endsWith(".lbrn2",Qt::CaseInsensitive),
+       "Bezier benchmark requires a .lbrn2 copy");
+ QFile file(source);
+ check(file.open(QIODevice::ReadOnly),"Bezier benchmark cannot read source");
+ check(file.size()>0&&file.size()<=64*1024*1024,
+       "Bezier benchmark source outside 64 MiB read-only limit");
+ const QByteArray originalHash=QCryptographicHash::hash(
+   file.readAll(),QCryptographicHash::Sha256);
+ file.close();
+
+ LabWindow w(Document{});
+ w.resize(1200,800);w.show();
+ QApplication::processEvents();
+ w.importNativeLightBurn199(source,false);
+ QApplication::processEvents();
+ auto& v=w.view;
+ check(w.curves&&!w.curves->committed().contours.empty()&&
+       w.view.nativeItemCount()==w.curves->committed().contours.size(),
+       "Bezier benchmark failed to attach native geometry");
+ const auto unchangedCurves=serialize(encodeCurves(w.curves->committed()));
+ const int contourCount=int(w.curves->committed().contours.size());
+ // Fixed workstation reference frame; record actual viewport and DPR.
+ v.fitInView(QRectF(0,0,400,400),Qt::KeepAspectRatio);
+ QApplication::processEvents();
+
+ // Force complete paint frames after warmup to isolate draw time from load.
+ for(int i=0;i<3;++i){v.viewport()->repaint();QApplication::processEvents();}
+ v.paintMs.clear();v.foregroundMs.clear();v.backgroundMs.clear();
+ constexpr int kFrames=24;
+ for(int i=0;i<kFrames;++i){
+  v.viewport()->repaint();
+  QApplication::processEvents();
+ }
+ check(v.paintMs.size()>=kFrames,
+       "Bezier benchmark cannot collect synchronous Qt paint samples");
+ const double paintP50=percentile(v.paintMs,.5);
+ const double paintP95=percentile(v.paintMs,.95);
+ const double paintP99=percentile(v.paintMs,.99);
+ const double backgroundP95=percentile(v.backgroundMs,.95);
+ const double foregroundP95=percentile(v.foregroundMs,.95);
+
+ // Same native contour selection toggled 12 times. No geometry mutation,
+ // GUI preference reset, file saves or machine interactions.
+ const Key firstKey=w.curves->committed().contours.front().key;
+ const quint64 fullStart=v.nativeFullPathBuilds();
+ const quint64 selectiveStart=v.nativeSelectivePathBuilds();
+ QElapsedTimer selectionTimer;selectionTimer.start();
+ constexpr int kSelectionCycles=12;
+ for(int i=0;i<kSelectionCycles;++i){
+  w.curves->select(firstKey);v.nativeLayerChanged();
+  QApplication::processEvents();
+  w.curves->clearSelection();v.nativeLayerChanged();
+  QApplication::processEvents();
+ }
+ const double selectionTotalMs=selectionTimer.nsecsElapsed()/1e6;
+ check(serialize(encodeCurves(w.curves->committed()))==unchangedCurves,
+       "Bezier benchmark changed canonical geometry during selection");
+
+ QFile sourceAfter(source);
+ check(sourceAfter.open(QIODevice::ReadOnly),
+       "Bezier benchmark source unavailable after GUI test");
+ const bool originalPreserved=QCryptographicHash::hash(
+   sourceAfter.readAll(),QCryptographicHash::Sha256)==originalHash;
+ sourceAfter.close();
+ check(originalPreserved,"Bezier benchmark source file was modified");
+ return QJsonObject{
+  {"status","PASS"},{"experiment","native-bezier-real-paint-19.9"},
+  {"contours",contourCount},{"paint_samples",int(v.paintMs.size())},
+  {"paint_p50_ms",paintP50},{"paint_p95_ms",paintP95},
+  {"paint_p99_ms",paintP99},
+  {"background_p95_ms",backgroundP95},
+  {"foreground_p95_ms",foregroundP95},
+  {"selection_cycles",kSelectionCycles},
+  {"selection_total_ms",selectionTotalMs},
+  {"native_full_path_builds_delta",double(v.nativeFullPathBuilds()-fullStart)},
+  {"native_selective_path_builds_delta",double(v.nativeSelectivePathBuilds()-selectiveStart)},
+  {"legacy_selection_rebuild",v.nativeLegacySelectionRebuild()},
+  {"viewport_width_px",v.viewport()->width()},
+  {"viewport_height_px",v.viewport()->height()},
+  {"dpr",v.viewport()->devicePixelRatioF()},
+  {"qt",qVersion()},
+  {"source_sha256_unchanged",originalPreserved},
+  {"geometry_unchanged",true},
+  {"machine_commands_sent",false},
+  {"fabrication_enabled",false}
+ };
+}
+
 int main(int argc,char** argv){
  QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";
 
@@ -9089,6 +9181,18 @@ int main(int argc,char** argv){
   try{report=groupedCenterTransform199Test();}
   catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TRANSFORMACAO_CENTRAL_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--native-paint-bench-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=nativePaintBench199(csv);}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())},
+                      {"machine_commands_sent",false}};
+  }
+  QFile file(out+"/RESULTADO_PERFORMANCE_BEZIER_REAL_19_9.json");
   if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
   return pass?0:1;
