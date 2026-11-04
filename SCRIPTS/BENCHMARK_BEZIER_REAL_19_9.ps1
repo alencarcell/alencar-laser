@@ -12,12 +12,15 @@ Exemplos:
 param(
  [string]$ArquivoLbrn2 = '',
  [switch]$ModoLegado,
+ [switch]$CacheDispositivo,
  [switch]$SemCompilar
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $envPathBefore = $env:PATH
+$cacheBefore = [Environment]::GetEnvironmentVariable(
+    'ALENCAR_NATIVE_DEVICE_CACHE_BENCH_19_9','Process')
 $legacyBefore = [Environment]::GetEnvironmentVariable(
     'ALENCAR_NATIVE_LEGACY_SELECTION_REBUILD_19_9','Process')
 $sessionCopy = ''
@@ -69,15 +72,17 @@ try {
  }
  $env:PATH = $runtime + ';' + $envPathBefore
  $env:ALENCAR_NATIVE_LEGACY_SELECTION_REBUILD_19_9 = if ($ModoLegado) { '1' } else { '0' }
+ $env:ALENCAR_NATIVE_DEVICE_CACHE_BENCH_19_9 = if ($CacheDispositivo) { '1' } else { '0' }
  $mode = if ($ModoLegado) { 'LEGADO' } else { 'OTIMIZADO' }
+ $cacheSuffix = if ($CacheDispositivo) { '-CACHE' } else { '-SEM-CACHE' }
  $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
- $dest = Join-Path $root "RELATORIOS\AUDITORIAS\GITHUB_19_8\BEZIER_PERFORMANCE_19_9\$mode-$timestamp"
+ $dest = Join-Path $root "RELATORIOS\AUDITORIAS\GITHUB_19_8\BEZIER_PERFORMANCE_19_9\$mode$cacheSuffix-$timestamp"
  New-Item -Path $dest -ItemType Directory -Force | Out-Null
  $sessionCopy = Join-Path $dest 'ENTRADA_TEMPORARIA_BENCHMARK.lbrn2'
  Copy-Item -LiteralPath $originalSource -Destination $sessionCopy -ErrorAction Stop
  $copyHash = (Get-FileHash -LiteralPath $sessionCopy -Algorithm SHA256).Hash
  if ($copyHash -ne $originalHash) { throw 'Copia temporaria nao confere com origem' }
- Write-Host "Benchmark QT offline - modo $mode" -ForegroundColor Cyan
+ Write-Host "Benchmark QT offline - modo $mode $cacheSuffix" -ForegroundColor Cyan
  Write-Host "Origem protegida por SHA256: $originalHash"
  Write-Host 'Nenhuma conexao com laser sera iniciada.' -ForegroundColor Yellow
  & $exe --native-paint-bench-19-9-test $sessionCopy $dest
@@ -91,6 +96,9 @@ try {
   $reason = if ($report.PSObject.Properties.Name -contains 'error') { $report.error } else { 'sem detalhe no JSON' }
   throw "Benchmark falhou (exit $exitCode): $reason"
  }
+ if ([bool]$report.native_device_cache_benchmark -ne [bool]$CacheDispositivo) {
+  throw 'Modo de cache Qt nao corresponde ao solicitado'
+ }
  if (-not $report.source_sha256_unchanged -or
      -not $report.geometry_unchanged -or
      $report.machine_commands_sent -or $report.fabrication_enabled) {
@@ -98,6 +106,7 @@ try {
  }
  Write-Host "PASS $mode : $($report.contours) contornos, paint P95 $($report.paint_p95_ms) ms" -ForegroundColor Green
  Write-Host "Selecao: $($report.selection_total_ms) ms / $($report.selection_cycles) ciclos"
+ Write-Host "Cache device Qt: $($report.native_device_cache_items) itens; estimativa $($report.native_device_cache_estimated_bytes) bytes"
  Write-Host "Full path builds: $($report.native_full_path_builds_delta) / selective: $($report.native_selective_path_builds_delta)"
  Write-Host "Fases Qt: background P95 $($report.background_p95_ms) ms; foreground P95 $($report.foreground_p95_ms) ms"
  if ($report.PSObject.Properties.Name -contains 'paint_without_native_items_p95_ms') {
@@ -110,6 +119,8 @@ finally {
   Remove-Item -LiteralPath $sessionCopy -Force
  }
  $env:PATH = $envPathBefore
+ [Environment]::SetEnvironmentVariable(
+  'ALENCAR_NATIVE_DEVICE_CACHE_BENCH_19_9',$cacheBefore,'Process')
  [Environment]::SetEnvironmentVariable(
   'ALENCAR_NATIVE_LEGACY_SELECTION_REBUILD_19_9',$legacyBefore,'Process')
  if ($originalSource -and $originalHash) {
