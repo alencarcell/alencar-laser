@@ -1,6 +1,6 @@
 # Central de Auditoria — Alencar Laser 19.9 (experimental)
 
-**Entrada de continuidade entre chats:** este README, `INDICE.json` (apos primeira coleta), [Issue #18](https://github.com/alencarcell/alencar-laser/issues/18) e [PR #13](https://github.com/alencarcell/alencar-laser/pull/13).
+**Entrada de continuidade entre chats:** este README, `INDICE.json`, [Issue #20](https://github.com/alencarcell/alencar-laser/issues/20) (central), [Issue #18](https://github.com/alencarcell/alencar-laser/issues/18) (performance) e [PR #13](https://github.com/alencarcell/alencar-laser/pull/13).
 
 ## Objetivo
 
@@ -13,12 +13,16 @@ Com o projeto em `C:\ProjetoAlencarLaser`, na branch `fix/curvas-tesoura-preflig
 ```powershell
 git status --short
 git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030
+# Passo 0: autoteste de seguranca totalmente offline (sem dados reais):
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\TESTAR_CENTRAL_AUDITORIA_19_9.ps1"
 # Passo 1: prepara as evidencias filtradas localmente, sem rede:
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\REGISTRAR_AUDITORIA_GITHUB_19_9.ps1"
 # Passo 2: inspecione AUDITORIA_GITHUB\INDICE.json e REGISTROS.
 # Passo 3: somente apos inspecao, publicar na branch experimental:
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\REGISTRAR_AUDITORIA_GITHUB_19_9.ps1" -Publicar
 ```
+
+A validação opcional em GitHub Actions está em `.github/workflows/central-auditoria-19-9.yml`; verificar os resultados antes de considerar o coletor validado.
 
 O script coleta **o ultimo** JSON `AUDITORIA_CACHE_ZOOM_19_9_*.json` e o ultimo `COMPARACAO_CACHE_19_9_*.json`. Opcoes: `-Todos` importa historico local reconhecido, `-ArquivoJson "caminho.json"` seleciona um arquivo especifico. O modo normal **nao faz commit nem push**. O modo `-Publicar` requer acao explicita, verifica branch e remote, recusa staging anterior e inclui somente registros filtrados e o indice. Nunca usa `git add .`, `--force` nem grava na `main`.
 
