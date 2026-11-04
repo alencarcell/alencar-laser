@@ -338,6 +338,10 @@ class QtEditorLab final:public QGraphicsView{
  // Diagnostics only: count QPainterPath constructions, not scene repaints.
  // No paths, coordinates, or project data leave the local process.
  quint64 nativeFullPathBuilds_=0,nativeSelectivePathBuilds_=0;
+ // A/B rollback: only pure-selection operations rebuild all native paths
+ // when explicitly enabled, never by default. Geometry stays canonical.
+ const bool nativeLegacySelectionRebuild_=
+   qEnvironmentVariable("ALENCAR_NATIVE_LEGACY_SELECTION_REBUILD_19_9")=="1";
  bool nativePressing_=false;
  bool middlePanning_=false;
  QPointF middlePanLast_{};
@@ -667,6 +671,9 @@ class QtEditorLab final:public QGraphicsView{
   if(all||selectionChanged)viewport()->update();
   sample(all?nativeFullRefreshMs:nativeSelectiveRefreshMs,
          nativePathProfiler.nsecsElapsed()/1e6);
+ }
+ void updateNativeSelection199(){
+  updateNativePaths(nativeLegacySelectionRebuild_);
  }
 
  std::vector<int> expandedSelection()const{
@@ -1164,7 +1171,7 @@ private:
    if(!hits.empty()&&nativeSession_->startContourMove(hits.front().key,click)){
     nativeSelectedPart_.reset();nativeContourPressing_=true;
     // Mouse press only changes selection; geometry is still untouched.
-    updateNativePaths(false);if(stateChanged)stateChanged();
+    updateNativeSelection199();if(stateChanged)stateChanged();
    }
    e->accept();return;
   }
@@ -1209,8 +1216,8 @@ private:
    nativeSession_->select(hit.key);nativeSelectedPart_.reset();
   }
   // At most the selected contour changed when inserting an anchor.
-  // Pure selection never rebuilds all 2,134 native QPainterPaths.
-  updateNativePaths(false);if(stateChanged)stateChanged();e->accept();
+  // Pure selection never rebuilds all native paths unless A/B rollback is enabled.
+  updateNativeSelection199();if(stateChanged)stateChanged();e->accept();
  }
 
 public:
@@ -1265,6 +1272,7 @@ public:
  size_t nativeItemCount()const{return nativeItems_.size();}
  quint64 nativeFullPathBuilds()const{return nativeFullPathBuilds_;}
  quint64 nativeSelectivePathBuilds()const{return nativeSelectivePathBuilds_;}
+ bool nativeLegacySelectionRebuild()const{return nativeLegacySelectionRebuild_;}
  // Interface somente-leitura para verificar desenho da moldura em teste.
  std::optional<QRectF> selectionPreviewRect()const{return selectionDisplayBounds();}
  // Test-only and UI read access to the oriented frame, not serialized in .alaser.
@@ -1311,7 +1319,7 @@ public:
   if(!nativeSession_)return;
   lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
   // Layer selection changes metadata, not the geometry of every path.
-  updateNativePaths(false);
+  updateNativeSelection199();
   if(stateChanged)stateChanged();
  }
  bool nativeModeActive()const{return nativeMode_;}
@@ -1335,7 +1343,7 @@ public:
   if(startMove){
    nativeContourPressing_=nativeSession_->startContourMove(matches.front().key,click);
   }
-  updateNativePaths(false);
+  updateNativeSelection199();
   if(stateChanged)stateChanged();
   return true;
  }
@@ -2047,7 +2055,7 @@ void mousePressEvent(QMouseEvent* e)override{
     }
     nativeMode_=false;
     nativeSession_->clearSelection();
-    updateNativePaths(false);
+    updateNativeSelection199();
    }else if(tool==Tool::Select&&nativeEditHandles_){
     // A click away from native edges/handles returns to ordinary selection.
     const Pt at=fromQt(mapToScene(e->position().toPoint()));
@@ -2058,7 +2066,7 @@ void mousePressEvent(QMouseEvent* e)override{
       at,nativePxPerMm(),viewport()->devicePixelRatioF(),6);
     if(part||!hits.empty()){nativeMousePress(e);return;}
     nativeMode_=false;nativeEditHandles_=false;
-    nativeSession_->clearSelection();updateNativePaths(false);
+    nativeSession_->clearSelection();updateNativeSelection199();
    }else{nativeMousePress(e);return;}
   }
    if(tool==Tool::Select){
@@ -2980,6 +2988,7 @@ public:
    {"performance",QJsonObject{{"render_rebuild_count",double(view.fullRebuilds)},
       {"native_full_path_builds",double(view.nativeFullPathBuilds())},
       {"native_selective_path_builds",double(view.nativeSelectivePathBuilds())},
+      {"native_legacy_selection_rebuild",view.nativeLegacySelectionRebuild()},
       {"native_full_refresh_samples",int(view.nativeFullRefreshMs.size())},
       {"native_full_refresh_p95_ms",percentile(view.nativeFullRefreshMs,.95)},
       {"native_selective_refresh_samples",int(view.nativeSelectiveRefreshMs.size())},
@@ -8919,6 +8928,8 @@ QJsonObject nativeImportGui199Test(){
  const auto selectiveBuildsBeforeSelect=w.view.nativeSelectivePathBuilds();
  check(w.view.selectNativeAt(Pt{5.,0.},false),"native GUI could not select the first closed contour");
  QApplication::processEvents();
+ check(!w.view.nativeLegacySelectionRebuild(),
+       "native GUI regression must use the default selective update policy");
  check(w.view.nativeFullPathBuilds()==completeBuildsBeforeSelect,
        "native selection triggered full scene Bézier geometry rebuild");
  check(w.view.nativeSelectivePathBuilds()-selectiveBuildsBeforeSelect<=1,
