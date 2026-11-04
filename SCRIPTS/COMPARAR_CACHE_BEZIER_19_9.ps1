@@ -6,7 +6,7 @@ NoCache versus DeviceCoordinateCache with the same Qt binary.
 Requires local Qt6/MSYS2 and machine disconnected.
 #>
 [CmdletBinding()]
-param([string]$ArquivoLbrn2 = '',[switch]$SemCompilar)
+param([string]$ArquivoLbrn2 = '',[switch]$SemCompilar,[switch]$AuditarZoom)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -103,6 +103,7 @@ try {
   Write-Host "TESTE $($case.Name)" -ForegroundColor Cyan
   $cmd = @('-NoProfile','-ExecutionPolicy','Bypass','-File',
            $runner,'-ArquivoLbrn2',$original,'-SemCompilar') + $case.Args
+  if ($AuditarZoom -and $case.Name -eq 'CACHE_DEVICE') { $cmd += '-AuditarZoom' }
   $lines = @(& powershell.exe @cmd)
   foreach ($line in $lines) { Write-Host ([string]$line) }
   if ($LASTEXITCODE -ne 0) { throw "Runner $($case.Name) falhou" }
@@ -122,6 +123,13 @@ try {
   $cacheWanted = ($case.Name -eq 'CACHE_DEVICE')
   if ([bool]$j.native_device_cache_benchmark -ne $cacheWanted) {
    throw "Cache flag nao aplicado em $($case.Name)"
+  }
+  $zoomWanted = $cacheWanted -and [bool]$AuditarZoom
+  if ([bool]$j.native_cache_zoom_audit_enabled -ne $zoomWanted) {
+   throw "Zoom audit flag nao aplicado em $($case.Name)"
+  }
+  if ($zoomWanted -and @($j.native_cache_zoom_audit).Count -ne 3) {
+   throw 'Auditoria de zoom nao gerou as tres escalas previstas'
   }
   if ((Get-FileHash -LiteralPath $original -Algorithm SHA256).Hash -ne $sourceHash) {
    throw 'Origem alterada depois do teste'
@@ -143,6 +151,7 @@ try {
    native_device_cache_estimated_bytes = [double]$j.native_device_cache_estimated_bytes
    cache_visual_pixels_over8_percent = [double]$j.cache_visual_pixels_over8_percent
    cache_visual_max_channel_difference = [int]$j.cache_visual_max_channel_difference
+   zoom_audit = @($j.native_cache_zoom_audit)
    rss_bytes_after_benchmark = [double]$j.rss_bytes_after_benchmark
   }
  }
@@ -177,6 +186,13 @@ try {
     $a.paint_p95_ms,$b.paint_p95_ms,$reduction) -ForegroundColor Green
  Write-Host "Itens cacheados: $($b.native_device_cache_items); RSS (bytes) $($b.rss_bytes_after_benchmark)"
  Write-Host "Diferenca visual (pixels >8): $($b.cache_visual_pixels_over8_percent)% ; max canal $($b.cache_visual_max_channel_difference)"
+ if ($AuditarZoom) {
+  foreach ($z in $b.zoom_audit) {
+   Write-Host ("Zoom {0}x: itens cache {1}, P95 {2} ms, pixels >8 {3}%, revisar imagem {4}" -f
+     $z.relative_zoom_factor,$z.cache_items,$z.cached_paint_p95_ms,
+     $z.visual_pixels_over8_percent,$z.requires_visual_review)
+  }
+ }
  Write-Host "Relatorio: $summary"
 }
 finally {
