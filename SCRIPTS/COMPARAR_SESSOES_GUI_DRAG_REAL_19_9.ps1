@@ -87,7 +87,8 @@ $paintSamplesOn = Numero $on 'paint_count'
 $inputSamplesOff = Numero $off 'input_to_paint_samples'
 $inputSamplesOn = Numero $on 'input_to_paint_samples'
 if ($null -eq $pOff -or $null -eq $pOn -or $pOff -eq 0 -or
-    $null -eq $paintSamplesOff -or $null -eq $paintSamplesOn) {
+    $null -eq $paintSamplesOff -or $null -eq $paintSamplesOn -or
+    $paintSamplesOff -lt 1 -or $paintSamplesOn -lt 1) {
  throw 'Metrica de pintura incompleta: nao e possivel comparar as sessoes.'
 }
 if ($paintSamplesOff -lt 30 -or $paintSamplesOn -lt 30) {
@@ -114,7 +115,7 @@ $result = [ordered]@{
   paint_p95_ms = $pOff
   input_to_paint_samples = $inputSamplesOff
   input_to_paint_p95_ms = $inputOff
-  rss_bytes_exit = NumERO $memOff 'rss_bytes'
+  rss_bytes_exit = Numero $memOff 'rss_bytes'
   peak_rss_bytes = Numero $memOff 'peak_rss_bytes'
   localized_node_updates = Numero $off 'localized_node_updates'
  }
