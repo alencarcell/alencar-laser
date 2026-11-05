@@ -16,6 +16,7 @@ Set-StrictMode -Version Latest
 $branchEsperada = 'fix/curvas-tesoura-preflight-19-8-20261030'
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $origem = Join-Path $root 'RELATORIOS\AUDITORIAS\GITHUB_19_8\BEZIER_PERFORMANCE_19_9'
+$interacao = Join-Path $root 'RELATORIOS\AUDITORIAS\GITHUB_19_8\INTERACAO_19_9'
 $baseRel = 'AUDITORIA_GITHUB'
 $base = Join-Path $root $baseRel
 $registros = Join-Path $base 'REGISTROS'
@@ -41,6 +42,7 @@ function Estado($v) {
   'PASS_AUTOMATED_MANUAL_PENDING' { return 'PASS_AUTOMATED_MANUAL_PENDING' }
   'FAIL_AUTOMATED' { return 'FAIL_AUTOMATED' }
   'INCONCLUSIVE' { return 'INCONCLUSIVE' }
+  'MANUAL_REVIEW_PENDING' { return 'MANUAL_REVIEW_PENDING' }
   default { return 'UNVERIFIED' }
  }
 }
@@ -60,12 +62,14 @@ $fontes = @()
 if ($ArquivoJson) {
  $fontes = @(Get-Item -LiteralPath (Resolve-Path -LiteralPath $ArquivoJson).Path -ErrorAction Stop)
 } else {
- if (-not (Test-Path -LiteralPath $origem -PathType Container)) {
-  throw 'Pasta de relatorios locais nao encontrada.'
- }
- $patterns = @('AUDITORIA_CACHE_ZOOM_19_9_*.json', 'COMPARACAO_CACHE_19_9_*.json')
- foreach ($pat in $patterns) {
-  $found = @(Get-ChildItem -LiteralPath $origem -Filter $pat -File |
+ $targets = @(
+  [pscustomobject]@{ Folder=$origem; Pattern='AUDITORIA_CACHE_ZOOM_19_9_*.json' },
+  [pscustomobject]@{ Folder=$origem; Pattern='COMPARACAO_CACHE_19_9_*.json' },
+  [pscustomobject]@{ Folder=$interacao; Pattern='SESSAO_INTERACAO_19_9_*.json' }
+ )
+ foreach ($target in $targets) {
+  if (-not (Test-Path -LiteralPath $target.Folder -PathType Container)) { continue }
+  $found = @(Get-ChildItem -LiteralPath $target.Folder -Filter $target.Pattern -File |
      Sort-Object LastWriteTimeUtc -Descending)
   if ($Todos) { $fontes += $found }
   elseif ($found.Count -gt 0) { $fontes += $found[0] }
@@ -84,13 +88,21 @@ foreach ($f in $fontes) {
   $type = 'cache_zoom_validation'
  } elseif ((Campo $raw 'experiment') -eq 'native-device-coordinate-cache-19.9') {
   $type = 'cache_ab'
+ } elseif ((Campo $raw 'experiment') -eq 'manual-interaction-19.9') {
+  $type = 'interaction_session'
  } else {
   throw "Esquema nao autorizado para exportacao: $($f.Name)"
  }
  $shaOriginal = [string](Campo $raw 'source_sha256')
- if ($shaOriginal -notmatch '^[0-9a-fA-F]{64}$') {
+ if ($type -ne 'interaction_session' -and $shaOriginal -notmatch '^[0-9a-fA-F]{64}$') {
   throw "SHA da origem ausente/invalido: $($f.Name)"
  }
+ if ($type -eq 'interaction_session' -and $shaOriginal -ne '' -and
+     $shaOriginal -notmatch '^[0-9a-fA-F]{64}$') {
+  throw "SHA opcional da sessao invalido: $($f.Name)"
+ }
+ $prefixoProjeto = $null
+ if ($shaOriginal) { $prefixoProjeto = $shaOriginal.Substring(0,12).ToUpperInvariant() }
  # Identificadores de arquivo e metricas numericas apenas: nenhum campo livre
  # do JSON original e transportado ao GitHub.
  $dataUtc = $f.LastWriteTimeUtc.ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -103,12 +115,66 @@ foreach ($f in $fontes) {
   type = $type
   status = $status
   source_report_sha256 = $digest
-  source_project_sha256_prefix = $shaOriginal.Substring(0,12).ToUpperInvariant()
+  source_project_sha256_prefix = $prefixoProjeto
   machine_commands_sent = $null
   production_homologated = $false
   manual_validation_pending = $true
  }
- if ($type -eq 'cache_zoom_validation') {
+ if ($type -eq 'interaction_session') {
+  if ((Campo $raw 'status') -ne 'MANUAL_REVIEW_PENDING' -or
+      (Campo $raw 'production_homologated') -ne $false -or
+      (Campo $raw 'manual_validation_pending') -ne $true -or
+      (Campo $raw 'machine_commands_sent') -ne $null) {
+   throw 'Sessao nao possui os estados observacionais seguros.'
+  }
+  $manual = Campo $raw 'manual_results'
+  $memory = Campo $raw 'memory'
+  if ($null -eq $manual -or $null -eq $memory) { throw 'Sessao incompleta.' }
+  $keys = @('selection','drag','zoom_pan','scissors','undo_redo')
+  $statuses = [ordered]@{}
+  foreach ($key in $keys) {
+   $val = [string](Campo $manual $key)
+   if (@('PASS','FAIL','NOT_TESTED') -notcontains $val) {
+    throw "Resultado manual invalido: $key"
+   }
+   $statuses[$key] = $val
+  }
+  $t = @($statuses.Values | Where-Object { $_ -ne 'NOT_TESTED' }).Count
+  $n = @($statuses.Values | Where-Object { $_ -eq 'FAIL' }).Count
+  if ([int](Campo $raw 'tested_cases') -ne $t -or
+      [int](Campo $raw 'failed_cases') -ne $n) {
+   throw 'Contagem manual divergente.'
+  }
+  $samples = Num $memory 'sample_count'
+  if ($null -eq $samples -or $samples -lt 0 -or $samples -gt 200000) {
+   throw 'Contagem de memoria invalida.'
+  }
+  if ($t -eq 0 -and $samples -eq 0) { throw 'Sessao vazia.' }
+  $rss95 = Num $memory 'rss_p95_mb'
+  $rssMax = Num $memory 'rss_max_mb'
+  $cpu95 = Num $memory 'cpu_p95_percent'
+  if ($samples -gt 0 -and ($samples -lt 3 -or $null -eq $rss95 -or
+       $null -eq $rssMax -or $null -eq $cpu95 -or
+       $rss95 -lt 0 -or $rss95 -gt $rssMax -or
+       $rssMax -gt 1048576 -or $cpu95 -lt 0 -or $cpu95 -gt 10000)) {
+   throw 'Metricas de memoria invalidas.'
+  }
+  if ($samples -eq 0 -and ($null -ne $rss95 -or $null -ne $rssMax -or
+       $null -ne $cpu95)) { throw 'Metricas de memoria sem amostras.' }
+  $record['metrics'] = [ordered]@{
+   selection = $statuses['selection']
+   drag = $statuses['drag']
+   zoom_pan = $statuses['zoom_pan']
+   scissors = $statuses['scissors']
+   undo_redo = $statuses['undo_redo']
+   tested_cases = [int]$t
+   failed_cases = [int]$n
+   memory_sample_count = [int]$samples
+   rss_p95_mb = $rss95
+   rss_max_mb = $rssMax
+   cpu_p95_percent = $cpu95
+  }
+ } elseif ($type -eq 'cache_zoom_validation') {
   if ((Campo $raw 'hardware_permitted') -eq $true -or
       (Campo $raw 'production_homologated') -eq $true) {
    throw 'Relatorio de validacao contradiz as travas de seguranca.'
@@ -169,19 +235,23 @@ function Validar-Registro($rec, [string]$nome) {
  }
  $tip = [string](Campo $rec 'type')
  if ((Campo $rec 'schema') -ne 'alencar-laser-audit-sanitized-v1' -or
-     @('cache_zoom_validation','cache_ab') -notcontains $tip) {
+     @('cache_zoom_validation','cache_ab','interaction_session') -notcontains $tip) {
   throw "Esquema inesperado em $nome"
  }
  $sha = [string](Campo $rec 'source_report_sha256')
  if ($sha -notmatch '^[a-f0-9]{64}$' -or
-     (Campo $rec 'event_id') -ne $sha.Substring(0,16) -or
-     [string](Campo $rec 'source_project_sha256_prefix') -notmatch '^[A-F0-9]{12}$') {
+     (Campo $rec 'event_id') -ne $sha.Substring(0,16)) {
   throw "Identidade SHA incorreta em $nome"
+ }
+ $prefixo = Campo $rec 'source_project_sha256_prefix'
+ if (($tip -ne 'interaction_session' -or $null -ne $prefixo) -and
+     [string]$prefixo -notmatch '^[A-F0-9]{12}$') {
+  throw "Identidade do projeto incorreta em $nome"
  }
  if ((Campo $rec 'version') -ne '19.9-experimental' -or
      [string](Campo $rec 'recorded_utc') -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$' -or
      @('PASS','FAIL','PASS_AUTOMATED_MANUAL_PENDING','FAIL_AUTOMATED',
-       'INCONCLUSIVE','UNVERIFIED') -notcontains [string](Campo $rec 'status')) {
+       'INCONCLUSIVE','UNVERIFIED','MANUAL_REVIEW_PENDING') -notcontains [string](Campo $rec 'status')) {
   throw "Metadados invalidos em $nome"
  }
  if ((Campo $rec 'production_homologated') -ne $false -or
@@ -195,6 +265,9 @@ function Validar-Registro($rec, [string]$nome) {
   @('contours','p95_uncached_ms','p95_cached_ms','reduction_percent',
     'cached_items','cache_estimated_bytes','process_rss_bytes',
     'visual_pixels_over8_percent','zoom')
+ } elseif ($tip -eq 'interaction_session') {
+  @('selection','drag','zoom_pan','scissors','undo_redo','tested_cases','failed_cases',
+    'memory_sample_count','rss_p95_mb','rss_max_mb','cpu_p95_percent')
  } else { @('checks_failed_count') }
  foreach ($p in $metricas.PSObject.Properties.Name) {
   if ($permitidos -notcontains $p) { throw "Metrica inesperada em $nome : $p" }
@@ -212,6 +285,11 @@ function Validar-Registro($rec, [string]$nome) {
      }
     }
    }
+  } elseif ($tip -eq 'interaction_session' -and
+      @('selection','drag','zoom_pan','scissors','undo_redo') -contains $p) {
+   if (@('PASS','FAIL','NOT_TESTED') -notcontains [string]$v) {
+    throw "Resultado manual nao autorizado em $nome : $p"
+   }
   } elseif ($null -ne $v -and $v -isnot [ValueType]) {
    throw "Metrica nao numerica em $nome : $p"
   }
@@ -224,7 +302,7 @@ foreach ($f in @(Get-ChildItem -LiteralPath $registros -Recurse -File -Filter '*
  $rec = Get-Content -LiteralPath $f.FullName -Raw | ConvertFrom-Json
  Validar-Registro $rec $f.Name
  $relative = ($f.FullName.Substring($root.Length + 1) -replace '\\','/')
- if ($relative -notmatch '^AUDITORIA_GITHUB/REGISTROS/\d{4}-\d{2}-\d{2}/(cache_zoom_validation|cache_ab)_[a-f0-9]{16}\.json$') {
+ if ($relative -notmatch '^AUDITORIA_GITHUB/REGISTROS/\d{4}-\d{2}-\d{2}/(cache_zoom_validation|cache_ab|interaction_session)_[a-f0-9]{16}\.json$') {
   throw 'Caminho de registro fora do padrao. Envio suspenso.'
  }
  if ($f.BaseName -ne (([string]$rec.type) + '_' + ([string]$rec.event_id))) {
