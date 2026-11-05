@@ -35,11 +35,13 @@ Com **cópia** do mesmo projeto, laser desconectado e sem alterações em produ�
 
 ```powershell
 # Referência: política anterior
-powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -UsarBuildDragAB
 # Feche a primeira sessão antes de iniciar a outra.
-# Candidata: repintura localizada (flag restrita ao processo)
-powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -TestarRepinturaLocal
+# Candidata: MESMO executável A/B, com flag temporária ligada
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -UsarBuildDragAB -TestarRepinturaLocal
 ```
+
+ATENÇÃO: use `-UsarBuildDragAB` **nas duas sessões** para evitar comparar o executável antigo com o novo. Por segurança, o launcher recusa `-TestarRepinturaLocal` desacompanhado de `-UsarBuildDragAB`. O binário A/B precisa estar compilado e validado previamente.
 
 Repetir seleção por área, arraste de centenas de formas, zoom e pan, Tesoura, Undo e Redo nas duas sessões. Registrar P95/P99 de pintura, latência entrada→pintura, porcentagem da viewport repintada, contadores locais, qualidade visual das alças, integridade/Undo e RSS. Comparar somente sessões com a mesma origem, zoom, duração aproximada e gestos. A GUI não automatiza esses gestos; resultados do mouse continuam pendentes.
 
