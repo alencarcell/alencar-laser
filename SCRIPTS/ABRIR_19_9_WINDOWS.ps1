@@ -7,13 +7,15 @@ Usage (from repo root):
  powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1"
  powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -VerificarSomente
  powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -ModoCompatibilidade
+ powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -TestarRepinturaLocal
 #>
 [CmdletBinding()]
-param([switch]$VerificarSomente, [switch]$ModoCompatibilidade)
+param([switch]$VerificarSomente, [switch]$ModoCompatibilidade, [switch]$TestarRepinturaLocal)
 
 $ErrorActionPreference = 'Stop'
 $originalPath = $env:PATH
 $originalGroupedDrag = [Environment]::GetEnvironmentVariable('ALENCAR_DISABLE_GROUPED_DRAG','Process')
+$originalOverlay = [Environment]::GetEnvironmentVariable('ALENCAR_LOCAL_DRAG_OVERLAY_19_9','Process')
 $didPush = $false
 try {
     $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -45,6 +47,10 @@ try {
         $env:ALENCAR_DISABLE_GROUPED_DRAG = '1'
         Write-Warning 'MODO COMPATIBILIDADE: arraste agrupado experimental desativado nesta sessao.'
     }
+    if ($TestarRepinturaLocal) {
+        $env:ALENCAR_LOCAL_DRAG_OVERLAY_19_9 = '1'
+        Write-Warning 'EXPERIMENTO: invalidação local de overlay no arraste ativada somente nesta sessao. Sem homologacao.'
+    }
     Push-Location -LiteralPath $root
     $didPush = $true
     Write-Host 'Abrindo editor experimental. Mantenha o laser desconectado.' -ForegroundColor Yellow
@@ -64,5 +70,6 @@ finally {
     } else {
         [Environment]::SetEnvironmentVariable('ALENCAR_DISABLE_GROUPED_DRAG',$originalGroupedDrag,'Process')
     }
+    [Environment]::SetEnvironmentVariable('ALENCAR_LOCAL_DRAG_OVERLAY_19_9',$originalOverlay,'Process')
     if ($didPush) { Pop-Location }
 }
