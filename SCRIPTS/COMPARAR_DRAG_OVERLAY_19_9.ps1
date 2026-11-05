@@ -1,8 +1,9 @@
 #requires -Version 5.1
 <#
 ALENCAR LASER 19.9 - A/B offline da repintura local no arraste agrupado.
-Configura/compila apenas o Qt de desenvolvimento. Mesmo teste sintetico
-de 40 objetos com flag OFF e ON; sem portas, Git push ou projetos reais.
+Configura/compila Qt de desenvolvimento em DIRETORIO ISOLADO para evitar
+bloquear/substituir exe do editor aberto. Mesmo teste sintetico 40 objetos
+com flag OFF/ON; sem portas, Git push, encerramento forçado ou projeto real.
 #>
 [CmdletBinding()]
 param([switch]$SemCompilar)
@@ -10,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $source = Join-Path $root 'DESENVOLVIMENTO\FONTE'
-$build = Join-Path $source 'build_WINDOWS_GIT_19_8'
+$build = Join-Path $source 'build_WINDOWS_DRAG_AB_19_9'
 $exe = Join-Path $build 'alencar_test7_qt6.exe'
 $cmake = 'C:\msys64\ucrt64\bin\cmake.exe'
 $oldPath = $env:PATH
@@ -27,8 +28,17 @@ try {
  $env:PATH = 'C:\msys64\ucrt64\bin;' + $oldPath
  # A/B identical: disable only the temporary grouped-drag compatibility opt-out.
  [Environment]::SetEnvironmentVariable('ALENCAR_DISABLE_GROUPED_DRAG',$null,'Process')
+ # Preflight nao intrusivo. Nunca encerra processes automaticamente.
+ $usingBuild = @(Get-Process -Name 'alencar_test7_qt6' -ErrorAction SilentlyContinue |
+     Where-Object { $_.Path -and
+       [string]::Equals($_.Path, $exe, [StringComparison]::OrdinalIgnoreCase) })
+ if ($usingBuild.Count -gt 0) {
+  throw "A copia isolada do exe esta em uso. Feche somente essa sessao (PID: $($usingBuild.Id -join ',')) e tente novamente."
+ }
  if (-not $SemCompilar) {
   if (-not (Test-Path -LiteralPath $cmake)) { throw 'CMake UCRT64 ausente.' }
+  Write-Host "Build A/B isolado: $build" -ForegroundColor Cyan
+  Write-Host 'O editor anterior pode permanecer aberto: este exe usa outro diretorio.' -ForegroundColor Cyan
   $configureArgs = @('-S',$source,'-B',$build,'-G','Ninja',
     '-DCMAKE_BUILD_TYPE=Release','-DALENCAR_REQUIRE_QT=ON',
     '-DCMAKE_PREFIX_PATH=C:/msys64/ucrt64',
@@ -39,7 +49,15 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Compilacao Qt falhou; veja os erros acima.' }
  }
  if (-not (Test-Path -LiteralPath $exe)) {
-  throw 'Executavel experimental ausente. Execute sem -SemCompilar.'
+  throw 'Executavel A/B isolado ausente. Execute sem -SemCompilar.'
+ }
+ if ($SemCompilar) {
+  $src = Join-Path $source 'qt\qt6_test6.cpp'
+  $srcTime = (Get-Item -LiteralPath $src).LastWriteTimeUtc
+  $exeTime = (Get-Item -LiteralPath $exe).LastWriteTimeUtc
+  if ($srcTime -gt $exeTime) {
+   throw 'O executavel A/B e mais antigo que a fonte Qt. Execute sem -SemCompilar.'
+  }
  }
  function Testar([string]$dest,[bool]$usarFlag) {
   if ($usarFlag) {
