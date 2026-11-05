@@ -1287,3 +1287,10 @@ Registrar mudanças, testes e pendências.
 - Captura do Windows: compilacao do Qt terminou ate link, mas `ld.exe` falhou em `cannot open output file alencar_test7_qt6.exe: Permission denied` durante [2/2] Linking. Warnings anteriores (`-Wrange-loop-construct`, `misleading-indentation`) nao sao a causa. Provavel bloqueio por exe aberto, mas causa/PID nao confirmados; teste A/B nao executado.
 - Hotfix commit 22b92d5 no SCRIPTS/COMPARAR_DRAG_OVERLAY_19_9.ps1: agora usa DESENVOLVIMENTO/FONTE/build_WINDOWS_DRAG_AB_19_9, isolado do build_WINDOWS_GIT_19_8/Alencar Laser aberto. Nao mata processos; verifica se a propria copia de teste esta em uso, e -SemCompilar evita exe mais antigo que a fonte.
 - Docs atualizadas em DESENVOLVIMENTO/ESPECIFICACOES/EXPERIMENTO_DRAG_OVERLAY_19_9_20261105.md. Operador deve fazer `git pull --ff-only` e repetir `powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\COMPARAR_DRAG_OVERLAY_19_9.ps1` sem -SemCompilar, laser desconectado. Resultado nao homologado ate PASS do A/B real.
+
+
+## 05/11/2026 — PASS A/B Qt de arraste localizado no Windows (40 objetos)
+- Captura do Windows apos build isolado confirmou `[3/3] Linking CXX executable alencar_test7_qt6.exe` sem Permission denied e `PASS: Qt baseline e opt-in, 40 objetos, geometria, Undo/Redo, sem hardware.` pelo COMPARAR_DRAG_OVERLAY_19_9.ps1.
+- Relatorio local (nao publicado): RELATORIOS/AUDITORIAS/GITHUB_19_8/DRAG_OVERLAY_19_9/COMPARACAO_DRAG_OVERLAY_19_9.json. Warnings de C++/Qt nao foram falhas de compilacao.
+- Issue #18 atualizada com essa evidencia; o PASS e **sintetico** de integridade, nao comprovacao de ganho real P95 nem fidelidade da GUI em ~575 objetos. Continua PENDENTE zoom/pan real, rastros de moldura, P95 mouse e CPU.
+- Proximo gate: abrir o mesmo projeto copiado em duas sessoes independentes: launcher ABRIR_19_9_WINDOWS.ps1 normal (OFF) e depois com -TestarRepinturaLocal (ON), laser desconectado; repetir os mesmos gestos/zoom e exportar diagnosticos individuais. Validar paint P95/P99, input_to_paint P95, viewportPaintBBox P95, contadores de overlay, undo/redo e qualidade visual; manter flag desligada por padrao.
