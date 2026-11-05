@@ -128,6 +128,7 @@
 #include <psapi.h>
 #endif
 #include <QPaintEvent>
+#include <QRegion>
 #include <map>
 #include <optional>
 #include <cmath>
@@ -365,6 +366,12 @@ class QtEditorLab final:public QGraphicsView{
  QGraphicsItemGroup* shapePreviewGroup_=nullptr; // transient preview only, never document geometry
  static constexpr std::size_t kGroupedDragThreshold=32;
  int groupedDragStarts_=0,groupedDragFrameUpdates_=0;
+ // A/B opt-in: Qt already invalidates moving scene items automatically;
+ // explicit viewport updates here are only for the selection foreground.
+ // Rollback immediately: unset ALENCAR_LOCAL_DRAG_OVERLAY_19_9.
+ const bool localDragOverlay199_=
+   qEnvironmentVariable("ALENCAR_LOCAL_DRAG_OVERLAY_19_9")=="1";
+ quint64 dragOverlayLocalRequests199_=0,dragOverlayFullFallbacks199_=0;
  // Alcas independentes dos dados; commit unico no mouseRelease.
  bool transformDragging_=false;
  int transformHandle_=-1; // 0..7 tamanho; 8..11 rotacao; 12 move pelo centro
@@ -1696,6 +1703,9 @@ public:
  size_t directQueries()const{return picker_.directQueries();}
  void invalidateSelectionCache(){picker_.invalidate();}
  bool fastDenseDisplay()const noexcept{return fastDenseDisplay_;}
+ bool dragOverlayLocalExperiment199()const noexcept{return localDragOverlay199_;}
+ quint64 dragOverlayLocalRequests199()const noexcept{return dragOverlayLocalRequests199_;}
+ quint64 dragOverlayFullFallbacks199()const noexcept{return dragOverlayFullFallbacks199_;}
  void rebuild(){
   QElapsedTimer rebuildProfiler;rebuildProfiler.start();
   // Adaptive drawing quality: no simplification of geometry or hit-testing.
@@ -2395,6 +2405,33 @@ void mousePressEvent(QMouseEvent* e)override{
    if(r>0){p.moveTo(c+QPointF(r,0));for(int i=1;i<6;i++){double t=2*std::numbers::pi*i/6;p.lineTo(c+QPointF(r*std::cos(t),r*std::sin(t)));}p.closeSubpath();}
   }return p;
  }
+ // Selection outline/handles are painted in drawForeground, not QGraphicsItems.
+ // Invalidate only their OLD and NEW screen bounds; geometry stays untouched.
+ std::optional<QRect> shapeOverlayDirtyRect199(
+     const std::optional<std::array<QPointF,4>>& quad)const{
+  if(!quad)return std::nullopt;
+  const auto handles=handlesForQuad(*quad);
+  double minX=std::numeric_limits<double>::infinity();
+  double minY=std::numeric_limits<double>::infinity();
+  double maxX=-std::numeric_limits<double>::infinity();
+  double maxY=-std::numeric_limits<double>::infinity();
+  for(const auto& point:handles){
+   if(!std::isfinite(point.x())||!std::isfinite(point.y())||
+      std::abs(point.x())>1e7||std::abs(point.y())>1e7)
+    return std::nullopt;
+   minX=std::min(minX,double(point.x()));
+   minY=std::min(minY,double(point.y()));
+   maxX=std::max(maxX,double(point.x()));
+   maxY=std::max(maxY,double(point.y()));
+  }
+  // Margin covers the rotation arcs, cosmetic strokes and antialiasing.
+  constexpr double pad=12.;
+  const QRectF visible=QRectF(QPointF(minX-pad,minY-pad),
+                              QPointF(maxX+pad,maxY+pad))
+                        .intersected(QRectF(viewport()->rect()));
+  if(visible.isEmpty())return QRect{};
+  return visible.toAlignedRect().intersected(viewport()->rect());
+ }
 void mouseMoveEvent(QMouseEvent* e)override{
  if(rasterDragging_||rasterResizing_){
   updateRasterDrag(e->position());e->accept();return;
@@ -2429,6 +2466,8 @@ void mouseMoveEvent(QMouseEvent* e)override{
    if(transformDragging_){updateSelectionTransform(e->position(),e->modifiers());e->accept();return;}
    if(marqueeActive_){showMarquee(e->position());e->accept();return;}
   if(shapeDragging_){
+   const auto oldQuad=localDragOverlay199_?selectionQuadScene():
+                      std::optional<std::array<QPointF,4>>{};
    shapePreviewDelta_=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
    if(shapePreviewGroup_){
     shapePreviewGroup_->setPos(shapePreviewDelta_);
@@ -2436,8 +2475,19 @@ void mouseMoveEvent(QMouseEvent* e)override{
    }else{
     for(auto* item:shapePreviewItems_)item->setPos(shapePreviewDelta_);
    }
-   // drawForeground desenha moldura/alcas; invalida tambem essa camada.
-   viewport()->update();
+   // Scene items invalidate their own geometry. In opt-in mode, update only
+   // OLD and NEW selection handles; default preserves previous full update.
+   if(localDragOverlay199_){
+    const auto oldRect=shapeOverlayDirtyRect199(oldQuad);
+    const auto newRect=shapeOverlayDirtyRect199(selectionQuadScene());
+    if(oldRect&&newRect){
+     const QRegion dirty=QRegion(*oldRect).united(QRegion(*newRect));
+     if(!dirty.isEmpty())viewport()->update(dirty);
+     ++dragOverlayLocalRequests199_;
+    }else{
+     viewport()->update();++dragOverlayFullFallbacks199_;
+    }
+   }else viewport()->update();
    ++frameUpdates;e->accept();return;
   }
   if(draggingNode_&&active_){
@@ -3126,6 +3176,9 @@ public:
       {"foreground_samples",int(view.foregroundMs.size())},
       {"grouped_drag_starts",view.groupedDragStarts()},
       {"grouped_drag_frame_updates",view.groupedDragFrameUpdates()},
+      {"drag_overlay_local_experiment_19_9",view.dragOverlayLocalExperiment199()},
+      {"drag_overlay_local_requests_19_9",double(view.dragOverlayLocalRequests199())},
+      {"drag_overlay_full_fallbacks_19_9",double(view.dragOverlayFullFallbacks199())},
       {"grouped_transform_starts",view.groupedTransformStarts()},
       {"grouped_transform_frame_updates",view.groupedTransformFrameUpdates()},
       {"transform_preview_samples",int(view.transformPreviewMs.size())},
