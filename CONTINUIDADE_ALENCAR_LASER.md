@@ -1264,3 +1264,11 @@ Registrar mudanças, testes e pendências.
 - ESTADO: codigo publicado em branch experimental fix/curvas-tesoura-preflight-19-8-20261030. Os runs recentes da Central de Auditoria no GitHub Actions aparecem failure; logs ainda nao foram acessiveis na consulta. Nenhum PASS Windows do fluxo novo foi confirmado. NAO homologar.
 - Proximos passos: git status --short; git pull --ff-only; executar os dois autotestes offline no PowerShell 5.1; somente depois registrar gestos reais com laser desconectado, preparar relatórios filtrados SEM publicar, inspecionar, e optar por -Publicar.
 - Continuidade: AUDITORIA_GITHUB/README.md, AUDITORIA_GITHUB/INDICE.json, Issue #20 e Issue #18. Producao, instalador, Wi-Fi e GRBL intocados.
+
+
+## 05/11/2026 — Dois autotestes de auditoria PASS local no Windows
+- Captura do operador apos git pull --ff-only: TESTAR_CENTRAL_AUDITORIA_19_9.ps1 PASS para dois esquemas, campos privados rejeitados, indice, validacao negativa e sem transmissao.
+- TESTAR_SESSAO_INTERACAO_19_9.ps1 PASS para geracao offline, CSV de memoria sintetico, SHA, privacidade, status de homologacao pendente. Fixture: 2 casos, 1 FAIL proposital, 3 amostras; NAO SAO TESTES REAIS do editor.
+- Registros da captura foram criados em repositorio temporario; NAO publicar o teste sintetico como sessao real. Issue #20 atualizada.
+- Proxima verificacao: abrir editor experimental com script ABRIR_19_9_WINDOWS.ps1 e laser desconectado; monitorar RAM usando MEDIR_MEMORIA_WINDOWS_19_9.ps1 em outro terminal; testar fisicamente selecao, arraste, zoom/pan, Tesoura, undo/redo numa copia e registrar estados manuais via GERAR_SESSAO_INTERACAO_19_9.ps1. Depois preparar relatorio filtrado SEM -Publicar e revisar.
+- A homologacao do editor e o workflow de CI seguem pendentes. Continuar preservando main/APLICATIVO/instalador e emissao fisica.
