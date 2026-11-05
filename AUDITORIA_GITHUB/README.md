@@ -56,35 +56,35 @@ Mouse real, selecao e deselecao, zoom/pan continuo, Tesoura com curvas, desfazer
 ## 05/11/2026 — Sessao de interacao e consumo de RAM/CPU (experimental)
 
 Novos scripts: 
-- \`SCRIPTS/GERAR_SESSAO_INTERACAO_19_9.ps1\` cria JSON **somente local** de resultados informados pelo operador (\`PASS\`, \`FAIL\` ou \`NOT_TESTED\`) para selecao, arraste, zoom/pan, Tesoura e undo/redo. O status agregado e sempre \`MANUAL_REVIEW_PENDING\`: nao e teste automatico do editor nem homologacao.
-- \`SCRIPTS/MEDIR_MEMORIA_WINDOWS_19_9.ps1\` (ja existente) observa passivamente o processo Qt em funcionamento e gera CSV local.
-- \`SCRIPTS/TESTAR_SESSAO_INTERACAO_19_9.ps1\` executa regressao sintetica de CSV, privacidade e ausencia de homologacao.
-- \`SCRIPTS/TESTAR_CENTRAL_AUDITORIA_19_9.ps1\` tambem exercita o esquema de sessao manual e rejeicao de campos inesperados.
-- O coletor \`REGISTRAR_AUDITORIA_GITHUB_19_9.ps1\` reconhece \`manual-interaction-19.9\`, filtra apenas enums de resultado, contagens e metricas de RAM/CPU. Nomes, caminhos, detalhes de projeto e CSV bruto permanecem fora do GitHub.
+- `SCRIPTS/GERAR_SESSAO_INTERACAO_19_9.ps1` cria JSON **somente local** de resultados informados pelo operador (`PASS`, `FAIL` ou `NOT_TESTED`) para selecao, arraste, zoom/pan, Tesoura e undo/redo. O status agregado e sempre `MANUAL_REVIEW_PENDING`: nao e teste automatico do editor nem homologacao.
+- `SCRIPTS/MEDIR_MEMORIA_WINDOWS_19_9.ps1` (ja existente) observa passivamente o processo Qt em funcionamento e gera CSV local.
+- `SCRIPTS/TESTAR_SESSAO_INTERACAO_19_9.ps1` executa regressao sintetica de CSV, privacidade e ausencia de homologacao.
+- `SCRIPTS/TESTAR_CENTRAL_AUDITORIA_19_9.ps1` tambem exercita o esquema de sessao manual e rejeicao de campos inesperados.
+- O coletor `REGISTRAR_AUDITORIA_GITHUB_19_9.ps1` reconhece `manual-interaction-19.9`, filtra apenas enums de resultado, contagens e metricas de RAM/CPU. Nomes, caminhos, detalhes de projeto e CSV bruto permanecem fora do GitHub.
 
 ### Teste manual no editor (laser desconectado)
 
-Abra uma **copia** do projeto na versao experimental e observe as funcoes. Use \`PASS\` somente se realmente testou e viu funcionar; \`FAIL\` para defeito reproduzido; \`NOT_TESTED\` para nao executado. Exemplo ilustrativo (substitua pelos resultados observados):
+Abra uma **copia** do projeto na versao experimental e observe as funcoes. Use `PASS` somente se realmente testou e viu funcionar; `FAIL` para defeito reproduzido; `NOT_TESTED` para nao executado. Exemplo ilustrativo (substitua pelos resultados observados):
 
-\`\`\`powershell
+```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\GERAR_SESSAO_INTERACAO_19_9.ps1" -Selecao PASS -Arraste NOT_TESTED -ZoomPan NOT_TESTED -Tesoura NOT_TESTED -DesfazerRefazer NOT_TESTED
-\`\`\`
+```
 
 Para medir RAM/CPU, com o processo experimental Qt aberto (sem hardware), execute o medidor em um terminal diferente durante os gestos:
 
-\`\`\`powershell
+```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\MEDIR_MEMORIA_WINDOWS_19_9.ps1" -DuracaoSegundos 180
-\`\`\`
+```
 
-Use o caminho CSV informado ao final para gerar um relatorio de sessao com \`-CsvMemoria "caminho.csv"\`. Se quiser associar o mesmo teste a uma copia do projeto, use \`-ProjetoCopia "caminho_do_arquivo.lbrn2"\`: calcula apenas o SHA-256 e nunca inclui o nome/caminho no JSON.
+Use o caminho CSV informado ao final para gerar um relatorio de sessao com `-CsvMemoria "caminho.csv"`. Se quiser associar o mesmo teste a uma copia do projeto, use `-ProjetoCopia "caminho_do_arquivo.lbrn2"`: calcula apenas o SHA-256 e nunca inclui o nome/caminho no JSON.
 
 ### Seguranca, coleta e publicacao
 
-1. Testar: \`TESTAR_CENTRAL_AUDITORIA_19_9.ps1\` e \`TESTAR_SESSAO_INTERACAO_19_9.ps1\` (e conferir Actions).
-2. Preparar registros: \`REGISTRAR_AUDITORIA_GITHUB_19_9.ps1\` **sem** \`-Publicar\`.
-3. Inspecionar somente \`AUDITORIA_GITHUB/INDICE.json\` e \`AUDITORIA_GITHUB/REGISTROS/\`.
-4. Publicar seletivamente com \`-Publicar\` somente apos revisar dados filtrados.
+1. Testar: `TESTAR_CENTRAL_AUDITORIA_19_9.ps1` e `TESTAR_SESSAO_INTERACAO_19_9.ps1` (e conferir Actions).
+2. Preparar registros: `REGISTRAR_AUDITORIA_GITHUB_19_9.ps1` **sem** `-Publicar`.
+3. Inspecionar somente `AUDITORIA_GITHUB/INDICE.json` e `AUDITORIA_GITHUB/REGISTROS/`.
+4. Publicar seletivamente com `-Publicar` somente apos revisar dados filtrados.
 
-\`machine_commands_sent = null\` nas sessoes significa **nao medido**; nao significa que comandos foram enviados, nem prova ausencia deles. O gerador nao abre conexao e os testes devem ser feitos com hardware desconectado.
+`machine_commands_sent = null` nas sessoes significa **nao medido**; nao significa que comandos foram enviados, nem prova ausencia deles. O gerador nao abre conexao e os testes devem ser feitos com hardware desconectado.
 
-Nenhum teste da sessao habilita cache no aplicativo normal. A \`main\`, instalador, \`APLICATIVO\`, projetos reais e as portas de laser continuam inalterados.
+Nenhum teste da sessao habilita cache no aplicativo normal. A `main`, instalador, `APLICATIVO`, projetos reais e as portas de laser continuam inalterados.
