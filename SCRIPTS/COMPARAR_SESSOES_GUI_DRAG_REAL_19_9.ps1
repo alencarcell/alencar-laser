@@ -104,11 +104,18 @@ $ratio = [math]::Min($paintSamplesOff,$paintSamplesOn)/
 if ($ratio -lt 0.7) {
  $issues.Add('Quantidade de amostras de pintura difere mais de 30% entre OFF e ON.')
 }
+# A comparison with unbalanced samples or different environments cannot pass a speed gate.
+# Even with balanced samples, manually performed gestures/zoom are not controlled.
+$comparisonGate = if ($issues.Count -gt 0) { 'INCONCLUSIVE' } else { 'OBSERVATIONAL_ONLY' }
 $memOff = Campo $off 'memory'
 $memOn  = Campo $on 'memory'
 $result = [ordered]@{
  schema = 'alencar-laser-manual-drag-ab-summary-19.9'
  status = 'OBSERVATIONAL_NOT_HOMOLOGATED'
+ comparison_gate = $comparisonGate
+ controlled_gestures_confirmed = $false
+ speedup_claim_allowed = $false
+ paint_sample_balance_ratio = [math]::Round($ratio,4)
  source = 'two-local-interactive-qt-sessions'
  baseline_off = [ordered]@{
   paint_samples = $paintSamplesOff
@@ -147,6 +154,7 @@ $out = Join-Path $outRoot ('COMPARACAO_GUI_REAL_DRAG_19_9_' +
 [IO.File]::WriteAllText($out,(($result | ConvertTo-Json -Depth 8)+[Environment]::NewLine),
  [Text.UTF8Encoding]::new($false))
 Write-Host 'ALENCAR LASER - comparacao observacional OFF/ON' -ForegroundColor Cyan
+Write-Host ('Gate: {0} (razao de amostras: {1:N4})' -f $comparisonGate,$ratio) -ForegroundColor Yellow
 Write-Host ('OFF pintura P95: {0} ms ({1} amostras)' -f $pOff,$paintSamplesOff)
 Write-Host ('ON  pintura P95: {0} ms ({1} amostras)' -f $pOn,$paintSamplesOn)
 Write-Host ('Delta de pintura P95 (positivo favorece ON): {0}%' -f (Delta $pOff $pOn))
@@ -155,5 +163,8 @@ Write-Host ('Delta entrada->pintura P95 (positivo favorece ON): {0}%' -f (Delta 
 Write-Host ('OFF RSS ao sair: {0} bytes / ON: {1} bytes' -f (Numero $memOff 'rss_bytes'),(Numero $memOn 'rss_bytes'))
 foreach ($warning in $issues) { Write-Warning $warning }
 Write-Warning 'Comparacao observacional: sem garantia de gestos/zoom iguais, sem P99 e sem homologacao.'
+if ($comparisonGate -eq 'INCONCLUSIVE') {
+ Write-Warning 'NAO USAR este delta para afirmar ganho ou regressao causal da otimizacao.'
+}
 Write-Host "JSON local: $out"
 Write-Host 'SEM ENVIO. Nenhuma maquina conectada ou acionada.' -ForegroundColor Green
