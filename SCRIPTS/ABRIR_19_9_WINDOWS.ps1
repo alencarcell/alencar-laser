@@ -28,7 +28,16 @@ try {
     $exeBuild = if ($UsarBuildDragAB) { 'build_WINDOWS_DRAG_AB_19_9' } else { 'build_WINDOWS_GIT_19_8' }
     $exe = Join-Path $root ("DESENVOLVIMENTO\FONTE\$exeBuild\alencar_test7_qt6.exe")
     $fixture = Join-Path $root 'DESENVOLVIMENTO\FONTE\fixtures\web_nodes_normalized.csv'
-    $sessionDir = Join-Path $root 'RELATORIOS\AUDITORIAS\GITHUB_19_8\sessao'
+    $sessionRoot = Join-Path $root 'RELATORIOS\AUDITORIAS\GITHUB_19_8\sessao'
+    $sessionDir = $sessionRoot
+    if ($UsarBuildDragAB) {
+        # An isolated, unique folder prevents the ON run from overwriting
+        # the OFF session's SESSAO_INTERATIVA_TESTE_6.json.
+        $modeLabel = if ($TestarRepinturaLocal) { 'ON' } else { 'OFF' }
+        $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+        $nonce = [Guid]::NewGuid().ToString('N').Substring(0,8)
+        $sessionDir = Join-Path $sessionRoot ("DRAG_AB_19_9_" + $modeLabel + "_" + $stamp + "_" + $nonce)
+    }
     foreach ($file in @($exe, $fixture)) {
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
             throw "Arquivo ausente: $file. Compile a candidata com TESTAR_19_8_WINDOWS.ps1 primeiro."
@@ -48,6 +57,7 @@ try {
         return
     }
     [void](New-Item -ItemType Directory -Path $sessionDir -Force)
+    if ($UsarBuildDragAB) { Write-Host "Pasta exclusiva desta sessao: $sessionDir" -ForegroundColor Cyan }
     $env:PATH = $ucrtBin + ';' + $originalPath
     if ($ModoCompatibilidade) {
         # Disable only transient grouped-drag optimization. Files, history
@@ -62,9 +72,21 @@ try {
     Push-Location -LiteralPath $root
     $didPush = $true
     Write-Host 'Abrindo editor experimental. Mantenha o laser desconectado.' -ForegroundColor Yellow
+    $inicio = Get-Date
     & $exe --interactive $fixture $sessionDir
-    if ($LASTEXITCODE -ne 0) {
-        throw "Editor encerrou com codigo $LASTEXITCODE. Confira mensagens acima."
+    $codigoEditor = $LASTEXITCODE
+    $tempo = [math]::Round(((Get-Date)-$inicio).TotalSeconds,1)
+    Write-Host "Editor encerrou; duracao: $tempo segundos; codigo: $codigoEditor" -ForegroundColor Cyan
+    if ($UsarBuildDragAB) {
+        $telemetria = Join-Path $sessionDir 'SESSAO_INTERATIVA_TESTE_6.json'
+        if (Test-Path -LiteralPath $telemetria -PathType Leaf) {
+            Write-Host "Relatorio automatico desta sessao: $telemetria" -ForegroundColor Green
+        } else {
+            Write-Warning "Relatorio automatico nao encontrado: $telemetria"
+        }
+    }
+    if ($codigoEditor -ne 0) {
+        throw "Editor encerrou com codigo $codigoEditor. Confira mensagens acima."
     }
 }
 catch {
