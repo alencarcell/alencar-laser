@@ -1294,3 +1294,10 @@ Registrar mudanças, testes e pendências.
 - Relatorio local (nao publicado): RELATORIOS/AUDITORIAS/GITHUB_19_8/DRAG_OVERLAY_19_9/COMPARACAO_DRAG_OVERLAY_19_9.json. Warnings de C++/Qt nao foram falhas de compilacao.
 - Issue #18 atualizada com essa evidencia; o PASS e **sintetico** de integridade, nao comprovacao de ganho real P95 nem fidelidade da GUI em ~575 objetos. Continua PENDENTE zoom/pan real, rastros de moldura, P95 mouse e CPU.
 - Proximo gate: abrir o mesmo projeto copiado em duas sessoes independentes: launcher ABRIR_19_9_WINDOWS.ps1 normal (OFF) e depois com -TestarRepinturaLocal (ON), laser desconectado; repetir os mesmos gestos/zoom e exportar diagnosticos individuais. Validar paint P95/P99, input_to_paint P95, viewportPaintBBox P95, contadores de overlay, undo/redo e qualidade visual; manter flag desligada por padrao.
+
+
+## 05/11/2026 — Correção do protocolo A/B manual: mesmo executável
+- O A/B sintetico OFF/ON compilou e passou (40 objetos, geometria, Undo/Redo) no build isolado build_WINDOWS_DRAG_AB_19_9, sem enviar comandos para laser. Arquivo JSON permanece local.
+- Detectado risco: ABRIR_19_9_WINDOWS.ps1 antigo apontava para build_WINDOWS_GIT_19_8, diferente do exe A/B recém-compilado. Commit a3d28f8 adicionou -UsarBuildDragAB e exige essa flag quando -TestarRepinturaLocal. Mesma compilacao deve ser usada no OFF e no ON.
+- Comandos corretos apos git pull: `powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -UsarBuildDragAB` (OFF); fechar; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -UsarBuildDragAB -TestarRepinturaLocal` (ON). Testar copia do mesmo projeto, laser desconectado, exportar diagnósticos separadamente e comparar paint/input P95, repintura, RSS e artefatos.
+- Gate de GUI real ainda pendente; nao divulgar ganho P95 nao medido. Documentacao DESENVOLVIMENTO/ESPECIFICACOES/EXPERIMENTO_DRAG_OVERLAY_19_9_20261105.md revisada.
