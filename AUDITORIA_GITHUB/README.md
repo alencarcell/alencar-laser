@@ -24,7 +24,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\REGISTRAR_AUDITOR
 
 A validação opcional em GitHub Actions está em `.github/workflows/central-auditoria-19-9.yml`; verificar os resultados antes de considerar o coletor validado.
 
-O script coleta **o ultimo** JSON `AUDITORIA_CACHE_ZOOM_19_9_*.json` e o ultimo `COMPARACAO_CACHE_19_9_*.json`. Opcoes: `-Todos` importa historico local reconhecido, `-ArquivoJson "caminho.json"` seleciona um arquivo especifico. O modo normal **nao faz commit nem push**. O modo `-Publicar` requer acao explicita, verifica branch e remote, recusa staging anterior e inclui somente registros filtrados e o indice. Nunca usa `git add .`, `--force` nem grava na `main`.
+O script coleta **o ultimo** JSON `AUDITORIA_CACHE_ZOOM_19_9_*.json`, o ultimo `COMPARACAO_CACHE_19_9_*.json` e a ultima sessao `SESSAO_INTERACAO_19_9_*.json` (quando disponiveis). Opcoes: `-Todos` importa historico local reconhecido, `-ArquivoJson "caminho.json"` seleciona um arquivo especifico. O modo normal **nao faz commit nem push**. O modo `-Publicar` requer acao explicita, verifica branch e remote, recusa staging anterior e inclui somente registros filtrados e o indice. Nunca usa `git add .`, `--force` nem grava na `main`.
 
 ## Campos de cada registro
 
@@ -33,7 +33,7 @@ O script coleta **o ultimo** JSON `AUDITORIA_CACHE_ZOOM_19_9_*.json` e o ultimo 
 - metrics numericas permitidas: contornos, P95 com/sem cache, percentual, memoria estimada, zoom visivel, quantidade de itens em cache, pixels divergentes acima de 8 e quantidade de checks falhos;
 - estado de homologacao sempre **falso**, ate processo separado e validacao manual.
 
-**Nao exportar:** JSON original, caminho de usuario, CPF, contato, nome de clientes, imagens, .lbrn2, .alaser, logs de comunicacao, fotos, scripts .env, tokens ou segredos. Nao se permite copiar campos de texto livres do relatorio. O codigo admite apenas dois esquemas tecnicos conhecidos; outro JSON e rejeitado.
+**Nao exportar:** JSON original, caminho de usuario, CPF, contato, nome de clientes, imagens, .lbrn2, .alaser, logs de comunicacao, fotos, scripts .env, tokens ou segredos. Nao se permite copiar campos de texto livres do relatorio. O codigo admite somente tres esquemas tecnicos conhecidos (zoom, cache A/B e sessao manual); outro JSON e rejeitado.
 
 ## Interpretacao correta
 
@@ -51,3 +51,40 @@ O script coleta **o ultimo** JSON `AUDITORIA_CACHE_ZOOM_19_9_*.json` e o ultimo 
 ## Proximos testes
 
 Mouse real, selecao e deselecao, zoom/pan continuo, Tesoura com curvas, desfazer/refazer, RSS e pelo menos mais duas rodadas A/B com origem identica. Se houver diferencas visuais, registrar FAIL/INCONCLUSIVE em vez de chamar o cache de homologado.
+
+
+## 05/11/2026 — Sessao de interacao e consumo de RAM/CPU (experimental)
+
+Novos scripts: 
+- \`SCRIPTS/GERAR_SESSAO_INTERACAO_19_9.ps1\` cria JSON **somente local** de resultados informados pelo operador (\`PASS\`, \`FAIL\` ou \`NOT_TESTED\`) para selecao, arraste, zoom/pan, Tesoura e undo/redo. O status agregado e sempre \`MANUAL_REVIEW_PENDING\`: nao e teste automatico do editor nem homologacao.
+- \`SCRIPTS/MEDIR_MEMORIA_WINDOWS_19_9.ps1\` (ja existente) observa passivamente o processo Qt em funcionamento e gera CSV local.
+- \`SCRIPTS/TESTAR_SESSAO_INTERACAO_19_9.ps1\` executa regressao sintetica de CSV, privacidade e ausencia de homologacao.
+- \`SCRIPTS/TESTAR_CENTRAL_AUDITORIA_19_9.ps1\` tambem exercita o esquema de sessao manual e rejeicao de campos inesperados.
+- O coletor \`REGISTRAR_AUDITORIA_GITHUB_19_9.ps1\` reconhece \`manual-interaction-19.9\`, filtra apenas enums de resultado, contagens e metricas de RAM/CPU. Nomes, caminhos, detalhes de projeto e CSV bruto permanecem fora do GitHub.
+
+### Teste manual no editor (laser desconectado)
+
+Abra uma **copia** do projeto na versao experimental e observe as funcoes. Use \`PASS\` somente se realmente testou e viu funcionar; \`FAIL\` para defeito reproduzido; \`NOT_TESTED\` para nao executado. Exemplo ilustrativo (substitua pelos resultados observados):
+
+\`\`\`powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\GERAR_SESSAO_INTERACAO_19_9.ps1" -Selecao PASS -Arraste NOT_TESTED -ZoomPan NOT_TESTED -Tesoura NOT_TESTED -DesfazerRefazer NOT_TESTED
+\`\`\`
+
+Para medir RAM/CPU, com o processo experimental Qt aberto (sem hardware), execute o medidor em um terminal diferente durante os gestos:
+
+\`\`\`powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\MEDIR_MEMORIA_WINDOWS_19_9.ps1" -DuracaoSegundos 180
+\`\`\`
+
+Use o caminho CSV informado ao final para gerar um relatorio de sessao com \`-CsvMemoria "caminho.csv"\`. Se quiser associar o mesmo teste a uma copia do projeto, use \`-ProjetoCopia "caminho_do_arquivo.lbrn2"\`: calcula apenas o SHA-256 e nunca inclui o nome/caminho no JSON.
+
+### Seguranca, coleta e publicacao
+
+1. Testar: \`TESTAR_CENTRAL_AUDITORIA_19_9.ps1\` e \`TESTAR_SESSAO_INTERACAO_19_9.ps1\` (e conferir Actions).
+2. Preparar registros: \`REGISTRAR_AUDITORIA_GITHUB_19_9.ps1\` **sem** \`-Publicar\`.
+3. Inspecionar somente \`AUDITORIA_GITHUB/INDICE.json\` e \`AUDITORIA_GITHUB/REGISTROS/\`.
+4. Publicar seletivamente com \`-Publicar\` somente apos revisar dados filtrados.
+
+\`machine_commands_sent = null\` nas sessoes significa **nao medido**; nao significa que comandos foram enviados, nem prova ausencia deles. O gerador nao abre conexao e os testes devem ser feitos com hardware desconectado.
+
+Nenhum teste da sessao habilita cache no aplicativo normal. A \`main\`, instalador, \`APLICATIVO\`, projetos reais e as portas de laser continuam inalterados.
