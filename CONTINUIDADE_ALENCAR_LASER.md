@@ -1253,3 +1253,14 @@ Registrar mudanças, testes e pendências.
 - \`RELATORIOS/\` permanece ignorada pelo Git; o script nao habilita laser, nao altera main/APLICATIVO/instalador e nao implica homologacao. Primeiro executar o autoteste em Windows; depois preparar, inspecionar e publicar separadamente apenas os dados filtrados.
 - Entrada de continuidade para outros chats: \`AUDITORIA_GITHUB/README.md\`, \`AUDITORIA_GITHUB/INDICE.json\`, Issue #20 e Issue #18 (benchmark Qt). O registro no GitHub ate aqui e codigo/documentacao, nao uma prova de envio dos JSON reais.
 - Comandos Windows seguros, a partir de \`C:\ProjetoAlencarLaser\` e apos \`git status --short\`: \`git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030\`; \`powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\TESTAR_CENTRAL_AUDITORIA_19_9.ps1"\`; apos PASS, \`powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\REGISTRAR_AUDITORIA_GITHUB_19_9.ps1"\`. Publicacao opcional somente apos revisao usando \`-Publicar\`.
+
+
+## 05/11/2026 — Central de Auditoria: sessoes de interacao (Issue #20)
+- Verificado no GitHub: primeira publicacao de 04/11/2026 gravou AUDITORIA_GITHUB/INDICE.json com records_count=2 (cache A/B e zoom); main e producao preservadas.
+- Criado SCRIPTS/GERAR_SESSAO_INTERACAO_19_9.ps1: registra localmente os estados manuais PASS/FAIL/NOT_TESTED de selecao, arraste, zoom/pan, Tesoura e undo/redo. O status agregado sempre e MANUAL_REVIEW_PENDING; nao e teste automatico do editor.
+- O script MEDIR_MEMORIA_WINDOWS_19_9.ps1 (ja existente) fornece CSV passivo de RAM/CPU. O novo gerador pode importar o CSV e registrar amostras, RSS P95/max e CPU P95. PID, caminho, nome do projeto e CSV bruto nao sao exportados.
+- SCRIPTS/REGISTRAR_AUDITORIA_GITHUB_19_9.ps1 reconhece tipo interaction_session, filtra metadados permitidos, incorpora no indice e permite publicacao apenas mediante -Publicar explicito. SHA do projeto e opcional; somente prefixo segue para o GitHub.
+- Testes sinteticos: TESTAR_CENTRAL_AUDITORIA_19_9.ps1 ampliado e TESTAR_SESSAO_INTERACAO_19_9.ps1 criado. Workflow .github/workflows/central-auditoria-19-9.yml ampliado para ambos.
+- ESTADO: codigo publicado em branch experimental fix/curvas-tesoura-preflight-19-8-20261030. Os runs recentes da Central de Auditoria no GitHub Actions aparecem failure; logs ainda nao foram acessiveis na consulta. Nenhum PASS Windows do fluxo novo foi confirmado. NAO homologar.
+- Proximos passos: git status --short; git pull --ff-only; executar os dois autotestes offline no PowerShell 5.1; somente depois registrar gestos reais com laser desconectado, preparar relatórios filtrados SEM publicar, inspecionar, e optar por -Publicar.
+- Continuidade: AUDITORIA_GITHUB/README.md, AUDITORIA_GITHUB/INDICE.json, Issue #20 e Issue #18. Producao, instalador, Wi-Fi e GRBL intocados.
