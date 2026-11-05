@@ -15,6 +15,7 @@ $exe = Join-Path $build 'alencar_test7_qt6.exe'
 $cmake = 'C:\msys64\ucrt64\bin\cmake.exe'
 $oldPath = $env:PATH
 $oldFlag = [Environment]::GetEnvironmentVariable('ALENCAR_LOCAL_DRAG_OVERLAY_19_9','Process')
+$oldGrouped = [Environment]::GetEnvironmentVariable('ALENCAR_DISABLE_GROUPED_DRAG','Process')
 $dir = Join-Path $root 'RELATORIOS\AUDITORIAS\GITHUB_19_8\DRAG_OVERLAY_19_9'
 $off = Join-Path $dir 'OFF'
 $on = Join-Path $dir 'ON'
@@ -24,6 +25,8 @@ try {
   throw 'Runtime UCRT64 incompleto: libminizip-1.dll ausente.'
  }
  $env:PATH = 'C:\msys64\ucrt64\bin;' + $oldPath
+ # A/B identical: disable only the temporary grouped-drag compatibility opt-out.
+ [Environment]::SetEnvironmentVariable('ALENCAR_DISABLE_GROUPED_DRAG',$null,'Process')
  if (-not $SemCompilar) {
   if (-not (Test-Path -LiteralPath $cmake)) { throw 'CMake UCRT64 ausente.' }
   $configureArgs = @('-S',$source,'-B',$build,'-G','Ninja',
@@ -98,5 +101,6 @@ try {
 }
 finally {
  [Environment]::SetEnvironmentVariable('ALENCAR_LOCAL_DRAG_OVERLAY_19_9',$oldFlag,'Process')
+ [Environment]::SetEnvironmentVariable('ALENCAR_DISABLE_GROUPED_DRAG',$oldGrouped,'Process')
  $env:PATH = $oldPath
 }
