@@ -25,7 +25,7 @@ git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_DRAG_OVERLAY_19_9.ps1"
 ```
 
-O script compila `alencar_test7_qt6.exe` no build **de desenvolvimento**, chama a mesma regressão Qt de arraste agrupado (40 objetos) primeiro com a flag OFF, depois ON, e gera `RELATORIOS/AUDITORIAS/GITHUB_19_8/DRAG_OVERLAY_19_9/COMPARACAO_DRAG_OVERLAY_19_9.json`. Exige `PASS` da regressão de geometria, grupo transitório, Undo/Redo, e valida que o modo ON realmente solicitou repintura local. **Ainda não prova melhora de P95 real nem fidelidade em seleções 575.**
+O script compila `alencar_test7_qt6.exe` no build **isolado** `DESENVOLVIMENTO/FONTE/build_WINDOWS_DRAG_AB_19_9` (separado do editor em `build_WINDOWS_GIT_19_8`, que pode permanecer aberto), chama a mesma regressão Qt de arraste agrupado (40 objetos) primeiro com a flag OFF, depois ON, e gera `RELATORIOS/AUDITORIAS/GITHUB_19_8/DRAG_OVERLAY_19_9/COMPARACAO_DRAG_OVERLAY_19_9.json`. Exige `PASS` da regressão de geometria, grupo transitório, Undo/Redo, e valida que o modo ON realmente solicitou repintura local. **Ainda não prova melhora de P95 real nem fidelidade em seleções 575.**
 
 Para rodar novamente com executável já compilado, opcionalmente acrescente `-SemCompilar` ao comando.
 
@@ -53,3 +53,13 @@ Repetir seleção por área, arraste de centenas de formas, zoom e pan, Tesoura,
 ## Continuidade
 
 Ver Issue #18 (desempenho) e Issue #20 (auditoria). Branch `fix/curvas-tesoura-preflight-19-8-20261030` permanece experimental. O teste Qt do arraste existente foi ampliado para validar contadores de invalidação local quando a flag está ligada.
+
+
+## 05/11/2026 — Correção do bloqueio do linker no Windows
+
+Uma captura do operador mostrou a falha `ld.exe: cannot open output file alencar_test7_qt6.exe: Permission denied` durante `[2/2] Linking CXX executable`, após warnings não fatais do compilador. O cenário é **compatível com o executável aberto/bloqueado**, mas a causa exata não foi confirmada por PID. O A/B não executou, e não há PASS novo.
+
+O hotfix do script `COMPARAR_DRAG_OVERLAY_19_9.ps1` (commit `22b92d5`) evita compartilhar o alvo binário com o editor: agora compila e executa uma **cópia isolada** em `build_WINDOWS_DRAG_AB_19_9`, diretório ignorado pelo Git. Não força encerramento de processos e não altera a versão experimental aberta. Se a própria cópia A/B estiver em uso, o preflight recusa o teste e informa o processo. O modo `-SemCompilar` também recusa executável mais antigo que a fonte Qt.
+
+Para retomar, após `git pull --ff-only`, repita o comando sem `-SemCompilar`. A primeira compilação isolada pode recompilar o alvo inteiro. Somente considerar o gate aprovado após aparecer `PASS` nos dois modos e existir o JSON de comparação; não tratar warnings como falha.
+
