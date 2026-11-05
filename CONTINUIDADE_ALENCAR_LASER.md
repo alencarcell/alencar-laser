@@ -1272,3 +1272,12 @@ Registrar mudanças, testes e pendências.
 - Registros da captura foram criados em repositorio temporario; NAO publicar o teste sintetico como sessao real. Issue #20 atualizada.
 - Proxima verificacao: abrir editor experimental com script ABRIR_19_9_WINDOWS.ps1 e laser desconectado; monitorar RAM usando MEDIR_MEMORIA_WINDOWS_19_9.ps1 em outro terminal; testar fisicamente selecao, arraste, zoom/pan, Tesoura, undo/redo numa copia e registrar estados manuais via GERAR_SESSAO_INTERACAO_19_9.ps1. Depois preparar relatorio filtrado SEM -Publicar e revisar.
 - A homologacao do editor e o workflow de CI seguem pendentes. Continuar preservando main/APLICATIVO/instalador e emissao fisica.
+
+
+## 05/11/2026 — Otimizacao experimental do overlay de arraste (opt-in)
+- Diagnostico real TESTE_19.8 do operador: 195 eventos, selecoes/arrastes ~558-575 objetos, paint P95=208.7439 ms, MAX=663.3852 ms, viewportPaintBBox P95=1, inputToPaint P95=58.2393 ms. Causa isolada ainda NAO COMPROVADA; correlacao com full viewport update no mouseMove(shapeDragging_) motivou o experimento.
+- Em DESENVOLVIMENTO/FONTE/qt/qt6_test6.cpp, implementada invalidacao local apenas do overlay da moldura/alcas antes/depois do movimento usando QRegion. FLAG EXPLICITA `ALENCAR_LOCAL_DRAG_OVERLAY_19_9=1`; comportamento legacy segue como DEFAULT. Qt invalida os items movidos sozinho. Ha fallback full viewport se pontos nao finitos/limites invalidos. Nao altera geometria canonica, Undo/Redo, arquivo .alaser, emissao ou maquina.
+- Novos contadores de diagnostico: drag_overlay_local_experiment_19_9, drag_overlay_local_requests_19_9, drag_overlay_full_fallbacks_19_9. Teste Qt --grouped-drag-19-9-test estendido para verificar flag e contadores junto com integridade/Undo/Redo.
+- SCRIPTS/ABRIR_19_9_WINDOWS.ps1 aceita `-TestarRepinturaLocal` (variavel de processo restaurada ao finalizar), SCRIPTS/COMPARAR_DRAG_OVERLAY_19_9.ps1 compila build Qt experimental e executa A/B sintetico de 40 objetos OFF/ON gerando JSON local. Nenhum envio automatico ao GitHub.
+- Especificacao e passos: DESENVOLVIMENTO/ESPECIFICACOES/EXPERIMENTO_DRAG_OVERLAY_19_9_20261105.md. PROXIMO GATE: executar no Windows com laser desconectado, depois duas sessoes reais com mesma copia (OFF/ON), zoom/selecoes/Tesoura/undo, medir P95/artefatos. CI da branch ainda apresenta failure sem causa verificada; NAO afirmar PASS, nem homologar.
+- Branch fix/curvas-tesoura-preflight-19-8-20261030 apenas; main, APLICATIVO, instalador, Wi-Fi/GRBL e laser fisico preservados. Reversao por flag: iniciar sem `-TestarRepinturaLocal`.
