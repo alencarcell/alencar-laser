@@ -7,10 +7,11 @@ Usage (from repo root):
  powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1"
  powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -VerificarSomente
  powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -ModoCompatibilidade
- powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -TestarRepinturaLocal
+ powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -UsarBuildDragAB
+ powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -UsarBuildDragAB -TestarRepinturaLocal
 #>
 [CmdletBinding()]
-param([switch]$VerificarSomente, [switch]$ModoCompatibilidade, [switch]$TestarRepinturaLocal)
+param([switch]$VerificarSomente, [switch]$ModoCompatibilidade, [switch]$TestarRepinturaLocal, [switch]$UsarBuildDragAB)
 
 $ErrorActionPreference = 'Stop'
 $originalPath = $env:PATH
@@ -21,7 +22,11 @@ try {
     $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
     $ucrtBin = 'C:\msys64\ucrt64\bin'
     $requiredDll = Join-Path $ucrtBin 'libminizip-1.dll'
-    $exe = Join-Path $root 'DESENVOLVIMENTO\FONTE\build_WINDOWS_GIT_19_8\alencar_test7_qt6.exe'
+    if ($TestarRepinturaLocal -and -not $UsarBuildDragAB) {
+        throw 'Teste real de repintura 19.9 exige -UsarBuildDragAB para usar a mesma compilacao isolada nas sessoes OFF/ON.'
+    }
+    $exeBuild = if ($UsarBuildDragAB) { 'build_WINDOWS_DRAG_AB_19_9' } else { 'build_WINDOWS_GIT_19_8' }
+    $exe = Join-Path $root ("DESENVOLVIMENTO\FONTE\$exeBuild\alencar_test7_qt6.exe")
     $fixture = Join-Path $root 'DESENVOLVIMENTO\FONTE\fixtures\web_nodes_normalized.csv'
     $sessionDir = Join-Path $root 'RELATORIOS\AUDITORIAS\GITHUB_19_8\sessao'
     foreach ($file in @($exe, $fixture)) {
@@ -34,6 +39,9 @@ try {
     }
     Write-Host 'Alencar Laser - runtime UCRT64 encontrado.' -ForegroundColor Green
     Write-Host "Executavel: $exe"
+    if ($UsarBuildDragAB) {
+        Write-Host 'COMPARACAO REAL: mesmo executavel isolado para modo OFF e ON.' -ForegroundColor Cyan
+    }
     Write-Host "MiniZip: $requiredDll"
     if ($VerificarSomente) {
         Write-Host 'Preflight de arquivos: PASS. O editor nao foi iniciado.' -ForegroundColor Green
