@@ -65,3 +65,12 @@ O hotfix do script `COMPARAR_DRAG_OVERLAY_19_9.ps1` (commit `22b92d5`) evita com
 
 Para retomar, após `git pull --ff-only`, repita o comando sem `-SemCompilar`. A primeira compilação isolada pode recompilar o alvo inteiro. Somente considerar o gate aprovado após aparecer `PASS` nos dois modos e existir o JSON de comparação; não tratar warnings como falha.
 
+
+
+## 05/11/2026 — Telemetria OFF/ON em pastas separadas
+
+A captura do operador mostra a execução do launcher ON com aviso de flag ativa, seguida do prompt PowerShell. A versão Qt interativa usa `app.exec()`; portanto, o retorno do prompt implica que o processo inicial terminou (mas não comprova por quanto tempo a janela ficou visível nem se os gestos foram testados).
+
+Foi identificado um risco no launcher anterior: OFF e ON passavam a mesma pasta `RELATORIOS/AUDITORIAS/GITHUB_19_8/sessao` para `--interactive`, cujo JSON automático tem sempre o nome `SESSAO_INTERATIVA_TESTE_6.json`. Assim, uma sessão podia substituir o arquivo da outra.
+
+O launcher experimental agora cria pastas únicas `DRAG_AB_19_9_OFF_<data>_<id>` e `DRAG_AB_19_9_ON_<data>_<id>`, informa duração e código de saída, e mostra o caminho do JSON automático. Cada pasta permanece local em `RELATORIOS` (ignorada pelo Git). Para uma comparação fiel, execute novamente OFF e ON com o launcher atualizado e o mesmo projeto/copias equivalentes; confirme os dois caminhos distintos. A saída automática não equivale a comprovação de melhora visual, e os diagnósticos adicionais podem exigir exportação manual.
