@@ -74,3 +74,28 @@ A captura do operador mostra a execução do launcher ON com aviso de flag ativa
 Foi identificado um risco no launcher anterior: OFF e ON passavam a mesma pasta `RELATORIOS/AUDITORIAS/GITHUB_19_8/sessao` para `--interactive`, cujo JSON automático tem sempre o nome `SESSAO_INTERATIVA_TESTE_6.json`. Assim, uma sessão podia substituir o arquivo da outra.
 
 O launcher experimental agora cria pastas únicas `DRAG_AB_19_9_OFF_<data>_<id>` e `DRAG_AB_19_9_ON_<data>_<id>`, informa duração e código de saída, e mostra o caminho do JSON automático. Cada pasta permanece local em `RELATORIOS` (ignorada pelo Git). Para uma comparação fiel, execute novamente OFF e ON com o launcher atualizado e o mesmo projeto/copias equivalentes; confirme os dois caminhos distintos. A saída automática não equivale a comprovação de melhora visual, e os diagnósticos adicionais podem exigir exportação manual.
+
+
+## 05/11/2026 — Comparador observacional de sessões GUI
+
+As imagens do operador comprovam duas sessões usando o mesmo executável experimental:
+- OFF: 98,9 segundos, encerramento 0, telemetria automática salva em diretório `DRAG_AB_19_9_OFF_*`.
+- ON: 69,1 segundos, encerramento 0, telemetria automática salva em diretório `DRAG_AB_19_9_ON_*`.
+- Ambas com máquina desconectada. Há seleção de 575 contornos/13.415 nós em capturas, mas escala/posicionamento visuais não são idênticos; duração de uso NÃO é indicador de velocidade.
+
+O código Qt da telemetria automática `SESSAO_INTERATIVA_TESTE_6.json` contém `paint_count`, `paint_p95_ms`, `input_to_paint_samples`, `input_to_paint_p95_ms`, `memory.rss_bytes`, `memory.peak_rss_bytes`, versão Qt, plataforma, DPR e sistema operacional. **Não** exporta P99, `viewport_paint_bbox_fraction_p95`, contadores da flag `drag_overlay_local_requests_19_9`, nem métricas de arraste agrupado. Esses campos fazem parte de outro formato de diagnóstico, e não podem ser inventados na comparação.
+
+Criado `SCRIPTS/COMPARAR_SESSOES_GUI_DRAG_REAL_19_9.ps1` (commit `0f03767`; validação da contagem no commit `709f05d`). O comparador é **somente leitura** dos últimos diretórios OFF e ON e:
+- Compara P95 de pintura, P95 de entrada-até-pintura, suas contagens de amostras, RSS final/pico e ambiente Qt/DPR/OS.
+- Calcula delta percentual `((OFF-ON)/OFF)*100` e deixa claro que o valor é observacional e confunde se gestos, zoom e carga forem diferentes.
+- Alerta se amostras escassas ou muito diferentes entre sessões, sem converter observações em homologação.
+- Gera resumo JSON exclusivamente local em `RELATORIOS/AUDITORIAS/GITHUB_19_8/DRAG_OVERLAY_19_9/`, sem nomes/caminhos do usuário, sem cópias dos JSONs e sem `git push`.
+
+Após `git pull --ff-only`, executar:
+
+```powershell
+cd C:\ProjetoAlencarLaser
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_SESSOES_GUI_DRAG_REAL_19_9.ps1"
+```
+
+Os dois editores podem permanecer fechados durante essa leitura. Não publicar com `-Publicar`: este formato não faz parte da allowlist atual da Central de Auditoria. Primeiro confirmar os números locais; depois registrar síntese técnica na Issue #18, mantendo P95 real e integridade de objetos como gates separados.
