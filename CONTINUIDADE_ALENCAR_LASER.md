@@ -1308,3 +1308,11 @@ Registrar mudanças, testes e pendências.
 - Identificado risco de sobrescrita: ambos os modos passavam RELATORIOS/AUDITORIAS/GITHUB_19_8/sessao para o executavel; codigo Qt escreve SESSAO_INTERATIVA_TESTE_6.json nessa pasta ao sair.
 - Hotfix commit 1cb9da3 no SCRIPTS/ABRIR_19_9_WINDOWS.ps1: cria diretorio unico para modo OFF/ON com data/hora e sufixo, imprime duracao/codigo de saida e caminho de telemetria gerada. Nada publicado automaticamente; arquivos continuam em RELATORIOS ignorada pelo Git.
 - Proximo gate: git pull --ff-only; executar OFF e depois ON no mesmo executavel A/B isolado (fechando primeiro), fazer mesmos gestos/copia de projeto, confirmar caminhos JSON distintos, comparar medidas e observar artefatos. Ainda nao homologar performance real.
+
+
+## 05/11/2026 — OFF/ON real concluídos e comparador observacional
+- Capturas: editor Qt candidato abriu; modo OFF 98.9 s, codigo 0, JSON salvo em pasta DRAG_AB_19_9_OFF_*; modo ON 69.1 s, codigo 0, JSON salvo em DRAG_AB_19_9_ON_*. Mesmo executavel build_WINDOWS_DRAG_AB_19_9. Maquina declarada desconectada nas capturas.
+- Foto do editor mostra selecao de 575 contornos, 13415 nos, mas zoom/enquadramento diferentes. NAO inferir ganho por duracao da sessao (uso e nao performance).
+- Verificacao do codigo Qt: telemetria automatica SESSAO_INTERATIVA_TESTE_6.json inclui paint_count, paint_p95_ms, input_to_paint_samples/p95, memoria RSS, Qt/plataforma/DPR; NAO inclui paint P99, viewport bbox fraction, contadores de overlay nem resumo de gestos.
+- Criado SCRIPTS/COMPARAR_SESSOES_GUI_DRAG_REAL_19_9.ps1 (commits 0f03767 e 709f05d) para localizar automaticamente os ultimos OFF/ON, conferir ambientes, comparar P95 de pintura e entrada ate pintura, amostras e RAM; alerta discrepancias e emite JSON SOMENTE local em RELATORIOS/.../DRAG_OVERLAY_19_9/. Sempre status OBSERVATIONAL_NOT_HOMOLOGATED.
+- Proximo comando no Windows: git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030; powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_SESSOES_GUI_DRAG_REAL_19_9.ps1". Conferir saida antes de qualquer conclusao. Nenhum novo JSON foi publicado no GitHub, apenas codigo/docs. Main, instalador e hardware preservados.
