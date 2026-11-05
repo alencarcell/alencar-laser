@@ -9208,6 +9208,12 @@ QJsonObject groupedDrag199Test(){
  check(groupsDuringPreview==1,"Drag preview must use exactly one temporary graphics group");
  QTest::mouseMove(v.viewport(),finish);QApplication::processEvents();
  check(v.groupedDragFrameUpdates()>0,"Grouped preview did not move");
+ if(v.dragOverlayLocalExperiment199()){
+  check(v.dragOverlayLocalRequests199()>0,"Opt-in drag did not request local overlay repaint");
+  check(v.dragOverlayFullFallbacks199()==0,"Opt-in drag fell back to full viewport unexpectedly");
+ }else{
+  check(v.dragOverlayLocalRequests199()==0,"Legacy drag unexpectedly used local repaint");
+ }
  check(stateText(v.editor.state())==before,"Preview altered canonical state");
  QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,finish);
  QApplication::processEvents();checkRendered(w);
@@ -9232,6 +9238,9 @@ QJsonObject groupedDrag199Test(){
  return QJsonObject{{"status","PASS"},{"selected_objects",40},
                     {"grouped_starts",v.groupedDragStarts()},
                     {"grouped_frames",v.groupedDragFrameUpdates()},
+                    {"drag_overlay_local_experiment",v.dragOverlayLocalExperiment199()},
+                    {"drag_overlay_local_requests",double(v.dragOverlayLocalRequests199())},
+                    {"drag_overlay_full_fallbacks",double(v.dragOverlayFullFallbacks199())},
                     {"undo_redo_preserved",true},{"hardware_commands_sent",false}};
 }
 
