@@ -1301,3 +1301,10 @@ Registrar mudanças, testes e pendências.
 - Detectado risco: ABRIR_19_9_WINDOWS.ps1 antigo apontava para build_WINDOWS_GIT_19_8, diferente do exe A/B recém-compilado. Commit a3d28f8 adicionou -UsarBuildDragAB e exige essa flag quando -TestarRepinturaLocal. Mesma compilacao deve ser usada no OFF e no ON.
 - Comandos corretos apos git pull: `powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -UsarBuildDragAB` (OFF); fechar; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -UsarBuildDragAB -TestarRepinturaLocal` (ON). Testar copia do mesmo projeto, laser desconectado, exportar diagnósticos separadamente e comparar paint/input P95, repintura, RSS e artefatos.
 - Gate de GUI real ainda pendente; nao divulgar ganho P95 nao medido. Documentacao DESENVOLVIMENTO/ESPECIFICACOES/EXPERIMENTO_DRAG_OVERLAY_19_9_20261105.md revisada.
+
+
+## 05/11/2026 — Launcher A/B: relatorios OFF/ON isolados
+- Captura do operador: executou ABRIR_19_9_WINDOWS.ps1 -UsarBuildDragAB -TestarRepinturaLocal, runtime/flag reconhecidos e exibiu Abrindo editor experimental, mas o prompt PowerShell retornou. O binario Qt modo --interactive usa app.exec(); retorno do prompt significa processo terminou, nao prova qualidade visual, duracao nem gestos.
+- Identificado risco de sobrescrita: ambos os modos passavam RELATORIOS/AUDITORIAS/GITHUB_19_8/sessao para o executavel; codigo Qt escreve SESSAO_INTERATIVA_TESTE_6.json nessa pasta ao sair.
+- Hotfix commit 1cb9da3 no SCRIPTS/ABRIR_19_9_WINDOWS.ps1: cria diretorio unico para modo OFF/ON com data/hora e sufixo, imprime duracao/codigo de saida e caminho de telemetria gerada. Nada publicado automaticamente; arquivos continuam em RELATORIOS ignorada pelo Git.
+- Proximo gate: git pull --ff-only; executar OFF e depois ON no mesmo executavel A/B isolado (fechando primeiro), fazer mesmos gestos/copia de projeto, confirmar caminhos JSON distintos, comparar medidas e observar artefatos. Ainda nao homologar performance real.
