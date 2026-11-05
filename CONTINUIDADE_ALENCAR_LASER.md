@@ -1281,3 +1281,9 @@ Registrar mudanças, testes e pendências.
 - SCRIPTS/ABRIR_19_9_WINDOWS.ps1 aceita `-TestarRepinturaLocal` (variavel de processo restaurada ao finalizar), SCRIPTS/COMPARAR_DRAG_OVERLAY_19_9.ps1 compila build Qt experimental e executa A/B sintetico de 40 objetos OFF/ON gerando JSON local. Nenhum envio automatico ao GitHub.
 - Especificacao e passos: DESENVOLVIMENTO/ESPECIFICACOES/EXPERIMENTO_DRAG_OVERLAY_19_9_20261105.md. PROXIMO GATE: executar no Windows com laser desconectado, depois duas sessoes reais com mesma copia (OFF/ON), zoom/selecoes/Tesoura/undo, medir P95/artefatos. CI da branch ainda apresenta failure sem causa verificada; NAO afirmar PASS, nem homologar.
 - Branch fix/curvas-tesoura-preflight-19-8-20261030 apenas; main, APLICATIVO, instalador, Wi-Fi/GRBL e laser fisico preservados. Reversao por flag: iniciar sem `-TestarRepinturaLocal`.
+
+
+## 05/11/2026 — Linker Permission denied no A/B de arraste: build isolado
+- Captura do Windows: compilacao do Qt terminou ate link, mas `ld.exe` falhou em `cannot open output file alencar_test7_qt6.exe: Permission denied` durante [2/2] Linking. Warnings anteriores (`-Wrange-loop-construct`, `misleading-indentation`) nao sao a causa. Provavel bloqueio por exe aberto, mas causa/PID nao confirmados; teste A/B nao executado.
+- Hotfix commit 22b92d5 no SCRIPTS/COMPARAR_DRAG_OVERLAY_19_9.ps1: agora usa DESENVOLVIMENTO/FONTE/build_WINDOWS_DRAG_AB_19_9, isolado do build_WINDOWS_GIT_19_8/Alencar Laser aberto. Nao mata processos; verifica se a propria copia de teste esta em uso, e -SemCompilar evita exe mais antigo que a fonte.
+- Docs atualizadas em DESENVOLVIMENTO/ESPECIFICACOES/EXPERIMENTO_DRAG_OVERLAY_19_9_20261105.md. Operador deve fazer `git pull --ff-only` e repetir `powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\COMPARAR_DRAG_OVERLAY_19_9.ps1` sem -SemCompilar, laser desconectado. Resultado nao homologado ate PASS do A/B real.
