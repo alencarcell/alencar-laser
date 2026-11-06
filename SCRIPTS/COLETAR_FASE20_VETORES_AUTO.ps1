@@ -57,6 +57,16 @@ foreach($round in @($r.rounds)){
   throw "Metricas de pintura vetorial incompletas na rodada $($round.round)."
  }
 }
+# Resume os hotspots da propria coleta, sem novos testes e sem arquivo extra.
+$analyzer=Join-Path $PSScriptRoot 'ANALISAR_FASE20_VETORES_AUTO.ps1'
+if (-not (Test-Path -LiteralPath $analyzer -PathType Leaf)) {
+ throw 'Analisador Fase20b ausente: resumo tecnico nao verificado.'
+}
+Write-Host 'FASE 20b: analisando automaticamente grupos de nos e dez maiores custos...' -ForegroundColor Cyan
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $analyzer -Resumo $file
+if ($LASTEXITCODE -ne 0) {
+ throw 'Analisador dos hotspots falhou; revisar relatorio antes de registrar conclusoes.'
+}
 Write-Host 'PASS TECNICO: 6 rodadas, 575 contornos, diagnosticos por frame.' -ForegroundColor Green
 Write-Host 'A coleta e instrumentada e NAO comprova ganhos de desempenho na GUI comum.' -ForegroundColor Yellow
 Write-Host "Resumo: $file" -ForegroundColor Cyan
