@@ -72,7 +72,10 @@ $bboxOn=Med $b 'viewport_bbox_p95_fraction'
 $reg95=100*($on95-$off95)/$off95
 $reg99=100*($on99-$off99)/$off99
 $paintCount=@($rows | ForEach-Object { [double]$_.paint_samples })
-$balance=($paintCount | Measure-Object -Minimum).Minimum / ($paintCount | Measure-Object -Maximum).Maximum
+$minSamples=[double](($paintCount | Measure-Object -Minimum).Minimum)
+$maxSamples=[double](($paintCount | Measure-Object -Maximum).Maximum)
+if ($maxSamples -le 0 -or $off95 -le 0 -or $off99 -le 0) { throw 'Pintura/amostras invalidas no resumo.' }
+$balance=$minSamples/$maxSamples
 $gate=if ($balance -lt 0.70) { 'INCONCLUSIVE_SAMPLE_IMBALANCE' }
       elseif ($reg95 -ge 10 -and $reg99 -ge 10) { 'REGRESSION_OBSERVED_DO_NOT_PROMOTE' }
       else { 'SYNTHETIC_RESULTS_MANUAL_REVIEW_REQUIRED' }
