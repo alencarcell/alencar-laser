@@ -38,10 +38,18 @@ function Run([int]$pair,[string]$mode) {
  if($mode -eq 'ON'){$env:ALENCAR_TRANSFORM_LOCAL_REPAINT_20H='1'}
  else{[Environment]::SetEnvironmentVariable('ALENCAR_TRANSFORM_LOCAL_REPAINT_20H',$null,'Process')}
  & $exe --grouped-center-transform-575-20i-test '-' $sub
- if($LASTEXITCODE -ne 0){throw "Teste $pair $mode falhou com exit $LASTEXITCODE"}
+ $exitCode=$LASTEXITCODE
  $file=Join-Path $sub 'RESULTADO_TRANSFORMACAO_CENTRAL_575_20I.json'
- if(-not (Test-Path $file -PathType Leaf)){throw "JSON ausente: $file"}
+ if(-not (Test-Path -LiteralPath $file -PathType Leaf)){
+  throw "Teste $pair $mode (exit $exitCode) nao produziu JSON: $file"
+ }
  $r=Get-Content -LiteralPath $file -Raw -Encoding UTF8 | ConvertFrom-Json
+ if($exitCode -ne 0 -or $r.status -ne 'PASS'){
+  $detail=if($null -ne $r.error){[string]$r.error}else{'Falha nao detalhada pelo Qt'}
+  Write-Host ("ERRO QT: "+$detail) -ForegroundColor Red
+  Write-Host ("JSON original: "+$file) -ForegroundColor Yellow
+  throw "Teste $pair $mode falhou (exit $exitCode): $detail"
+ }
  if($r.status -ne 'PASS' -or [int]$r.selected_objects -ne 575 -or
     $r.undo_redo_preserved -ne $true -or
     $r.document_unchanged_during_preview -ne $true -or
