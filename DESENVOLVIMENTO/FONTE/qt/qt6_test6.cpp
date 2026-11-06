@@ -452,6 +452,11 @@ class QtEditorLab final:public QGraphicsView{
  std::vector<QGraphicsPathItem*> transformItems_;
  QGraphicsItemGroup* transformPreviewGroup_=nullptr; // center-handle preview only
  int groupedTransformStarts_=0,groupedTransformFrameUpdates_=0;
+ // Phase20h opt-in. Existing behavior is preserved when unset.
+ const bool localTransformOverlay20h_=
+   qEnvironmentVariable("ALENCAR_TRANSFORM_LOCAL_REPAINT_20H")=="1";
+ quint64 transformOverlayLocalUpdates20h_=0;
+ quint64 transformOverlayFullFallbacks20h_=0;
  bool nativeContourPressing_=false;
  bool nativeTransformDragging_=false;
  Key nativeTransformKey_{};
@@ -979,6 +984,8 @@ class QtEditorLab final:public QGraphicsView{
  void updateSelectionTransform(QPointF pointer,Qt::KeyboardModifiers mods){
   if(!transformDragging_)return;
   QElapsedTimer transformProfiler;transformProfiler.start();
+  const auto oldQuad20h=localTransformOverlay20h_
+    ?selectionQuadScene():std::optional<std::array<QPointF,4>>{};
   QTransform t;
   if(transformHandle_==12){
    const QPointF pivot=middle(transformQuad_[0],transformQuad_[2]);
@@ -1062,7 +1069,19 @@ class QtEditorLab final:public QGraphicsView{
    for(auto* item:transformItems_)item->setTransform(t);
   }
   sample(transformPreviewMs,transformProfiler.nsecsElapsed()/1e6);
-  viewport()->update();
+  // Items invalidate their old/new outlines automatically on setTransform.
+  // Explicit updates below are for foreground handles only.
+  if(localTransformOverlay20h_){
+   const auto before=shapeOverlayDirtyRect199(oldQuad20h);
+   const auto after=shapeOverlayDirtyRect199(selectionQuadScene());
+   if(before&&after){
+    const QRegion dirty=QRegion(*before).united(QRegion(*after));
+    if(!dirty.isEmpty())viewport()->update(dirty);
+    ++transformOverlayLocalUpdates20h_;
+   }else{
+    viewport()->update();++transformOverlayFullFallbacks20h_;
+   }
+  }else viewport()->update();
  }
  void finishSelectionTransform(){
   if(!transformDragging_)return;
