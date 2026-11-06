@@ -228,3 +228,31 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_DRAG_CON
 ```
 
 **Status:** fonte e script publicados no GitHub; compilação do novo residual e seis rodadas ainda não executadas no Windows. Manter OFF como padrão, sem publicar logs brutos; não promover para main/instalador/produção nem conectar o laser.
+
+
+## 06/11/2026 — Fase 20: coleta automatica de pintura de contornos
+
+A pedido do operador, manter a estratégia de **coletas automáticas com um comando local**, testes sintéticos replicáveis e salvamento dos relatórios no PC, sem conexão com o laser e sem publicação automática de logs/arte.
+
+### Implementação experimental
+
+- `qt6_test6.cpp`: flag somente de teste `ALENCAR_VECTOR_PAINT_PROBE_20=1`. Quando ligada, na construção de `rebuild()` somente os 575 contornos normais são instanciados como `TimedContourPathItem20` (subclasse de `QGraphicsPathItem`), que cronometra `QGraphicsPathItem::paint()` dentro do mesmo `QGraphicsView::paintEvent()`. Com flag desligada, permanece o **mesmo** `scene_.addPath()` de produção, sem modificar a criação dos itens normais.
+- Acumuladores são zerados a cada frame medido; o relatório inclui `vector_paint_p95_ms`, `vector_paint_p99_ms`, `vector_paint_item_calls_p95`, `noncontour_inclusive_p95_ms`, `noncontour_inclusive_p99_ms` e número de amostras. O residual não-contorno resulta do **mesmo paintEvent**: tempo restante após fundo, foreground e pintura dos contornos monitorados. Continua incluindo composição, outros itens, clipping e overhead.
+- O benchmark de 575 contornos continua validando contornos, 13.415 nós, geometria, Undo/Redo, zoom, integridade de 144 eventos, ausência de comandos físicos e equivalência de política ON3/OFF. A variante de medição envolve subclassificação e timers adicionais; é um experimento com overhead, **não uma medida isenta da GUI usual**.
+- `COMPARAR_DRAG_CONTROLADO_575_19_9.ps1` recebe `-ColetarVetores`: ativa a sonda apenas nas seis rodadas, verifica os campos por rodada, mantém as métricas anteriores, sinaliza o overhead e restaura a variável de ambiente no final.
+- `SCRIPTS/COLETAR_FASE20_VETORES_AUTO.ps1` é a entrada de uso simples: compila o Qt experimental, executa seis rodadas OFF/ON3 em ordem pareada, confirma a saída do diagnóstico e o gate `EQUIVALENT_REPAINT_POLICY_NO_SPEEDUP_CLAIM`. A pasta de saída recebe `CONTROLADO_575_FASE20_*`, para não sobrescrever nem confundir os relatórios anteriores.
+
+### Como executar
+
+Com **Alencar Laser fechado e máquina fisicamente desconectada**, no terminal PowerShell de `C:\ProjetoAlencarLaser`:
+
+```powershell
+git status --short
+git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030
+if ($LASTEXITCODE -ne 0) { throw 'Falha na atualizacao' }
+powershell -NoProfile -ExecutionPolicy Bypass -File '.\SCRIPTS\COLETAR_FASE20_VETORES_AUTO.ps1'
+```
+
+**Estado atual:** arquivos registrados na branch experimental no GitHub, mas **nova instrumentação ainda não compilada nem executada no PC do operador**. Não afirmar P95 de vetores, PASS de seis rodadas ou ganho até receber a captura/JSON sanitizado do Windows. A execução é síncrona e iniciada pelo operador; não existe monitoramento contínuo em segundo plano. Dados completos ficam somente em `RELATORIOS/`, ignorada pelo Git; resultados agregados podem ser registrados na Issue #18 após verificação manual.
+
+Em toda a Fase 20: flag OFF como padrão; `main`, `APLICATIVO`, instalador e interfaces GRBL/laser preservados. O próprio instrumento pode afetar desempenho; não comparar diretamente seus P95 com os das rodadas sem sonda.
