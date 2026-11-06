@@ -1391,3 +1391,11 @@ Registrar mudanças, testes e pendências.
 - A política de pintura ON3 para 575 é idêntica ao OFF, portanto diferenças observadas dos tempos NÃO são ganho causal do modo ON3; manter speedup_claim_allowed=false, OFF como padrão e sem promoção.
 - Fonte Qt inspecionada: itens comuns são QGraphicsPathItem criados por scene_.addPath(...), incluindo contornos. Próximo plano recomendável: instrumentação específica de paint de itens usando abordagem que preserve o pipeline atual; NÃO ligar QGraphicsView::IndirectPainting para capturar drawItems, porque muda o algoritmo Qt moderno. Primeiro auditoria e teste isolado; nenhum novo código de otimização de itens foi publicado ainda.
 - Issue #18 atualizada e associada a esta medição. Main, APLICATIVO, instalador e transporte do laser preservados.
+
+
+## 06/11/2026 — Fase 20: testes vetoriais com coleta automatica opt-in
+- A pedido do operador, continuar a rotina de coleta automatica com um comando PowerShell: compila o Qt experimental, roda 6 casos sinteticos OFF/ON3, gera relatorios locais e avalia gates; sem comunicacao com laser nem alteracao de producao.
+- qt6_test6.cpp (commits 76b067e/1218d16) ganhou probe opt-in ALENCAR_VECTOR_PAINT_PROBE_20=1, com subclasse TimedContourPathItem20 somente em testes. Quando desligado, o editor mantem scene_.addPath normal. Mede somatorio de pintura de contornos por paintEvent, contagens de chamadas e residual nao-contorno inclusivo; a instrumentacao tem custo proprio e NAO comprova ganho real.
+- COMPARAR_DRAG_CONTROLADO_575_19_9.ps1 (commit ccc42e1) recebe -ColetarVetores, roda 6 processos/144 movimentos, verifica contagens e restaura ambiente. COLETAR_FASE20_VETORES_AUTO.ps1 (commit d344502) serve de entrada unica, exige relatorio PASS sintetico + equivalencia OFF/ON3, guarda JSON local em CONTROLADO_575_FASE20_* e nao faz push. Documentacao 4ef1230.
+- Proximo comando local com editor fechado e laser desconectado: git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030; powershell -NoProfile -ExecutionPolicy Bypass -File '.\SCRIPTS\COLETAR_FASE20_VETORES_AUTO.ps1'. Ainda SEM compilacao/execucao do novo instrumento no Windows. Nunca declarar PASS, melhoria de P95 ou homologacao sem os logs da maquina.
+- Modo OFF default. ON3 usa fallback de repaint completo para 575; main/APLICATIVO/instalador e emissoes de maquina preservados.
