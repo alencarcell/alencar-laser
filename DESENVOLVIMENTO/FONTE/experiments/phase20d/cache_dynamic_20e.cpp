@@ -101,6 +101,7 @@ struct Measurement{
  quint64 changedPixels=0,maxDelta=0,peakRss=0;
  int eligible=0;
  QJsonArray stepDifferences;
+ quint64 coldCachePixels=0,warmColdPixels=0,coldCacheMaxDelta=0;
 };
 static Measurement round(int count,int n,const QString& artifactDir){
  // Balanced orders across rounds to reduce consistent first-run bias.
@@ -136,6 +137,34 @@ static Measurement round(int count,int n,const QString& artifactDir){
    {"pan_x",step.panX},{"pan_y",step.panY},
    {"changed_pixels",double(diff)},{"max_channel_difference",maxChannel}
   });
+  // Targeted diagnostic: compare a FRESH cache item scene directly at this
+  // zoom/pan. Distinguish cache-history effects from intrinsic cache raster
+  // behavior. Never changes the original scenes or editor state.
+  if(count==575 && n==0 && stepIndex==4){
+   QGraphicsScene coldCache;
+   populate(coldCache,count,true);
+   const QImage fresh=draw(coldCache,step);
+   int freshMax=0;
+   const quint64 freshDifferences=diffPixels(cacheFirst?b:a,fresh,freshMax);
+   int coldBaselineMax=0;
+   const quint64 coldVsBaseline=diffPixels(cacheFirst?b:a,fresh,coldBaselineMax);
+   // The reference image is always the scene without cache.
+   const QImage& baselineImage=cacheFirst?b:a;
+   const QImage& warmCacheImage=cacheFirst?a:b;
+   int coldMaxDiff=0;
+   const quint64 coldDiff=diffPixels(baselineImage,fresh,coldMaxDiff);
+   int warmVsColdMax=0;
+   const quint64 warmColdDiff=diffPixels(warmCacheImage,fresh,warmVsColdMax);
+   result.coldCachePixels=coldDiff;
+   result.warmColdPixels=warmColdDiff;
+   result.coldCacheMaxDelta=quint64(coldMaxDiff);
+   (void)freshDifferences;
+   (void)freshMax;
+   (void)coldBaselineMax;
+   (void)coldVsBaseline;
+   const QString dir=artifactDir;
+   if(!dir.isEmpty())fresh.save(dir+"/DIFF_575_ETAPA_5_CACHE_FRESCO.png");
+  }
   // A mask image is created only when the pixels differ; first round only.
   // Red = any pixel difference, white = identical.
   if(n==0 && diff>0 && !artifactDir.isEmpty()){
@@ -188,7 +217,10 @@ int main(int argc,char** argv){
     {"changed_pixels_all_steps",double(result.changedPixels)},
     {"max_channel_difference",double(result.maxDelta)},
     {"peak_process_working_set_bytes",double(result.peakRss)},
-    {"pixel_differences_by_step",result.stepDifferences}
+    {"pixel_differences_by_step",result.stepDifferences},
+    {"step5_cold_cache_vs_baseline_pixels",double(result.coldCachePixels)},
+    {"step5_warm_cache_vs_cold_cache_pixels",double(result.warmColdPixels)},
+    {"step5_cold_cache_max_channel_difference",double(result.coldCacheMaxDelta)}
    });
    std::printf("%d objects / round %d: OFF %.3f ms CACHE %.3f ms / pixels changed %llu / peak RSS %llu\n",
     count,i+1,result.baselineMs,result.cacheMs,
