@@ -133,7 +133,10 @@ try {
  $b=@($data | Where-Object mode -eq 'ON')
  if ($a.Count -ne 3 -or $b.Count -ne 3) { throw 'Quantidade de rodadas incorreta.' }
  $samples = @($data | ForEach-Object { $_.paint_samples })
- $balance=($samples|Measure-Object -Minimum).Minimum/($samples|Measure-Object -Maximum).Maximum
+ $minSamples = [double](($samples | Measure-Object -Minimum).Minimum)
+ $maxSamples = [double](($samples | Measure-Object -Maximum).Maximum)
+ if ($maxSamples -le 0) { throw 'Nenhuma amostra de pintura valida.' }
+ $balance = $minSamples / $maxSamples
  $off95=Mediana @($a | ForEach-Object { $_.paint_p95_ms })
  $on95=Mediana @($b | ForEach-Object { $_.paint_p95_ms })
  $off99=Mediana @($a | ForEach-Object { $_.paint_p99_ms })
