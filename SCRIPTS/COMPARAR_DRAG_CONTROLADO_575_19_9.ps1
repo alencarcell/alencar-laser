@@ -166,7 +166,7 @@ try {
   environment=$reference
   protocol='OFF-ON-ON-OFF-OFF-ON; 144 mouse moves; 575 contours, 13415 nodes; zoom=1.2'
   optin_mode_code=$ModoOtimizado
-  optin_mode_description=if ($ModoOtimizado -eq '2') { 'QRegion with cached bounds' } else { 'QRegion with bounds recomputed' }
+  optin_mode_description=$(if ($ModoOtimizado -eq '2') { 'QRegion with cached bounds' } else { 'QRegion with bounds recomputed' })
   paint_sample_balance_ratio=[math]::Round($balance,4)
   medians=[ordered]@{
     viewport_bbox_p95_fraction_off=(Mediana @($a | ForEach-Object { $_.viewport_bbox_p95_fraction }))
