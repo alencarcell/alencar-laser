@@ -8,7 +8,7 @@ Sem comandos de laser, sem projeto de cliente, sem git push.
 PASS do teste sintetico nao e homologacao visual ou de producao.
 #>
 [CmdletBinding()]
-param([switch]$SemCompilar, [ValidateSet('1','2','3')][string]$ModoOtimizado='1')
+param([switch]$SemCompilar, [ValidateSet('1','2','3')][string]$ModoOtimizado='1', [switch]$ColetarVetores)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -17,10 +17,11 @@ $fixture = Join-Path $src 'fixtures\web_nodes_normalized.csv'
 $exe = Join-Path $src 'build_WINDOWS_DRAG_AB_19_9\alencar_test7_qt6.exe'
 $resultsDir = Join-Path $root 'RELATORIOS\AUDITORIAS\GITHUB_19_8\DRAG_OVERLAY_19_9'
 $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-$groupDir = Join-Path $resultsDir ("CONTROLADO_575_" + $stamp + "_" + ([guid]::NewGuid().ToString('N').Substring(0,8)))
+$groupDir = Join-Path $resultsDir ("CONTROLADO_575_" + $(if($ColetarVetores){"FASE20_"}else{""}) + $stamp + "_" + ([guid]::NewGuid().ToString('N').Substring(0,8)))
 $oldPath = $env:PATH
 $oldOverlay = [Environment]::GetEnvironmentVariable('ALENCAR_LOCAL_DRAG_OVERLAY_19_9','Process')
 $oldGrouped = [Environment]::GetEnvironmentVariable('ALENCAR_DISABLE_GROUPED_DRAG','Process')
+$oldVectorProbe = [Environment]::GetEnvironmentVariable('ALENCAR_VECTOR_PAINT_PROBE_20','Process')
 function Mediana([object[]]$nums) {
  $sorted = @($nums | ForEach-Object { [double]$_ } | Sort-Object)
  if ($sorted.Count -ne 3) { throw 'Mediana exige tres rodadas por modo.' }
@@ -68,6 +69,12 @@ try {
  $fixtureSha = (Get-FileHash -LiteralPath $fixture -Algorithm SHA256).Hash
  $binarySha  = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
  $env:PATH = 'C:\msys64\ucrt64\bin;' + $oldPath
+ if ($ColetarVetores) {
+  $env:ALENCAR_VECTOR_PAINT_PROBE_20='1'
+  Write-Warning 'FASE 20: sonda de pintura vetorial habilitada somente nesta coleta. A instrumentacao altera o custo medido; nao comparar diretamente com runs antigos.'
+ } else {
+  [Environment]::SetEnvironmentVariable('ALENCAR_VECTOR_PAINT_PROBE_20',$null,'Process')
+ }
  [Environment]::SetEnvironmentVariable('ALENCAR_DISABLE_GROUPED_DRAG',$null,'Process')
  [void](New-Item -ItemType Directory -Path $groupDir -Force)
  $order = @('OFF','ON','ON','OFF','OFF','ON')
@@ -131,6 +138,17 @@ try {
       $pairedSamples -lt 30) {
    throw "Amostragem de fases ou pintura insuficiente na rodada $($i+1)"
   }
+  if ($json.measured.vector_probe_enabled -ne [bool]$ColetarVetores) {
+   throw "Estado de coleta vetorial divergente na rodada $($i+1)"
+  }
+  if ($ColetarVetores) {
+   $vectorSamples=ValidateNumerical $json.measured 'vector_paint_frame_samples'
+   $vectorInvalid=ValidateNumerical $json.measured 'vector_probe_invalid_frames'
+   if ($vectorSamples -ne $pairedSamples -or $vectorInvalid -ne 0 -or
+       (ValidateNumerical $json.measured 'vector_paint_item_calls_p95') -lt 1) {
+    throw "Metrica vetorial por frame invalida na rodada $($i+1)"
+   }
+  }
   $entry = [pscustomobject]@{
    mode = $mode
    round = $i+1
@@ -148,6 +166,10 @@ try {
    paired_other_inclusive_p95_ms = ValidateNumerical $json.measured 'paired_other_inclusive_p95_ms'
    paired_other_inclusive_p99_ms = ValidateNumerical $json.measured 'paired_other_inclusive_p99_ms'
    paired_total_p95_ms = ValidateNumerical $json.measured 'paired_total_p95_ms'
+   vector_paint_p95_ms = $(if($ColetarVetores){ValidateNumerical $json.measured 'vector_paint_p95_ms'}else{$null})
+   vector_paint_p99_ms = $(if($ColetarVetores){ValidateNumerical $json.measured 'vector_paint_p99_ms'}else{$null})
+   vector_paint_item_calls_p95 = $(if($ColetarVetores){ValidateNumerical $json.measured 'vector_paint_item_calls_p95'}else{$null})
+   noncontour_inclusive_p95_ms = $(if($ColetarVetores){ValidateNumerical $json.measured 'noncontour_inclusive_p95_ms'}else{$null})
    input_samples = [int]$inputSamples
    input_to_paint_p95_ms = ValidateNumerical $json.measured 'input_to_paint_p95_ms'
    viewport_bbox_p95_fraction = ValidateNumerical $json.measured 'viewport_bbox_p95_fraction'
@@ -188,6 +210,8 @@ try {
  $report=[ordered]@{
   schema='alencar-laser-controlled-drag-575-ab-19.9'
   status=$gate
+  vector_paint_probe_enabled=[bool]$ColetarVetores
+  phase20_probe_overhead_unquantified=[bool]$ColetarVetores
   performance_gate=$performanceGate
   effective_repaint_policy_on=$(if ($ModoOtimizado -eq '3') { 'legacy_full_viewport_for_575' } else { 'localized_QRegion' })
   same_repaint_policy_as_off=($ModoOtimizado -eq '3')
@@ -243,7 +267,8 @@ try {
           'Paired other time is total frame paintEvent minus foreground/background within the same frame. It includes item rendering and Qt overhead, not item-only time.',
           'P95/P99 describe paint samples, not whole interaction throughput.',
           'Viewport bbox metric is paint event bounding rectangle, not exact QRegion pixels.',
-          'No automated visual pixel equivalence proof; inspect for stale selection handles.')
+          'No automated visual pixel equivalence proof; inspect for stale selection handles.',
+          'Phase20 optional per-contour subclass probe affects timing. Compare only Phase20 runs that used the same probe.')
  }
  $output=Join-Path $groupDir 'RESUMO_AB_CONTROLADO_575_19_9.json'
  [IO.File]::WriteAllText($output,(($report|ConvertTo-Json -Depth 8)+[Environment]::NewLine),
@@ -256,6 +281,11 @@ try {
  Write-Host ('P95 fundo OFF/ON: {0} / {1} ms' -f (Mediana @($a | ForEach-Object { $_.background_p95_ms })),(Mediana @($b | ForEach-Object { $_.background_p95_ms })))
  Write-Host ('P95 overlay OFF/ON: {0} / {1} ms' -f (Mediana @($a | ForEach-Object { $_.foreground_p95_ms })),(Mediana @($b | ForEach-Object { $_.foreground_p95_ms })))
  Write-Host ('P95 restante inclusivo pareado OFF/ON: {0} / {1} ms' -f (Mediana @($a | ForEach-Object { $_.paired_other_inclusive_p95_ms })),(Mediana @($b | ForEach-Object { $_.paired_other_inclusive_p95_ms })))
+ if ($ColetarVetores) {
+  Write-Host ('FASE20: pintura vetorial P95 OFF/ON: {0} / {1} ms' -f (Mediana @($a | ForEach-Object { $_.vector_paint_p95_ms })),(Mediana @($b | ForEach-Object { $_.vector_paint_p95_ms }))) -ForegroundColor Cyan
+  Write-Host ('FASE20: pintura vetorial P99 OFF/ON: {0} / {1} ms' -f (Mediana @($a | ForEach-Object { $_.vector_paint_p99_ms })),(Mediana @($b | ForEach-Object { $_.vector_paint_p99_ms }))) -ForegroundColor Cyan
+  Write-Host ('FASE20: restante nao-contorno inclusivo P95 OFF/ON: {0} / {1} ms' -f (Mediana @($a | ForEach-Object { $_.noncontour_inclusive_p95_ms })),(Mediana @($b | ForEach-Object { $_.noncontour_inclusive_p95_ms }))) -ForegroundColor Cyan
+ }
  Write-Host ('P95 entrada-pintura OFF/ON: {0} / {1} ms, delta {2}%' -f $offInput,$onInput,(Reducao $offInput $onInput))
  Write-Host ('Repintura bbox P95 fracao OFF/ON: {0:N3} / {1:N3}' -f (Mediana @($a | ForEach-Object { $_.viewport_bbox_p95_fraction })),(Mediana @($b | ForEach-Object { $_.viewport_bbox_p95_fraction })))
  Write-Host ('Requisicoes local ON: {0}, fallbacks full ON: {1}' -f (($b | Measure-Object -Property local_requests -Sum).Sum),(($b | Measure-Object -Property full_fallbacks -Sum).Sum))
@@ -272,4 +302,5 @@ finally {
  $env:PATH = $oldPath
  [Environment]::SetEnvironmentVariable('ALENCAR_LOCAL_DRAG_OVERLAY_19_9',$oldOverlay,'Process')
  [Environment]::SetEnvironmentVariable('ALENCAR_DISABLE_GROUPED_DRAG',$oldGrouped,'Process')
+ [Environment]::SetEnvironmentVariable('ALENCAR_VECTOR_PAINT_PROBE_20',$oldVectorProbe,'Process')
 }
