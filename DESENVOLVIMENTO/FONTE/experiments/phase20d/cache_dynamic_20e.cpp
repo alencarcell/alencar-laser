@@ -12,6 +12,8 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QFile>
+#include <QFileInfo>
+#include <QDir>
 #include <QColor>
 #include <QString>
 #include <algorithm>
@@ -98,8 +100,9 @@ struct Measurement{
  double baselineMs=0,cacheMs=0;
  quint64 changedPixels=0,maxDelta=0,peakRss=0;
  int eligible=0;
+ QJsonArray stepDifferences;
 };
-static Measurement round(int count,int n){
+static Measurement round(int count,int n,const QString& artifactDir){
  // Balanced orders across rounds to reduce consistent first-run bias.
  QGraphicsScene first,second;
  const bool cacheFirst=(n%2)==1;
@@ -114,7 +117,8 @@ static Measurement round(int count,int n){
  std::vector<double> offTimes,onTimes;
  // Warm-up deliberately excluded from timing.
  (void)draw(first,steps[0]);(void)draw(second,steps[0]);
- for(const Step& step:steps){
+ for(size_t stepIndex=0;stepIndex<steps.size();++stepIndex){
+  const Step& step=steps[stepIndex];
   QElapsedTimer timer;
   timer.start();
   const QImage a=draw(first,step);
@@ -127,6 +131,29 @@ static Measurement round(int count,int n){
   int maxChannel=0;
   const quint64 diff=diffPixels(a,b,maxChannel);
   result.changedPixels+=diff;
+  result.stepDifferences.append(QJsonObject{
+   {"step",int(stepIndex+1)},{"zoom",step.zoom},
+   {"pan_x",step.panX},{"pan_y",step.panY},
+   {"changed_pixels",double(diff)},{"max_channel_difference",maxChannel}
+  });
+  // A mask image is created only when the pixels differ; first round only.
+  // Red = any pixel difference, white = identical.
+  if(n==0 && diff>0 && !artifactDir.isEmpty()){
+   QImage mask(a.size(),QImage::Format_RGB32);
+   mask.fill(Qt::white);
+   for(int y=0;y<a.height();++y){
+    for(int x=0;x<a.width();++x){
+     mask.setPixelColor(x,y,a.pixel(x,y)==b.pixel(x,y)?
+       QColor(Qt::white):QColor(Qt::red));
+    }
+   }
+   const QString base=artifactDir+QString("/DIFF_%1_CONTORNOS_ETAPA_%2")
+                       .arg(count).arg(stepIndex+1);
+   if(!mask.save(base+".png") || !a.save(base+"_OFF.png") ||
+      !b.save(base+"_CACHE.png")){
+    std::fprintf(stderr,"Failed saving differential diagnostic image\n");
+   }
+  }
   result.maxDelta=std::max(result.maxDelta,quint64(maxChannel));
   result.peakRss=std::max(result.peakRss,rssBytes());
  }
@@ -147,7 +174,10 @@ int main(int argc,char** argv){
  bool valid=true;
  for(const int count:{40,128,575}){
   for(int i=0;i<6;++i){
-   const Measurement result=round(count,i);
+   const QFileInfo reportInfo(output);
+   const QString artifactDir=reportInfo.absolutePath()+"/DIAGNOSTICO_PIXELS_20E";
+   if(i==0 && !QDir().mkpath(artifactDir))return 6;
+   const Measurement result=round(count,i,artifactDir);
    if(result.baselineMs<=0||result.cacheMs<=0||
       result.eligible!=(count>561?count-561:0))valid=false;
    cases.append(QJsonObject{
@@ -157,7 +187,8 @@ int main(int argc,char** argv){
     {"cached_median_frame_ms",result.cacheMs},
     {"changed_pixels_all_steps",double(result.changedPixels)},
     {"max_channel_difference",double(result.maxDelta)},
-    {"peak_process_working_set_bytes",double(result.peakRss)}
+    {"peak_process_working_set_bytes",double(result.peakRss)},
+    {"pixel_differences_by_step",result.stepDifferences}
    });
    std::printf("%d objects / round %d: OFF %.3f ms CACHE %.3f ms / pixels changed %llu / peak RSS %llu\n",
     count,i+1,result.baselineMs,result.cacheMs,
@@ -172,6 +203,7 @@ int main(int argc,char** argv){
   {"speedup_claim_allowed",false},{"automatic_promotion_allowed",false},
   {"test_scope","offscreen QGraphicsScene synthetic frames, not interactive QGraphicsView"},
   {"protocol","6 balanced rounds per size; 8 changing zoom/pan steps; 40,128,575 items"},
+  {"diagnostic_images","Only first round: each differing step emits OFF/CACHE/DIFF PNG locally"},
   {"cases",cases}
  };
  QFile f(output);
