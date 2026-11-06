@@ -62,6 +62,14 @@ try {
   $peak=($group | Measure-Object -Property peak_process_working_set_bytes -Maximum).Maximum
   Write-Host ("{0} contornos: medianas OFF={1:N3}ms CACHE={2:N3}ms; pixels alterados={3}; max canal={4}; RSS pico={5:N0} bytes" -f $n,$offMed,$onMed,$changes,$maxDelta,$peak)
  }
+ $target=@($report.cases | Where-Object { $_.contours -eq 575 -and $_.round -eq 1 })
+ if($target.Count -ne 1){throw 'Rodada de diagnostico ausente'}
+ $step5=$target[0]
+ if($null -eq $step5.step5_cold_cache_vs_baseline_pixels -or
+    $null -eq $step5.step5_warm_cache_vs_cold_cache_pixels){
+   throw 'Diagnostico do cache fresco ausente'
+ }
+ Write-Host ("Etapa 5: cache FRESCO vs sem cache: {0} pixels; cache reutilizado vs fresco: {1} pixels; delta max canal (fresco vs base): {2}" -f $step5.step5_cold_cache_vs_baseline_pixels,$step5.step5_warm_cache_vs_cold_cache_pixels,$step5.step5_cold_cache_max_channel_difference) -ForegroundColor Yellow
  Write-Host 'Diferencas de pixels por etapa (575 contornos, rodada 1):' -ForegroundColor Cyan
  @($report.cases | Where-Object { $_.contours -eq 575 -and $_.round -eq 1 }) |
   ForEach-Object { $_.pixel_differences_by_step } |
