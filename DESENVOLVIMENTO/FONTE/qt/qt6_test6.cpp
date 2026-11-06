@@ -661,10 +661,14 @@ class QtEditorLab final:public QGraphicsView{
  struct PaintPhaseProbe199 {
   QElapsedTimer timer;
   std::vector<double>& samples;
-  explicit PaintPhaseProbe199(std::vector<double>& target):samples(target){timer.start();}
+  double* samePaintAccum=nullptr;
+  explicit PaintPhaseProbe199(std::vector<double>& target,double* sum=nullptr)
+   :samples(target),samePaintAccum(sum){timer.start();}
   ~PaintPhaseProbe199(){
+   const double elapsed=timer.nsecsElapsed()/1e6;
    if(samples.size()>=10000)samples.erase(samples.begin(),samples.begin()+5000);
-   samples.push_back(timer.nsecsElapsed()/1e6);
+   samples.push_back(elapsed);
+   if(samePaintAccum)*samePaintAccum+=elapsed;
   }
  };
  QElapsedTimer clock_;qint64 pendingInput_=-1;
@@ -1308,6 +1312,13 @@ public:
  std::vector<double> paintMs,inputToPaintMs,hitTestMs,styleApplyMs,rebuildMs,transformPreviewMs,wheelMs;
  std::vector<double> foregroundMs,backgroundMs,nativeFullRefreshMs,nativeSelectiveRefreshMs;
  std::vector<double> viewportPaintBBoxFractions;
+ // Controlled benchmark only: the residual includes QGraphicsItems, Qt
+ // composition/clipping, and other paintEvent overhead (not items alone).
+ bool measurePairedPaintPhases199=false;
+ bool pairedPaintInProgress199=false;
+ double pairedBackgroundCurrentMs199=0,pairedForegroundCurrentMs199=0;
+ std::vector<double> pairedOtherInclusiveMs199,pairedTotalMs199;
+ quint64 pairedPhaseInvalid199=0;
  static void sample(std::vector<double>& measurements,double duration){
   if(measurements.size()>=10000)measurements.erase(measurements.begin(),measurements.begin()+5000);
   measurements.push_back(duration);
@@ -1638,7 +1649,8 @@ public:
  }
 protected:
  void drawBackground(QPainter* painter,const QRectF& exposed) override{
-  PaintPhaseProbe199 phase(backgroundMs);
+  PaintPhaseProbe199 phase(backgroundMs,
+   pairedPaintInProgress199?&pairedBackgroundCurrentMs199:nullptr);
   QGraphicsView::drawBackground(painter,exposed);
   if(!workspaceGuides_)return;
   painter->save();
@@ -2067,11 +2079,29 @@ protected:
    const double dirtyPixels=double(r.width())*r.height();
    sample(viewportPaintBBoxFractions,dirtyPixels/viewportPixels);
   }
-  QElapsedTimer timer;timer.start();QGraphicsView::paintEvent(e);sample(paintMs,timer.nsecsElapsed()/1e6);
+  // Paired, frame-by-frame attribution. Keep the default GUI path passive.
+  const bool paired=measurePairedPaintPhases199&&!pairedPaintInProgress199;
+  if(paired){
+   pairedBackgroundCurrentMs199=0;
+   pairedForegroundCurrentMs199=0;
+   pairedPaintInProgress199=true;
+  }
+  QElapsedTimer timer;timer.start();QGraphicsView::paintEvent(e);
+  const double totalMs=timer.nsecsElapsed()/1e6;
+  if(paired){
+   pairedPaintInProgress199=false;
+   const double otherMs=totalMs-pairedBackgroundCurrentMs199-pairedForegroundCurrentMs199;
+   if(std::isfinite(otherMs)&&otherMs>=0){
+    sample(pairedOtherInclusiveMs199,otherMs);
+    sample(pairedTotalMs199,totalMs);
+   }else ++pairedPhaseInvalid199;
+  }
+  sample(paintMs,totalMs);
   if(pendingInput_>=0){sample(inputToPaintMs,(clock_.nsecsElapsed()-pendingInput_)/1e6);pendingInput_=-1;}
  }
  void drawForeground(QPainter* p,const QRectF& exposed)override{
-  PaintPhaseProbe199 phase(foregroundMs);
+  PaintPhaseProbe199 phase(foregroundMs,
+   pairedPaintInProgress199?&pairedForegroundCurrentMs199:nullptr);
   // QGraphicsPathItem normalizes a move-only path to empty. Draw isolated
   // anchors separately while keeping canonical path equality exact.
   p->save();p->resetTransform();
@@ -9318,6 +9348,9 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
  // Discard startup, marquee/selection and press paints from the measurement.
  v.paintMs.clear();v.inputToPaintMs.clear();v.viewportPaintBBoxFractions.clear();
  v.foregroundMs.clear();v.backgroundMs.clear();
+ v.pairedOtherInclusiveMs199.clear();v.pairedTotalMs199.clear();
+ v.pairedPhaseInvalid199=0;
+ v.measurePairedPaintPhases199=true;
  QPoint finish=start;
  for(int i=1;i<=kFrames;++i){
   // Deterministic bounded trajectory, ends at known displacement.
@@ -9339,6 +9372,11 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
  // for the same drag window as paintMs, without modifying paint behavior.
  check(!v.backgroundMs.empty()&&!v.foregroundMs.empty(),
        "Controlled drag paint phase sampling missing");
+ check(v.pairedOtherInclusiveMs199.size()>=30&&
+       v.pairedTotalMs199.size()==v.pairedOtherInclusiveMs199.size(),
+       "Controlled drag paired phase sampling missing");
+ check(v.pairedPhaseInvalid199==0,"Paint phase instrumentation returned invalid residual");
+ v.measurePairedPaintPhases199=false;
  const QJsonObject measured{
   {"frames",kFrames},{"paint_samples",paints},
   {"paint_p50_ms",percentile(v.paintMs,.50)},
@@ -9350,6 +9388,12 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
   {"foreground_samples",int(v.foregroundMs.size())},
   {"foreground_p95_ms",percentile(v.foregroundMs,.95)},
   {"foreground_p99_ms",percentile(v.foregroundMs,.99)},
+  {"paired_frame_samples",int(v.pairedOtherInclusiveMs199.size())},
+  {"paired_other_inclusive_p50_ms",percentile(v.pairedOtherInclusiveMs199,.50)},
+  {"paired_other_inclusive_p95_ms",percentile(v.pairedOtherInclusiveMs199,.95)},
+  {"paired_other_inclusive_p99_ms",percentile(v.pairedOtherInclusiveMs199,.99)},
+  {"paired_total_p95_ms",percentile(v.pairedTotalMs199,.95)},
+  {"paired_phase_invalid",double(v.pairedPhaseInvalid199)},
   {"input_to_paint_samples",inputPaints},
   {"input_to_paint_p95_ms",percentile(v.inputToPaintMs,.95)},
   {"viewport_bbox_p95_fraction",percentile(v.viewportPaintBBoxFractions,.95)},
