@@ -9317,6 +9317,7 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
  const int initialOverlay= int(v.dragOverlayLocalRequests199());
  // Discard startup, marquee/selection and press paints from the measurement.
  v.paintMs.clear();v.inputToPaintMs.clear();v.viewportPaintBBoxFractions.clear();
+ v.foregroundMs.clear();v.backgroundMs.clear();
  QPoint finish=start;
  for(int i=1;i<=kFrames;++i){
   // Deterministic bounded trajectory, ends at known displacement.
@@ -9334,11 +9335,21 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
  check(paints>=30,"Dense drag paint sampling too sparse");
  check(inputPaints>=20,"Dense drag input-to-paint sampling too sparse");
  check(!v.viewportPaintBBoxFractions.empty(),"Missing repaint area data");
+ // Phase probes are already part of the Qt view. Collect their p95/p99
+ // for the same drag window as paintMs, without modifying paint behavior.
+ check(!v.backgroundMs.empty()&&!v.foregroundMs.empty(),
+       "Controlled drag paint phase sampling missing");
  const QJsonObject measured{
   {"frames",kFrames},{"paint_samples",paints},
   {"paint_p50_ms",percentile(v.paintMs,.50)},
   {"paint_p95_ms",percentile(v.paintMs,.95)},
   {"paint_p99_ms",percentile(v.paintMs,.99)},
+  {"background_samples",int(v.backgroundMs.size())},
+  {"background_p95_ms",percentile(v.backgroundMs,.95)},
+  {"background_p99_ms",percentile(v.backgroundMs,.99)},
+  {"foreground_samples",int(v.foregroundMs.size())},
+  {"foreground_p95_ms",percentile(v.foregroundMs,.95)},
+  {"foreground_p99_ms",percentile(v.foregroundMs,.99)},
   {"input_to_paint_samples",inputPaints},
   {"input_to_paint_p95_ms",percentile(v.inputToPaintMs,.95)},
   {"viewport_bbox_p95_fraction",percentile(v.viewportPaintBBoxFractions,.95)},
