@@ -1776,6 +1776,7 @@ public:
  size_t directQueries()const{return picker_.directQueries();}
  void invalidateSelectionCache(){picker_.invalidate();}
  bool fastDenseDisplay()const noexcept{return fastDenseDisplay_;}
+ bool vectorPaintProbeEnabled20()const noexcept{return contourPaintProbeOptIn20_;}
  bool dragOverlayLocalExperiment199()const noexcept{return localDragOverlay199_;}
  bool dragOverlayCachedExperiment199()const noexcept{return cachedDragOverlay199_;}
  bool dragOverlayDenseGuard199()const noexcept{return denseGuardDragOverlay199_;}
@@ -9429,7 +9430,7 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
        v.pairedTotalMs199.size()==v.pairedOtherInclusiveMs199.size(),
        "Controlled drag paired phase sampling missing");
  check(v.pairedPhaseInvalid199==0,"Paint phase instrumentation returned invalid residual");
- if(v.contourPaintProbeOptIn20_){
+ if(v.vectorPaintProbeEnabled20()){
   check(v.contourProbeInvalid20_==0,"Contour paint probe invalid frame");
   check(v.contourPaintFrameMs20_.size()==v.pairedOtherInclusiveMs199.size(),
         "Contour paint sampling count differs from paired total");
@@ -9454,17 +9455,17 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
   {"paired_other_inclusive_p99_ms",percentile(v.pairedOtherInclusiveMs199,.99)},
   {"paired_total_p95_ms",percentile(v.pairedTotalMs199,.95)},
   {"paired_phase_invalid",double(v.pairedPhaseInvalid199)},
-  {"vector_probe_enabled",v.contourPaintProbeOptIn20_},
+  {"vector_probe_enabled",v.vectorPaintProbeEnabled20()},
   {"vector_paint_frame_samples",int(v.contourPaintFrameMs20_.size())},
-  {"vector_paint_p95_ms",v.contourPaintProbeOptIn20_?
+  {"vector_paint_p95_ms",v.vectorPaintProbeEnabled20()?
      percentile(v.contourPaintFrameMs20_,.95):0.},
-  {"vector_paint_p99_ms",v.contourPaintProbeOptIn20_?
+  {"vector_paint_p99_ms",v.vectorPaintProbeEnabled20()?
      percentile(v.contourPaintFrameMs20_,.99):0.},
-  {"vector_paint_item_calls_p95",v.contourPaintProbeOptIn20_?
+  {"vector_paint_item_calls_p95",v.vectorPaintProbeEnabled20()?
      percentile(v.contourPaintItemCalls20_,.95):0.},
-  {"noncontour_inclusive_p95_ms",v.contourPaintProbeOptIn20_?
+  {"noncontour_inclusive_p95_ms",v.vectorPaintProbeEnabled20()?
      percentile(v.noncontourInclusiveMs20_,.95):0.},
-  {"noncontour_inclusive_p99_ms",v.contourPaintProbeOptIn20_?
+  {"noncontour_inclusive_p99_ms",v.vectorPaintProbeEnabled20()?
      percentile(v.noncontourInclusiveMs20_,.99):0.},
   {"vector_probe_invalid_frames",double(v.contourProbeInvalid20_)},
   {"input_to_paint_samples",inputPaints},
