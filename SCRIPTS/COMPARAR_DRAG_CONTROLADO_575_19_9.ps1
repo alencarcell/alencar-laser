@@ -1,14 +1,14 @@
 #requires -Version 5.1
 <#
 ALENCAR LASER 19.9 - A/B controlado com fixture REAL de 575 contornos.
-ModoOtimizado=1 testa o QRegion original; =2 testa o quadro cacheado.
+ModoOtimizado=1 testa QRegion original; =2 cache de quadro; =3 guarda de densidade.
 Seis processos Qt separados na ordem OFF,ON,ON,OFF,OFF,ON.
 Cada um repete 144 eventos Qt de mouse, zoom 1.2, mesma viewport.
 Sem comandos de laser, sem projeto de cliente, sem git push.
 PASS do teste sintetico nao e homologacao visual ou de producao.
 #>
 [CmdletBinding()]
-param([switch]$SemCompilar, [ValidateSet('1','2')][string]$ModoOtimizado='1')
+param([switch]$SemCompilar, [ValidateSet('1','2','3')][string]$ModoOtimizado='1')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -97,12 +97,18 @@ try {
       $json.geometry_preserved -ne $true -or $json.undo_redo_preserved -ne $true -or
       $json.machine_commands_sent -ne $false -or
       $json.production_homologated -ne $false -or
-      $json.overlay_cached_bounds_enabled -ne ($enabled -and $ModoOtimizado -eq '2') -or
+      $json.overlay_cached_bounds_enabled -ne ($enabled -and $ModoOtimizado -in @('2','3')) -or
+      $json.overlay_dense_guard_enabled -ne ($enabled -and $ModoOtimizado -eq '3') -or
       $json.measured.frames -ne 144 -or
       [double]$json.zoom_factor -ne 1.2) {
    throw "Gate de integridade divergente: rodada $($i+1)"
   }
-  if ($enabled -and [double]$json.overlay_local_requests -le 0) {
+  if ($enabled -and $ModoOtimizado -eq '3') {
+   if ([double]$json.overlay_local_requests -ne 0 -or
+       [double]$json.overlay_dense_legacy_updates -lt 144) {
+    throw 'ON3 nao utilizou fallback legado na selecao densa.'
+   }
+  } elseif ($enabled -and [double]$json.overlay_local_requests -le 0) {
    throw 'ON nao iniciou a repintura localizada.'
   }
   if (-not $enabled -and [double]$json.overlay_local_requests -ne 0) {
@@ -128,6 +134,7 @@ try {
    viewport_bbox_p95_fraction = ValidateNumerical $json.measured 'viewport_bbox_p95_fraction'
    local_requests = [int]$json.overlay_local_requests
    full_fallbacks = [int]$json.overlay_full_fallbacks
+   dense_legacy_updates = [int]$json.overlay_dense_legacy_updates
   }
   $data += $entry
  }
@@ -166,7 +173,11 @@ try {
   environment=$reference
   protocol='OFF-ON-ON-OFF-OFF-ON; 144 mouse moves; 575 contours, 13415 nodes; zoom=1.2'
   optin_mode_code=$ModoOtimizado
-  optin_mode_description=$(if ($ModoOtimizado -eq '2') { 'QRegion with cached bounds' } else { 'QRegion with bounds recomputed' })
+  optin_mode_description=$(switch ($ModoOtimizado) {
+    '2' { 'QRegion with cached bounds' }
+    '3' { 'Dense guard: legacy repaint for 128+ items' }
+    default { 'QRegion with bounds recomputed' }
+  })
   paint_sample_balance_ratio=[math]::Round($balance,4)
   medians=[ordered]@{
     viewport_bbox_p95_fraction_off=(Mediana @($a | ForEach-Object { $_.viewport_bbox_p95_fraction }))
@@ -175,6 +186,7 @@ try {
     local_requests_on=($b | Measure-Object -Property local_requests -Sum).Sum
     full_fallbacks_off=($a | Measure-Object -Property full_fallbacks -Sum).Sum
     full_fallbacks_on=($b | Measure-Object -Property full_fallbacks -Sum).Sum
+    dense_legacy_updates_on=($b | Measure-Object -Property dense_legacy_updates -Sum).Sum
     paint_p95_off_ms=$off95; paint_p95_on_ms=$on95
     paint_p99_off_ms=$off99; paint_p99_on_ms=$on99
     input_to_paint_p95_off_ms=$offInput; input_to_paint_p95_on_ms=$onInput
@@ -195,7 +207,7 @@ try {
  $output=Join-Path $groupDir 'RESUMO_AB_CONTROLADO_575_19_9.json'
  [IO.File]::WriteAllText($output,(($report|ConvertTo-Json -Depth 8)+[Environment]::NewLine),
    [Text.UTF8Encoding]::new($false))
- Write-Host ('Modo ON testado: {0} (1=QRegion original; 2=QRegion cacheado)' -f $ModoOtimizado) -ForegroundColor Cyan
+ Write-Host ('Modo ON testado: {0} (1=QRegion original; 2=QRegion cacheado; 3=guarda para selecao densa)' -f $ModoOtimizado) -ForegroundColor Cyan
  Write-Host ('Gate sintetico: {0}, razao amostras: {1:N3}' -f $gate,$balance) -ForegroundColor Yellow
  Write-Host ('Gate de desempenho: {0}' -f $performanceGate) -ForegroundColor Yellow
  Write-Host ('P95 pintura OFF/ON: {0} / {1} ms, delta {2}%' -f $off95,$on95,(Reducao $off95 $on95))
