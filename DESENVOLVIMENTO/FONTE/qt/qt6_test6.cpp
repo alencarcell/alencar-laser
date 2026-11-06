@@ -9722,7 +9722,7 @@ QJsonObject groupedCenterTransformDense20iTest(){
  const auto before=stateText(v.editor.state());
  const Pt first=v.editor.state().doc.contours.front().nodes.front().p;
  const QPoint start=v.mapFromScene(QPointF(178.,166.));
- const QPoint end=v.mapFromScene(QPointF(182.,169.));
+ const QPoint end=v.mapFromScene(QPointF(190.,175.));
  const QPointF delta=v.mapToScene(end)-v.mapToScene(start);
  QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,start);
  QApplication::processEvents();
