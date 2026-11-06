@@ -306,7 +306,34 @@ protected:
  }
 };
 
+// Phase 20: opt-in contour paint probe. The normal editor continues to use
+// stock QGraphicsPathItem through QGraphicsScene::addPath.
+struct ContourPaintProbe20{
+ bool collect=false;
+ double currentMs=0.;
+ int currentCalls=0;
+};
+class TimedContourPathItem20 final:public QGraphicsPathItem{
+ ContourPaintProbe20* probe_;
+public:
+ TimedContourPathItem20(const QPainterPath& path,const QPen& pen,ContourPaintProbe20* probe)
+  :QGraphicsPathItem(path),probe_(probe){setPen(pen);}
+ void paint(QPainter* painter,const QStyleOptionGraphicsItem* option,
+            QWidget* widget=nullptr)override{
+  if(!probe_||!probe_->collect){
+   QGraphicsPathItem::paint(painter,option,widget);return;
+  }
+  QElapsedTimer timer;timer.start();
+  QGraphicsPathItem::paint(painter,option,widget);
+  probe_->currentMs+=timer.nsecsElapsed()/1e6;
+  ++probe_->currentCalls;
+ }
+};
+
 class QtEditorLab final:public QGraphicsView{
+ ContourPaintProbe20 contourProbe20_;
+ const bool contourPaintProbeOptIn20_=
+   qEnvironmentVariable("ALENCAR_VECTOR_PAINT_PROBE_20")=="1";
  QGraphicsScene scene_;
  bool fastDenseDisplay_=false; // visual mode only; canonical vector data unchanged
  WorkspaceConfig workspace_{};
@@ -1319,6 +1346,9 @@ public:
  double pairedBackgroundCurrentMs199=0,pairedForegroundCurrentMs199=0;
  std::vector<double> pairedOtherInclusiveMs199,pairedTotalMs199;
  quint64 pairedPhaseInvalid199=0;
+ std::vector<double> contourPaintFrameMs20_,noncontourInclusiveMs20_;
+ std::vector<double> contourPaintItemCalls20_;
+ quint64 contourProbeInvalid20_=0;
  static void sample(std::vector<double>& measurements,double duration){
   if(measurements.size()>=10000)measurements.erase(measurements.begin(),measurements.begin()+5000);
   measurements.push_back(duration);
@@ -1798,7 +1828,11 @@ public:
     QPen vectorPen(layerColor(meta.layer),1.15,Qt::SolidLine,
                    Qt::RoundCap,Qt::RoundJoin);
     vectorPen.setCosmetic(true);
-    auto* item=scene_.addPath(pathOf(c),vectorPen);
+    QGraphicsPathItem* item=nullptr;
+    if(contourPaintProbeOptIn20_){
+     auto* tracked=new TimedContourPathItem20(pathOf(c),vectorPen,&contourProbe20_);
+     scene_.addItem(tracked);item=tracked;
+    }else item=scene_.addPath(pathOf(c),vectorPen);
     item->setZValue(1);
     item->setVisible(layer.visible&&!hiddenTextEditingMembers_.count(c.key.object));
     objects_[c.key]=item;itemsByObject_[c.key.object].push_back(item);
@@ -2081,6 +2115,12 @@ protected:
   }
   // Paired, frame-by-frame attribution. Keep the default GUI path passive.
   const bool paired=measurePairedPaintPhases199&&!pairedPaintInProgress199;
+  const bool vectorPaired=paired&&contourPaintProbeOptIn20_;
+  if(vectorPaired){
+   contourProbe20_.currentMs=0.;
+   contourProbe20_.currentCalls=0;
+   contourProbe20_.collect=true;
+  }
   if(paired){
    pairedBackgroundCurrentMs199=0;
    pairedForegroundCurrentMs199=0;
@@ -2088,12 +2128,23 @@ protected:
   }
   QElapsedTimer timer;timer.start();QGraphicsView::paintEvent(e);
   const double totalMs=timer.nsecsElapsed()/1e6;
+  if(vectorPaired)contourProbe20_.collect=false;
   if(paired){
    pairedPaintInProgress199=false;
    const double otherMs=totalMs-pairedBackgroundCurrentMs199-pairedForegroundCurrentMs199;
    if(std::isfinite(otherMs)&&otherMs>=0){
     sample(pairedOtherInclusiveMs199,otherMs);
     sample(pairedTotalMs199,totalMs);
+    if(vectorPaired){
+     const double vectorMs=contourProbe20_.currentMs;
+     const double nonContourMs=otherMs-vectorMs;
+     if(std::isfinite(vectorMs)&&std::isfinite(nonContourMs)&&
+        vectorMs>=0&&nonContourMs>=-0.01){
+      sample(contourPaintFrameMs20_,vectorMs);
+      sample(contourPaintItemCalls20_,double(contourProbe20_.currentCalls));
+      sample(noncontourInclusiveMs20_,std::max(0.,nonContourMs));
+     }else ++contourProbeInvalid20_;
+    }
    }else ++pairedPhaseInvalid199;
   }
   sample(paintMs,totalMs);
@@ -9350,6 +9401,8 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
  v.foregroundMs.clear();v.backgroundMs.clear();
  v.pairedOtherInclusiveMs199.clear();v.pairedTotalMs199.clear();
  v.pairedPhaseInvalid199=0;
+ v.contourPaintFrameMs20_.clear();v.noncontourInclusiveMs20_.clear();
+ v.contourPaintItemCalls20_.clear();v.contourProbeInvalid20_=0;
  v.measurePairedPaintPhases199=true;
  QPoint finish=start;
  for(int i=1;i<=kFrames;++i){
@@ -9376,6 +9429,13 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
        v.pairedTotalMs199.size()==v.pairedOtherInclusiveMs199.size(),
        "Controlled drag paired phase sampling missing");
  check(v.pairedPhaseInvalid199==0,"Paint phase instrumentation returned invalid residual");
+ if(v.contourPaintProbeOptIn20_){
+  check(v.contourProbeInvalid20_==0,"Contour paint probe invalid frame");
+  check(v.contourPaintFrameMs20_.size()==v.pairedOtherInclusiveMs199.size(),
+        "Contour paint sampling count differs from paired total");
+  check(percentile(v.contourPaintItemCalls20_,.95)>=1.,
+        "No vector contour paints collected in benchmark");
+ }
  v.measurePairedPaintPhases199=false;
  const QJsonObject measured{
   {"frames",kFrames},{"paint_samples",paints},
@@ -9394,6 +9454,19 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
   {"paired_other_inclusive_p99_ms",percentile(v.pairedOtherInclusiveMs199,.99)},
   {"paired_total_p95_ms",percentile(v.pairedTotalMs199,.95)},
   {"paired_phase_invalid",double(v.pairedPhaseInvalid199)},
+  {"vector_probe_enabled",v.contourPaintProbeOptIn20_},
+  {"vector_paint_frame_samples",int(v.contourPaintFrameMs20_.size())},
+  {"vector_paint_p95_ms",v.contourPaintProbeOptIn20_?
+     percentile(v.contourPaintFrameMs20_,.95):0.},
+  {"vector_paint_p99_ms",v.contourPaintProbeOptIn20_?
+     percentile(v.contourPaintFrameMs20_,.99):0.},
+  {"vector_paint_item_calls_p95",v.contourPaintProbeOptIn20_?
+     percentile(v.contourPaintItemCalls20_,.95):0.},
+  {"noncontour_inclusive_p95_ms",v.contourPaintProbeOptIn20_?
+     percentile(v.noncontourInclusiveMs20_,.95):0.},
+  {"noncontour_inclusive_p99_ms",v.contourPaintProbeOptIn20_?
+     percentile(v.noncontourInclusiveMs20_,.99):0.},
+  {"vector_probe_invalid_frames",double(v.contourProbeInvalid20_)},
   {"input_to_paint_samples",inputPaints},
   {"input_to_paint_p95_ms",percentile(v.inputToPaintMs,.95)},
   {"viewport_bbox_p95_fraction",percentile(v.viewportPaintBBoxFractions,.95)},
