@@ -33,6 +33,23 @@ try {
     $report.speedup_claim_allowed -ne $false -or
     $report.automatic_promotion_allowed -ne $false -or
     @($report.cases).Count -ne 18){throw 'Gate de integridade invalido'}
+ foreach($case in @($report.cases)){
+  $steps=@($case.pixel_differences_by_step)
+  if($steps.Count -ne 8){throw 'Diagnostico de pixels por etapa incompleto'}
+  $sum=0.0
+  for($i=0;$i -lt $steps.Count;$i++){
+   $st=$steps[$i]
+   if([int]$st.step -ne ($i+1) -or
+      [double]$st.changed_pixels -lt 0 -or
+      [double]$st.max_channel_difference -lt 0){
+    throw 'Diagnostico de etapa invalido'
+   }
+   $sum += [double]$st.changed_pixels
+  }
+  if([math]::Abs($sum-[double]$case.changed_pixels_all_steps) -gt 0.01){
+   throw 'Soma de pixels por etapa diferente do total'
+  }
+ }
  foreach($n in @(40,128,575)){
   $group=@($report.cases | Where-Object { $_.contours -eq $n })
   if($group.Count -ne 6){throw "Rodadas incompletas: $n"}
@@ -45,6 +62,11 @@ try {
   $peak=($group | Measure-Object -Property peak_process_working_set_bytes -Maximum).Maximum
   Write-Host ("{0} contornos: medianas OFF={1:N3}ms CACHE={2:N3}ms; pixels alterados={3}; max canal={4}; RSS pico={5:N0} bytes" -f $n,$offMed,$onMed,$changes,$maxDelta,$peak)
  }
+ Write-Host 'Diferencas de pixels por etapa (575 contornos, rodada 1):' -ForegroundColor Cyan
+ @($report.cases | Where-Object { $_.contours -eq 575 -and $_.round -eq 1 }) |
+  ForEach-Object { $_.pixel_differences_by_step } |
+  Format-Table step,zoom,pan_x,pan_y,changed_pixels,max_channel_difference -AutoSize
+ Write-Host ("Imagens de diagnostico locais em: {0}" -f (Join-Path $dest 'DIAGNOSTICO_PIXELS_20E')) -ForegroundColor Cyan
  Write-Host 'FASE20e: MEDIDO, NAO HOMOLOGADO. Pixel divergente exige revisao; nenhuma promocao automatica.' -ForegroundColor Yellow
  Write-Host "Relatorio local: $out"
 }finally{
