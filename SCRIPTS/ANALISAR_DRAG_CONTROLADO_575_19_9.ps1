@@ -38,6 +38,10 @@ if ($r.schema -ne 'alencar-laser-controlled-drag-575-ab-19.9' -or
     $r.production_homologated -ne $false) {
  throw 'Schema ou estados de seguranca invalidos.'
 }
+$modeCode=[string]$r.optin_mode_code
+if (@('1','2','3') -notcontains $modeCode) {
+ throw 'Modo ON nao identificado no resumo; nao atribuir ganhos.'
+}
 $rows=@($r.rounds)
 $a=@($rows|Where-Object { $_.mode -eq 'OFF' })
 $b=@($rows|Where-Object { $_.mode -eq 'ON' })
@@ -77,12 +81,25 @@ $maxSamples=[double](($paintCount | Measure-Object -Maximum).Maximum)
 if ($maxSamples -le 0 -or $off95 -le 0 -or $off99 -le 0) { throw 'Pintura/amostras invalidas no resumo.' }
 $balance=$minSamples/$maxSamples
 $gate=if ($balance -lt 0.70) { 'INCONCLUSIVE_SAMPLE_IMBALANCE' }
-      elseif ($reg95 -ge 10 -and $reg99 -ge 10) { 'REGRESSION_OBSERVED_DO_NOT_PROMOTE' }
-      else { 'SYNTHETIC_RESULTS_MANUAL_REVIEW_REQUIRED' }
+      elseif ($modeCode -eq '3') { 'EQUIVALENT_REPAINT_POLICY_NO_SPEEDUP_CLAIM' }
+      elseif ($reg95 -ge 10 -and $reg99 -ge 10) {
+       'REGRESSION_OBSERVED_DO_NOT_PROMOTE'
+      } else { 'SYNTHETIC_RESULTS_MANUAL_REVIEW_REQUIRED' }
+if ($modeCode -eq '3') {
+ foreach ($row in $b) {
+  $dense=$row.PSObject.Properties['dense_legacy_updates']
+  if ($null -eq $dense -or
+      [double]$row.local_requests -ne 0 -or
+      [double]$dense.Value -lt 144) {
+   throw 'ON3 sem confirmacao do fallback legado para 575 objetos.'
+  }
+ }
+}
 Write-Host 'ALENCAR LASER — revisao de seis rodadas ja existentes' -ForegroundColor Cyan
+Write-Host ('Modo ON avaliado: {0}' -f $modeCode) -ForegroundColor Cyan
 $rows | Select-Object round,mode,paint_samples,paint_p95_ms,paint_p99_ms,
  input_to_paint_p95_ms,viewport_bbox_p95_fraction,
- local_requests,full_fallbacks | Format-Table -AutoSize
+ local_requests,full_fallbacks,dense_legacy_updates | Format-Table -AutoSize
 Write-Host ('P95 pintura mediana OFF/ON: {0:N4} / {1:N4} ms ({2:+0.00;-0.00;0.00}% ON vs OFF)' -f $off95,$on95,$reg95)
 Write-Host ('P99 pintura mediana OFF/ON: {0:N4} / {1:N4} ms ({2:+0.00;-0.00;0.00}% ON vs OFF)' -f $off99,$on99,$reg99)
 Write-Host ('Bbox P95 (proporcao viewport) OFF/ON: {0:N3} / {1:N3}' -f $bboxOff,$bboxOn)
@@ -91,5 +108,8 @@ Write-Host ('Requisicoes local ON: {0}; fallbacks completos ON: {1}' -f
  (($b | Measure-Object -Property full_fallbacks -Sum).Sum))
 Write-Host ('Balanceamento de amostras: {0:N4}' -f $balance)
 Write-Host ('Gate de desempenho: {0}' -f $gate) -ForegroundColor Yellow
+if ($modeCode -eq '3') {
+ Write-Warning 'ON3 e OFF repintam a viewport inteira nesta fixture de 575 objetos. Deltas de P95/P99 representam variacao entre execucoes, nao ganho de otimizacao.'
+}
 Write-Warning 'O gate e uma regra heuristica de seguranca, nao um teste de significancia estatistica nem homologacao visual.'
 Write-Host 'SOMENTE LEITURA. Nenhum comando de maquina, arquivo alterado ou Git push.' -ForegroundColor Green
