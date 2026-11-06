@@ -9245,6 +9245,116 @@ QJsonObject groupedDrag199Test(){
 }
 
 
+// Controlled synthetic input, REAL 575-contour fixture. Same Qt mouse events,
+// zoom, selection and geometry for OFF/ON; NOT a substitute for manual visual QA.
+QJsonObject controlledDenseDrag199Test(const QString& csv){
+ constexpr int kFrames=144;
+ LabWindow w(readCsv(csv.toStdString()));
+ w.resize(1180,680);w.show();QApplication::processEvents();
+ auto& v=w.view;
+ const auto& initialDoc=v.editor.state().doc;
+ check(initialDoc.contours.size()==575,"Dense drag requires 575 contours");
+ check(countNodes(initialDoc)==13415,"Dense drag fixture nodes mismatch");
+ check(initialDoc.contours[0].nodes.size()>15,"Dense drag fixture missing reference node");
+ const QPointF seed=toQt(initialDoc.contours[0].nodes[15].p);
+ v.setTransform(QTransform::fromScale(1.2,1.2));
+ v.centerOn(seed);QApplication::processEvents();
+ v.selectAllVisible();QApplication::processEvents();
+ check(v.selected.size()==575,"Dense drag failed to select 575 shapes");
+ const auto originalState=stateText(v.editor.state());
+ const Document originalDoc=v.editor.state().doc;
+ const QPoint start=v.mapFromScene(seed);
+ check(v.viewport()->rect().adjusted(20,20,-60,-50).contains(start),
+       "Dense drag anchor outside safe viewport area");
+ v.setFocus();v.viewport()->setFocus();
+ QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,start);
+ QApplication::processEvents();
+ check(v.groupedDragStarts()==1,"Dense drag preview was not grouped");
+ const int initialOverlay= int(v.dragOverlayLocalRequests199());
+ // Discard startup, marquee/selection and press paints from the measurement.
+ v.paintMs.clear();v.inputToPaintMs.clear();v.viewportPaintBBoxFractions.clear();
+ QPoint finish=start;
+ for(int i=1;i<=kFrames;++i){
+  // Deterministic bounded trajectory, ends at known displacement.
+  const int dx=8+((i*7)%32),dy=6+((i*3)%18);
+  finish=start+QPoint(dx,dy);
+  QTest::mouseMove(v.viewport(),finish,1);
+  QApplication::processEvents();
+ }
+ // Allow pending paint updates without forcing artificial full-view repaint.
+ QTest::qWait(25);QApplication::processEvents();
+ check(v.groupedDragFrameUpdates()>=kFrames,
+       "Dense drag mouse events were not accepted");
+ const int paints=int(v.paintMs.size());
+ const int inputPaints=int(v.inputToPaintMs.size());
+ check(paints>=30,"Dense drag paint sampling too sparse");
+ check(inputPaints>=20,"Dense drag input-to-paint sampling too sparse");
+ check(!v.viewportPaintBBoxFractions.empty(),"Missing repaint area data");
+ const QJsonObject measured{
+  {"frames",kFrames},{"paint_samples",paints},
+  {"paint_p50_ms",percentile(v.paintMs,.50)},
+  {"paint_p95_ms",percentile(v.paintMs,.95)},
+  {"paint_p99_ms",percentile(v.paintMs,.99)},
+  {"input_to_paint_samples",inputPaints},
+  {"input_to_paint_p95_ms",percentile(v.inputToPaintMs,.95)},
+  {"viewport_bbox_p95_fraction",percentile(v.viewportPaintBBoxFractions,.95)},
+  {"viewport_bbox_samples",int(v.viewportPaintBBoxFractions.size())}
+ };
+ check(stateText(v.editor.state())==originalState,
+       "Dense drag changed model before mouse release");
+ const QPointF delta=v.mapToScene(finish)-v.mapToScene(start);
+ QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,finish);
+ QApplication::processEvents();
+ check(v.editor.state().doc.contours.size()==575,"Dense drag changed contour count");
+ const auto& moved=v.editor.state().doc.contours;
+ for(size_t i=0;i<moved.size();++i){
+  check(moved[i].key==originalDoc.contours[i].key,
+        "Dense drag changed contour identity");
+  check(moved[i].nodes.size()==originalDoc.contours[i].nodes.size(),
+        "Dense drag changed node count");
+  for(size_t n=0;n<moved[i].nodes.size();++n){
+   const Pt actual=moved[i].nodes[n].p,old=originalDoc.contours[i].nodes[n].p;
+   check(std::abs(actual.x-old.x-delta.x())<1e-5 &&
+         std::abs(actual.y-old.y-delta.y())<1e-5,
+         "Dense drag changed canonical node geometry unexpectedly");
+  }
+ }
+ for(auto* item:v.scene()->items())
+  check(item->type()!=QGraphicsItemGroup::Type,
+        "Dense drag left a transient graphics group");
+ const auto movedText=stateText(v.editor.state());
+ pressKey(w,Qt::Key_Z,Qt::ControlModifier);QApplication::processEvents();
+ check(stateText(v.editor.state())==originalState,
+       "Dense drag Undo did not restore canonical geometry");
+ pressKey(w,Qt::Key_Y,Qt::ControlModifier);QApplication::processEvents();
+ check(stateText(v.editor.state())==movedText,
+       "Dense drag Redo did not restore committed geometry");
+ checkRendered(w);
+ check(v.dragOverlayLocalExperiment199() || v.dragOverlayLocalRequests199()==0,
+       "OFF mode unexpectedly used local overlay updates");
+ if(v.dragOverlayLocalExperiment199())
+  check(v.dragOverlayLocalRequests199()>quint64(initialOverlay),
+        "ON mode did not enter local overlay repaint");
+ return {
+  {"schema","alencar-laser-controlled-drag-575-19.9"},
+  {"status","PASS_SYNTHETIC_MANUAL_PENDING"},
+  {"selected_contours",575},{"fixture_nodes",13415},
+  {"zoom_factor",1.2},
+  {"viewport_width",v.viewport()->width()},
+  {"viewport_height",v.viewport()->height()},
+  {"dpr",v.viewport()->devicePixelRatioF()},
+  {"qt",qVersion()},
+  {"overlay_local_enabled",v.dragOverlayLocalExperiment199()},
+  {"overlay_local_requests",double(v.dragOverlayLocalRequests199())},
+  {"overlay_full_fallbacks",double(v.dragOverlayFullFallbacks199())},
+  {"measured",measured},
+  {"geometry_preserved",true},
+  {"undo_redo_preserved",true},
+  {"machine_commands_sent",false},
+  {"production_homologated",false}
+ };
+}
+
 QJsonObject groupedCenterTransform199Test(){
  LabWindow w(Document{});w.show();QApplication::processEvents();
  auto& v=w.view;
@@ -9594,6 +9704,18 @@ int main(int argc,char** argv){
   try{report=nativeImportGui199Test();}
   catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_IMPORTACAO_NATIVA_GUI_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--controlled-drag-575-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=controlledDenseDrag199Test(csv);}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())},
+                      {"machine_commands_sent",false}};
+  }
+  QFile file(out+"/RESULTADO_ARRASTE_CONTROLADO_575_19_9.json");
   if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
   return pass?0:1;
