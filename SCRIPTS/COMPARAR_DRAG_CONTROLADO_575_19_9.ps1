@@ -157,7 +157,11 @@ try {
  $paintP95Regression = if ($off95 -gt 0) { 100*($on95-$off95)/$off95 } else { 0 }
  $paintP99Regression = if ($off99 -gt 0) { 100*($on99-$off99)/$off99 } else { 0 }
  $performanceGate = if ($balance -lt 0.70) { 'INCONCLUSIVE_SAMPLE_IMBALANCE' }
-                    elseif ($paintP95Regression -ge 10 -and $paintP99Regression -ge 10) {
+                    elseif ($ModoOtimizado -eq '3') {
+                      # ON3 with 575 contours uses the same full-viewport
+                      # repaint strategy as OFF. A lower P95 is not speedup.
+                      'EQUIVALENT_REPAINT_POLICY_NO_SPEEDUP_CLAIM'
+                    } elseif ($paintP95Regression -ge 10 -and $paintP99Regression -ge 10) {
                       'REGRESSION_OBSERVED_DO_NOT_PROMOTE'
                     } else { 'SYNTHETIC_RESULTS_MANUAL_REVIEW_REQUIRED' }
  $gate = if ($balance -lt 0.70) { 'INCONCLUSIVE_SAMPLE_IMBALANCE' }
@@ -166,6 +170,9 @@ try {
   schema='alencar-laser-controlled-drag-575-ab-19.9'
   status=$gate
   performance_gate=$performanceGate
+  effective_repaint_policy_on=$(if ($ModoOtimizado -eq '3') { 'legacy_full_viewport_for_575' } else { 'localized_QRegion' })
+  same_repaint_policy_as_off=($ModoOtimizado -eq '3')
+  speedup_claim_allowed=$false
   regression_threshold_percent=10
   automatic_promotion_allowed=$false
   fixture_sha256=$fixtureSha
@@ -200,6 +207,7 @@ try {
   production_homologated=$false
   hardware_commands_sent=$false
   notes=@('Synthetic Qt mouse events, not human gestures.',
+          'Mode 3 for 575 contours reuses legacy full-viewport repaint in both OFF and ON; differences are run-to-run variation.',
           'P95/P99 describe paint samples, not whole interaction throughput.',
           'Viewport bbox metric is paint event bounding rectangle, not exact QRegion pixels.',
           'No automated visual pixel equivalence proof; inspect for stale selection handles.')
@@ -217,6 +225,9 @@ try {
  Write-Host ('Requisicoes local ON: {0}, fallbacks full ON: {1}' -f (($b | Measure-Object -Property local_requests -Sum).Sum),(($b | Measure-Object -Property full_fallbacks -Sum).Sum))
  if ($performanceGate -eq 'REGRESSION_OBSERVED_DO_NOT_PROMOTE') {
   Write-Warning 'REGRESSAO CONTROLADA: modo ON tem P95 e P99 >=10% piores. NAO PROMOVER.'
+ }
+ if ($performanceGate -eq 'EQUIVALENT_REPAINT_POLICY_NO_SPEEDUP_CLAIM') {
+  Write-Warning 'ON3 e OFF usam a mesma repintura completa para 575 objetos: NAO atribuir delta percentual a otimizacao.'
  }
  Write-Host "Resumo JSON local: $output" -ForegroundColor Green
  Write-Host 'Sem Git push e sem hardware. Homologacao visual/produçao pendente.'
