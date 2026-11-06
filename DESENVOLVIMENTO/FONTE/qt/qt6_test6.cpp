@@ -1794,6 +1794,16 @@ public:
  void invalidateSelectionCache(){picker_.invalidate();}
  bool fastDenseDisplay()const noexcept{return fastDenseDisplay_;}
  bool vectorPaintProbeEnabled20()const noexcept{return contourPaintProbeOptIn20_;}
+ // Public, read-only view for the isolated Qt synthetic benchmark.
+ // Keep the probe private; no geometry, ids or coordinates are exposed.
+ const std::vector<ContourPaintStats20>& contourPaintStats20()const noexcept{
+  return contourProbe20_.itemStats;
+ }
+ void resetContourPaintStats20()noexcept{
+  for(auto& st:contourProbe20_.itemStats){
+   st.calls=0;st.elapsedMs=0.;st.maxMs=0.;
+  }
+ }
  bool dragOverlayLocalExperiment199()const noexcept{return localDragOverlay199_;}
  bool dragOverlayCachedExperiment199()const noexcept{return cachedDragOverlay199_;}
  bool dragOverlayDenseGuard199()const noexcept{return denseGuardDragOverlay199_;}
@@ -9428,9 +9438,7 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
  v.pairedPhaseInvalid199=0;
  v.contourPaintFrameMs20_.clear();v.noncontourInclusiveMs20_.clear();
  v.contourPaintItemCalls20_.clear();v.contourProbeInvalid20_=0;
- for(auto& stats:v.contourProbe20_.itemStats){
-  stats.calls=0;stats.elapsedMs=0.;stats.maxMs=0.;
- }
+ v.resetContourPaintStats20();
  v.measurePairedPaintPhases199=true;
  QPoint finish=start;
  for(int i=1;i<=kFrames;++i){
@@ -9473,9 +9481,9 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
   struct Bucket20{int contours=0;quint64 calls=0;double ms=0.;};
   std::array<Bucket20,4> bins{};
   std::vector<std::size_t> ranked;
-  ranked.reserve(v.contourProbe20_.itemStats.size());
-  for(std::size_t i=0;i<v.contourProbe20_.itemStats.size();++i){
-   const auto& st=v.contourProbe20_.itemStats[i];
+  ranked.reserve(v.contourPaintStats20().size());
+  for(std::size_t i=0;i<v.contourPaintStats20().size();++i){
+   const auto& st=v.contourPaintStats20()[i];
    check(st.nodeCount>0&&st.pathElements>=0,
          "Invalid contour paint complexity");
    check(std::isfinite(st.elapsedMs)&&std::isfinite(st.maxMs)&&
@@ -9494,13 +9502,13 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
     {"paint_calls",double(b.calls)},{"total_ms",b.ms}});
   }
   std::sort(ranked.begin(),ranked.end(),[&](std::size_t a,std::size_t b){
-   const auto& left=v.contourProbe20_.itemStats[a];
-   const auto& right=v.contourProbe20_.itemStats[b];
+   const auto& left=v.contourPaintStats20()[a];
+   const auto& right=v.contourPaintStats20()[b];
    return left.elapsedMs==right.elapsedMs?a<b:left.elapsedMs>right.elapsedMs;
   });
   const int n=std::min(10,int(ranked.size()));
   for(int rank=0;rank<n;++rank){
-   const auto& st=v.contourProbe20_.itemStats[ranked[std::size_t(rank)]];
+   const auto& st=v.contourPaintStats20()[ranked[std::size_t(rank)]];
    contourTop20.append(QJsonObject{
     {"rank",rank+1},{"node_count",st.nodeCount},
     {"path_element_count",st.pathElements},{"paint_calls",double(st.calls)},
