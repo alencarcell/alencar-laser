@@ -193,3 +193,38 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_DRAG_CON
 ```
 
 Essa execução recompila a cópia Qt A/B isolada, repete 3 pares com 575 contornos e salva o relatório local em nova pasta `CONTROLADO_575_*`. **Estado atual: código registrado no GitHub, ainda não compilado/testado no Windows.** A versão OFF continua padrão; ON1/ON2 não homologados; nada foi enviado para produção.
+
+
+## 06/11/2026 — ON3: tempos por fase e residual pareado por frame
+
+**Captura do operador (novembro/2026):** o A/B controlado com `-ModoOtimizado 3` compilou o Qt e concluiu seis rodadas, cada uma com 575 contornos, 13.415 nós e 144 movimentos; amostras equilibradas, razão 1,000. A captura mostra as medianas abaixo (ms):
+
+| Métrica | OFF | ON3 |
+|---|---:|---:|
+| Paint P95 | 27,1715 | 18,3440 |
+| Paint P99 | 27,6833 | 22,0882 |
+| Background P95 | 0,3766 | 0,3761 |
+| Foreground P95 | 5,7734 | 7,5510 |
+| Entrada→pintura P95 | 31,9594 | 22,1668 |
+| Bbox repintura P95 | 1,000 | 1,000 |
+
+ON3 registrou **0 requisições de atualização localizada e 0 fallbacks QRegion**. A guarda optou pelo repaint completo como OFF. **Classificação correta: `EQUIVALENT_REPAINT_POLICY_NO_SPEEDUP_CLAIM`.** As diferenças de tempos não comprovam aceleração causada pelo ON3. O background medido é pequeno, enquanto foreground é mensurável; não é possível deduzir tempo dos vetores pela diferença entre P95 de etapas distintas.
+
+### Instrumentação de residual por evento de pintura (não executada ainda)
+
+Implementação somente na branch experimental:
+- Commit `81a3565`: `PaintPhaseProbe199` soma background e foreground **dentro do mesmo `QGraphicsView::paintEvent`** durante o benchmark. O evento calcula `other_inclusive_ms=totalMs-backgroundMs-foregroundMs` do **mesmo frame**, guardando apenas valores válidos. A métrica residual inclui **desenho de itens vetoriais, raster, clipping, dispatch, composição e outras despesas Qt**, não mede isoladamente `QGraphicsPathItem`.
+- Commit `3741394`: comparador automático de seis rodadas exige contagem pareada idêntica à contagem de pintura, zero residual inválido e relatório P95/P99 do residual inclusivo por rodada e medianas OFF/ON. Nova instrumentação não altera geometria, preview ou comunicação física.
+
+Esse residual emparelhado resolve o erro metodológico de **subtrair P95 independentes**, mas ainda não isola desenho de contornos do overhead geral Qt. Qualquer otimização dos itens vetoriais precisa de um teste específico, após obter valores.
+
+Próximo comando no Windows, Alencar Laser fechado e máquina desconectada:
+
+```powershell
+cd C:\ProjetoAlencarLaser
+git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030
+if ($LASTEXITCODE -ne 0) { throw 'Falha na atualização' }
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_DRAG_CONTROLADO_575_19_9.ps1" -ModoOtimizado 3
+```
+
+**Status:** fonte e script publicados no GitHub; compilação do novo residual e seis rodadas ainda não executadas no Windows. Manter OFF como padrão, sem publicar logs brutos; não promover para main/instalador/produção nem conectar o laser.
