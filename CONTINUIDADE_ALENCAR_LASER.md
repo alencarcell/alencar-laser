@@ -1415,3 +1415,21 @@ Registrar mudanças, testes e pendências.
 - Commit 91f791b valida consistencia entre buckets, chamadas e total, registra parcela do tempo somado pelos dez contornos mais custosos e chamadas medias por frame em cada rodada. Nao confundir parcela de soma de duracoes com razao de P95 diferentes. Commit 7a4ba1e atualiza o analisador para mostrar faixas de nos e top 10, podendo ler tambem relatórios anteriores. Commit 321f928 faz o lançador COLETAR_FASE20_VETORES_AUTO.ps1 executar automaticamente o analisador apos o A/B. Nenhum push dos JSONs locais.
 - ESTADO: codigo de Fase20b escrito na branch e reconsultado, NAO compilado nem executado no Windows. O proximo comando continua o mesmo: git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030; powershell -NoProfile -ExecutionPolicy Bypass -File '.\SCRIPTS\COLETAR_FASE20_VETORES_AUTO.ps1'. O teste executa seis rodadas no build isolado, mede e sumariza. Laser desconectado, editor fechado, principal OFF, nada promovido para producao.
 - GATE apos coleta: validar 575 itens por frame, distribuicao de custo por complexidade, top10, integridade geométrica e Undo/Redo; analisar se custo esta concentrado em poucos contornos antes de decidir cache/raster ou simplificacao de paths. Nao alterar vetores ou histórIco por antecipacao.
+
+
+## 06/11/2026 — Correção compilação Fase 20b: acesso privado QtEditorLab
+
+- Windows 11 (captura e log completo do operador, 06/11/2026): após `git pull` e `COLETAR_FASE20_VETORES_AUTO.ps1`, o g++ não compilou `qt6_test6.cpp`. Erro C++: `ContourPaintProbe20 QtEditorLab::contourProbe20_` is private within this context; 7 acessos externos em `controlledDenseDrag199Test()` (reset, tamanho, iteração, comparação e ranking). Os demais avisos `-Wmisleading-indentation`, `-Wrange-loop-construct` e API Qt deprecated são avisos, NÃO a causa desse bloqueio.
+- **Nenhum teste de 575 rodou; nenhum PASS foi gerado** nesta tentativa. O lançador interrompeu adequadamente após falha da compilação; nada foi enviado ao laser e não houve homologação.
+- Commit **`da6fcbf`** corrige o problema sem tornar o membro `private` público: adiciona métodos `contourPaintStats20() const noexcept` (acesso somente leitura ao vetor de estatísticas, na classe) e `resetContourPaintStats20() noexcept`; atualiza todos os acessos externos na função sintética. Todas as ocorrências `v.contourProbe20_` foram removidas da implementação.
+- Revisão estática no GitHub concluída; **o novo commit NÃO foi recompilado/testado ainda no Windows**. Nenhuma alegação de PASS ou melhoria de desempenho. Flag vetorial somente em teste experimental, `main`, `APLICATIVO`, instalador e comunicação laser preservados.
+- Próximo passo de um só comando no PowerShell do usuário, Alencar Laser fechado e laser fisicamente desconectado:
+
+```powershell
+cd C:\ProjetoAlencarLaser
+git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao atualizar' }
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COLETAR_FASE20_VETORES_AUTO.ps1"
+```
+
+- Se falhar novamente, coletar o primeiro erro vermelho com arquivo/linha (não somente avisos), interromper a análise de performance até compilar. Se passar, analisar histogramas de nós e ranking top 10 com os relatórios locais. Não publicar dados brutos.
