@@ -362,6 +362,9 @@ class QtEditorLab final:public QGraphicsView{
  QPointF shapeDragStart_{};
  QPointF shapePreviewDelta_{};
  std::optional<QRectF> shapePreviewBounds_;
+ // Cached at drag start in mode 2. The document's geometry remains unchanged
+ // until mouse release; only the scene-space preview delta moves this frame.
+ std::optional<std::array<QPointF,4>> dragOverlayBaseQuad199_;
  std::vector<QGraphicsPathItem*> shapePreviewItems_;
  QGraphicsItemGroup* shapePreviewGroup_=nullptr; // transient preview only, never document geometry
  static constexpr std::size_t kGroupedDragThreshold=32;
@@ -369,8 +372,13 @@ class QtEditorLab final:public QGraphicsView{
  // A/B opt-in: Qt already invalidates moving scene items automatically;
  // explicit viewport updates here are only for the selection foreground.
  // Rollback immediately: unset ALENCAR_LOCAL_DRAG_OVERLAY_19_9.
+ // 0/default: legacy full update; 1: original QRegion opt-in;
+ // 2: same QRegion with cached selection frame (no per-frame bounds scan).
  const bool localDragOverlay199_=
-   qEnvironmentVariable("ALENCAR_LOCAL_DRAG_OVERLAY_19_9")=="1";
+   qEnvironmentVariable("ALENCAR_LOCAL_DRAG_OVERLAY_19_9")=="1"||
+   qEnvironmentVariable("ALENCAR_LOCAL_DRAG_OVERLAY_19_9")=="2";
+ const bool cachedDragOverlay199_=
+   qEnvironmentVariable("ALENCAR_LOCAL_DRAG_OVERLAY_19_9")=="2";
  quint64 dragOverlayLocalRequests199_=0,dragOverlayFullFallbacks199_=0;
  // Alcas independentes dos dados; commit unico no mouseRelease.
  bool transformDragging_=false;
@@ -783,6 +791,11 @@ class QtEditorLab final:public QGraphicsView{
    const auto it=nativeItems_.find(*nativeSession_->selected());
    if(it!=nativeItems_.end())return quadFromRect(it->second->path().boundingRect());
   }
+  if(shapeDragging_&&cachedDragOverlay199_&&dragOverlayBaseQuad199_){
+   auto cached=*dragOverlayBaseQuad199_;
+   for(auto& p:cached)p+=shapePreviewDelta_;
+   return cached;
+  }
   if(selected.empty()||tool!=Tool::Select)return {};
   std::optional<std::array<QPointF,4>> points;
   if(orientedFrameValid())points=*orientedFrame_;
@@ -1049,6 +1062,7 @@ class QtEditorLab final:public QGraphicsView{
   }
   shapePreviewItems_.clear();shapeDragging_=false;
   shapePreviewDelta_={};shapePreviewBounds_.reset();
+  dragOverlayBaseQuad199_.reset();
   viewport()->update();
  }
  void beginShapePreview(QPointF origin){
@@ -1069,6 +1083,12 @@ class QtEditorLab final:public QGraphicsView{
   if(!shapePreviewBounds_){clearShapePreview();return;}
   shapePreviewDelta_={};
   shapeDragStart_=origin;
+  if(cachedDragOverlay199_){
+   // Capture once while shapeDragging_ is false. This preserves existing
+   // oriented frames and avoids repeated selectedBounds() on 13k+ nodes.
+   dragOverlayBaseQuad199_=selectionQuadScene();
+   if(!dragOverlayBaseQuad199_){clearShapePreview();return;}
+  }
   // For large selections, one temporary parent transform replaces hundreds
   // of per-item setPos() calls on EVERY mouse move. Small selections use the
   // established path to avoid introducing overhead.
@@ -1704,6 +1724,7 @@ public:
  void invalidateSelectionCache(){picker_.invalidate();}
  bool fastDenseDisplay()const noexcept{return fastDenseDisplay_;}
  bool dragOverlayLocalExperiment199()const noexcept{return localDragOverlay199_;}
+ bool dragOverlayCachedExperiment199()const noexcept{return cachedDragOverlay199_;}
  quint64 dragOverlayLocalRequests199()const noexcept{return dragOverlayLocalRequests199_;}
  quint64 dragOverlayFullFallbacks199()const noexcept{return dragOverlayFullFallbacks199_;}
  void rebuild(){
@@ -3177,6 +3198,7 @@ public:
       {"grouped_drag_starts",view.groupedDragStarts()},
       {"grouped_drag_frame_updates",view.groupedDragFrameUpdates()},
       {"drag_overlay_local_experiment_19_9",view.dragOverlayLocalExperiment199()},
+      {"drag_overlay_cached_experiment_19_9",view.dragOverlayCachedExperiment199()},
       {"drag_overlay_local_requests_19_9",double(view.dragOverlayLocalRequests199())},
       {"drag_overlay_full_fallbacks_19_9",double(view.dragOverlayFullFallbacks199())},
       {"grouped_transform_starts",view.groupedTransformStarts()},
@@ -9239,6 +9261,7 @@ QJsonObject groupedDrag199Test(){
                     {"grouped_starts",v.groupedDragStarts()},
                     {"grouped_frames",v.groupedDragFrameUpdates()},
                     {"drag_overlay_local_experiment",v.dragOverlayLocalExperiment199()},
+                    {"drag_overlay_cached_experiment",v.dragOverlayCachedExperiment199()},
                     {"drag_overlay_local_requests",double(v.dragOverlayLocalRequests199())},
                     {"drag_overlay_full_fallbacks",double(v.dragOverlayFullFallbacks199())},
                     {"undo_redo_preserved",true},{"hardware_commands_sent",false}};
@@ -9345,6 +9368,7 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
   {"dpr",v.viewport()->devicePixelRatioF()},
   {"qt",qVersion()},
   {"overlay_local_enabled",v.dragOverlayLocalExperiment199()},
+  {"overlay_cached_bounds_enabled",v.dragOverlayCachedExperiment199()},
   {"overlay_local_requests",double(v.dragOverlayLocalRequests199())},
   {"overlay_full_fallbacks",double(v.dragOverlayFullFallbacks199())},
   {"measured",measured},
