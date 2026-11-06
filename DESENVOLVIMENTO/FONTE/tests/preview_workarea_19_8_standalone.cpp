@@ -24,7 +24,33 @@ int main(){
   bed198::Report summary;
   const Plan filtered=bed198::restrictToBed(full,100,100,&summary);
   req(summary.outsideSegments>=1&&summary.clippedSegments>=2,"out-of-bed counters");
-  req(summary.omittedLaserMm>0,"excluded laser distance");
+  req(summary.outsideLaserSegments==1&&summary.clippedLaserSegments>=2,
+      "laser-only outside counters must exclude travel");
+  req(summary.omittedLaserMm>0&&summary.clippedLaserMm>0,
+      "excluded distance distinguishes partial cut vs fully outside");
+  req(bed198::partiallyOutsideActiveGeometry(summary),
+      "laser path that crosses bed must warn");
+  // Spare art completely outside the bed is intentionally kept in the
+  // document, omitted from clipped simulation and must NOT raise a banner.
+  Plan external;
+  external.moves={{{-40,20},{-10,20},true,1},
+                  {{-10,20},{-15,22},false,1}};
+  bed198::Report externalReport;
+  const Plan externalSim=bed198::restrictToBed(external,100,100,&externalReport);
+  req(externalSim.moves.empty()&&externalReport.outsideLaserSegments==1,
+      "external spare art is ignored only in virtual simulation");
+  req(!bed198::partiallyOutsideActiveGeometry(externalReport)&&
+      externalReport.clippedLaserMm==0,
+      "fully outside spare shape must not trigger workarea warning");
+  Plan mixedSpare=external;
+  mixedSpare.moves.push_back({{10,10},{25,15},true,2});
+  bed198::Report mixedReport;
+  const Plan mixedPreview=bed198::restrictToBed(mixedSpare,100,100,&mixedReport);
+  req(!bed198::partiallyOutsideActiveGeometry(mixedReport)&&
+      mixedReport.outsideLaserSegments==1&&mixedReport.clippedLaserSegments==0,
+      "outside spare plus inside work must not trigger warning");
+  req(mixedPreview.cutMm>0&&mixedPreview.cutMm<mixedSpare.moves.size()*100.,
+      "inside artwork still simulated while outside spare is ignored");
   req(!filtered.moves.empty(),"filtered plan");
   for(const auto& move:filtered.moves)
    req(bed198::inside(move.from,100,100)&&bed198::inside(move.to,100,100),

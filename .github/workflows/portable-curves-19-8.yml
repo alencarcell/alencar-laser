@@ -1,0 +1,59 @@
+name: Alencar Laser 19.8 - portable curves and bed checks
+on:
+  push:
+    branches:
+      - fix/curvas-tesoura-preflight-19-8-20261030
+    paths:
+      - DESENVOLVIMENTO/FONTE/src/**
+      - DESENVOLVIMENTO/FONTE/tests/**
+      - .github/workflows/portable-curves-19-8.yml
+  pull_request:
+    branches:
+      - fix/validacao-real-19-8-20261029
+    paths:
+      - DESENVOLVIMENTO/FONTE/src/**
+      - DESENVOLVIMENTO/FONTE/tests/**
+      - .github/workflows/portable-curves-19-8.yml
+permissions:
+  contents: read
+jobs:
+  portable-offline:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install C++ dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ libboost-json1.83-dev libminizip-dev zlib1g-dev
+      - name: Build and execute without GUI or hardware
+        working-directory: DESENVOLVIMENTO/FONTE
+        run: |
+          set -euo pipefail
+          mkdir -p build_ci_native_19_8
+          g++ -std=c++20 -O2 -Wall -Wextra tests/preview_draw_join_19_8_standalone.cpp -o build_ci_native_19_8/draw_join
+          ./build_ci_native_19_8/draw_join
+          g++ -std=c++20 -O2 -Wall -Wextra tests/selected_local_edit_19_8_standalone.cpp -o build_ci_native_19_8/selected_local_edit
+          ./build_ci_native_19_8/selected_local_edit
+          g++ -std=c++20 -O2 -Wall -Wextra tests/line_interval_19_8_standalone.cpp src/boost_json_impl.cpp -o build_ci_native_19_8/line_interval
+          ./build_ci_native_19_8/line_interval
+          g++ -std=c++20 -O2 -Wall -Wextra tests/alignment_mirror_19_8_standalone.cpp -o build_ci_native_19_8/alignment_mirror
+          ./build_ci_native_19_8/alignment_mirror
+          g++ -std=c++20 -O2 -Wall -Wextra tests/native_scissors_realcut_19_8_standalone.cpp -o build_ci_native_19_8/native_scissors
+          ./build_ci_native_19_8/native_scissors
+          g++ -std=c++20 -O2 -Wall -Wextra tests/diagnostics_native_events_19_8_standalone.cpp -o build_ci_native_19_8/native_diagnostics
+          ./build_ci_native_19_8/native_diagnostics
+          g++ -std=c++20 -O2 -Wall -Wextra tests/native_transform_19_8_standalone.cpp -o build_ci_native_19_8/native_transform
+          ./build_ci_native_19_8/native_transform
+          g++ -std=c++20 -O2 -Wall -Wextra -I src tests/preview_workarea_19_8_standalone.cpp src/boost_json_impl.cpp -lminizip -lz -o build_ci_native_19_8/preview_bed
+          ./build_ci_native_19_8/preview_bed
+          g++ -std=c++20 -O2 -Wall -Wextra tests/preview_native_bezier_19_8_standalone.cpp src/boost_json_impl.cpp -lminizip -lz -o build_ci_native_19_8/native_preview
+          ./build_ci_native_19_8/native_preview
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic tests/distribution_19_8_standalone.cpp src/boost_json_impl.cpp -o build_ci_native_19_8/distribution
+          ./build_ci_native_19_8/distribution
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic tests/rotary_offline_19_9_standalone.cpp -o build_ci_native_19_8/rotary_offline
+          ./build_ci_native_19_8/rotary_offline
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic tests/gear_generator_19_9_standalone.cpp -o build_ci_native_19_8/gear_offline
+          ./build_ci_native_19_8/gear_offline
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic tests/mechanism_studio_19_9_standalone.cpp -o build_ci_native_19_8/mechanism_offline
+          ./build_ci_native_19_8/mechanism_offline
+          echo 'PASS portable core only; Qt GUI and physical machine not validated.'

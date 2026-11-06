@@ -21,6 +21,8 @@ struct Layer {
  int passes=1;
  std::string powerMode="M4"; // M4=dinamica / M3=constante (somente metadados)
  bool optimizeTravel=true; // reordenacao VIRTUAL na previa apenas
+ double lineIntervalMm=0.20; // distancia entre linhas Fill (metadado offline)
+ bool parametersVerified=true; // false: imported layer has no confirmed simulation/fabrication settings
 };
 struct Meta {int layer=0,group=0;};
 struct EditableText {
@@ -34,6 +36,13 @@ struct EditableText {
 struct EditorState {
  Document doc;std::map<int,Meta> objects;std::map<int,Layer> layers;
  int nextGroup=1;std::map<int,EditableText> editableTexts;
+};
+// History memory is an estimate of NODE ARRAY PAYLOAD only, not complete RSS.
+// Measured on manual diagnostics export; never in mouse/paint callbacks.
+struct HistoryNodeFootprint {
+ size_t currentNodes=0,undoNodes=0,redoNodes=0;
+ size_t currentNodeBytes=0,undoNodeBytes=0,redoNodeBytes=0;
+ size_t undoStates=0,redoStates=0;
 };
 inline size_t countNodes(const Document& d){size_t n=0;for(auto& c:d.contours)n+=c.nodes.size();return n;}
 inline void validate(const EditorState& s){
@@ -51,7 +60,9 @@ inline void validate(const EditorState& s){
   else if(!std::isfinite(layer.speedMmMin)||layer.speedMmMin<10||layer.speedMmMin>100000||
           !std::isfinite(layer.powerPercent)||layer.powerPercent<0||layer.powerPercent>100||
           layer.passes<1||layer.passes>20||
-          (layer.powerMode!="M3"&&layer.powerMode!="M4"))
+          (layer.powerMode!="M3"&&layer.powerMode!="M4")||
+          !std::isfinite(layer.lineIntervalMm)||layer.lineIntervalMm<0.05||
+          layer.lineIntervalMm>5.0)
    throw std::runtime_error("invalid layer simulation parameters");
  for(auto obj:objs){auto i=s.objects.find(obj);if(i==s.objects.end()||!s.layers.count(i->second.layer)||i->second.group<0)throw std::runtime_error("unregistered object/layer");}
  for(auto& [id,meta]:s.objects)if(!objs.count(id))throw std::runtime_error("metadata on missing object");
@@ -146,7 +157,8 @@ class Editor{
    if(!intact)it=next.editableTexts.erase(it);else ++it;
   }
   validate(next);
-  past.push_back(current);if(past.size()>maxHistory)past.erase(past.begin());
+  // next already owns the validated copy; retain old state by MOVE, not a second deep copy.
+  past.push_back(std::move(current));if(past.size()>maxHistory)past.erase(past.begin());
   current=std::move(next);future.clear();++generation;if(changesGeometry)++geometryGeneration;
  }
  static int nextObjectId(const Document& d){int maxObj=0;for(auto& c:d.contours)maxObj=std::max(maxObj,c.key.object);if(maxObj>=INT32_MAX)throw std::runtime_error("object ID exhausted");return maxObj+1;}
@@ -171,8 +183,23 @@ public:
  const EditorState& state()const{return current;}
  size_t undoCount()const{return past.size();}
  size_t redoCount()const{return future.size();}
- bool undo(){if(past.empty())return false;future.push_back(current);current=std::move(past.back());past.pop_back();++generation;++geometryGeneration;return true;}
- bool redo(){if(future.empty())return false;past.push_back(current);current=std::move(future.back());future.pop_back();++generation;++geometryGeneration;return true;}
+ HistoryNodeFootprint historyNodeFootprint()const noexcept{
+  HistoryNodeFootprint out;
+  out.undoStates=past.size();out.redoStates=future.size();
+  const auto scan=[](const EditorState& st,size_t& nodes,size_t& bytes){
+   for(const auto& contour:st.doc.contours){
+    nodes+=contour.nodes.size();
+    // sizeof is unevaluated even when the vector is empty.
+    bytes+=contour.nodes.capacity()*sizeof(contour.nodes[0]);
+   }
+  };
+  scan(current,out.currentNodes,out.currentNodeBytes);
+  for(const auto& state:past)scan(state,out.undoNodes,out.undoNodeBytes);
+  for(const auto& state:future)scan(state,out.redoNodes,out.redoNodeBytes);
+  return out;
+ }
+ bool undo(){if(past.empty())return false;future.push_back(std::move(current));current=std::move(past.back());past.pop_back();++generation;++geometryGeneration;return true;}
+ bool redo(){if(future.empty())return false;past.push_back(std::move(current));current=std::move(future.back());future.pop_back();++generation;++geometryGeneration;return true;}
  int addContour(std::vector<Pt> points,bool closed,int layerId=0){
   if(points.size()<(closed?3U:2U))throw std::runtime_error("not enough nodes");
   int obj=nextObjectId(current.doc);
@@ -644,6 +671,22 @@ public:
   });
   return selectedResult;
  }
+ // Rotate-aware affine resize. A single atomic transaction keeps grouped objects
+ // intact; the preview rectangle is NOT serialized as project geometry.
+ // [a b; c d] maps the local axes of the oriented selection.
+ void affineObjects(std::vector<int> ids,Pt pivot,double a,double b,double c,double d){
+  const double determinant=a*d-b*c;
+  if(!std::isfinite(pivot.x)||!std::isfinite(pivot.y)||
+     !std::isfinite(a)||!std::isfinite(b)||!std::isfinite(c)||!std::isfinite(d)||
+     !std::isfinite(determinant)||std::abs(determinant)<1e-9)
+   throw std::runtime_error("invalid oriented resize");
+  change([&](EditorState& st){
+   apply(st,ids,[&](Pt p){
+    const double x=p.x-pivot.x,y=p.y-pivot.y;
+    return Pt{pivot.x+a*x+b*y,pivot.y+c*x+d*y};
+   });
+  });
+ }
  void rotateObjects(std::vector<int> ids,Pt pivot,double angle){change([&](EditorState& s){apply(s,ids,[&](Pt p){return rotateAround(p,pivot,angle);});});}
  void scaleObjects(std::vector<int> ids,Pt pivot,double sx,double sy){if(!std::isfinite(sx)||!std::isfinite(sy)||sx==0||sy==0)throw std::runtime_error("invalid scale");change([&](EditorState& s){apply(s,ids,[&](Pt p){return Pt{pivot.x+(p.x-pivot.x)*sx,pivot.y+(p.y-pivot.y)*sy};});});}
  void mirrorX(std::vector<int> ids,double axisX){change([&](EditorState& s){apply(s,ids,[&](Pt p){return Pt{2*axisX-p.x,p.y};});});}
@@ -708,6 +751,64 @@ public:
     else delta.y=coordinate(target)-coordinate(box);
     for(auto& contour:st.doc.contours)if(unit.count(contour.key.object))
      for(auto& n:contour.nodes)n.p=n.p+delta;
+   }
+  });
+ }
+ // Equally spaced margins between complete editable objects/groups (offline).
+ // Keeps the first and last selected units fixed; changes intermediate nodes
+ // in ONE transaction. No topology, layer, native Bezier or hardware changes.
+ void distributeObjects(const std::vector<int>& selectedIds,bool horizontal){
+  if(selectedIds.size()<3||selectedIds.size()>1000)
+   throw std::runtime_error("distribution requires 3 to 1000 selected objects");
+  change([&](EditorState& st){
+   std::set<int> wanted;
+   for(int id:selectedIds){
+    auto it=st.objects.find(id);
+    if(it==st.objects.end()||!editable(st,id))
+     throw std::runtime_error("distribution requires editable visible objects");
+    wanted.insert(it->second.group>0?-it->second.group:id);
+   }
+   std::map<int,std::set<int>> units;
+   for(const auto& [id,meta]:st.objects){
+    const int key=meta.group>0?-meta.group:id;
+    if(!wanted.count(key))continue;
+    if(!editable(st,id))throw std::runtime_error("distribution group is locked/hidden");
+    units[key].insert(id);
+   }
+   if(units.size()<3)throw std::runtime_error("choose 3 independent shapes/groups");
+   struct Item {int key;double lo,hi;};
+   std::vector<Item> order;
+   order.reserve(units.size());
+   for(const auto& [key,members]:units){
+    auto bounds=boundsOf(st.doc,std::vector<int>(members.begin(),members.end()));
+    double a=horizontal?bounds.first.x:bounds.first.y;
+    double b=horizontal?bounds.second.x:bounds.second.y;
+    if(!std::isfinite(a)||!std::isfinite(b)||b<a)
+     throw std::runtime_error("invalid distribution bounds");
+    order.push_back({key,a,b});
+   }
+   std::sort(order.begin(),order.end(),[](const Item& a,const Item& b){
+    if(a.lo!=b.lo)return a.lo<b.lo;
+    return a.key<b.key;
+   });
+   const double range=order.back().hi-order.front().lo;
+   double widths=0;
+   for(const auto& item:order)widths+=item.hi-item.lo;
+   const double available=range-widths;
+   if(!std::isfinite(available)||available<-1e-7)
+    throw std::runtime_error("selection has insufficient space for non-overlapping distribution");
+   const double gap=std::max(0.0,available)/double(order.size()-1);
+   double position=order.front().hi+gap;
+   for(size_t i=1;i+1<order.size();++i){
+    const Item& item=order[i];
+    const double shift=position-item.lo;
+    if(!std::isfinite(shift))throw std::runtime_error("non-finite distribution shift");
+    const auto& members=units.at(item.key);
+    for(auto& contour:st.doc.contours)if(members.count(contour.key.object))
+     for(auto& node:contour.nodes){
+      if(horizontal)node.p.x+=shift;else node.p.y+=shift;
+     }
+    position+=item.hi-item.lo+gap;
    }
   });
  }
@@ -776,19 +877,23 @@ public:
      !std::isfinite(desired.speedMmMin)||desired.speedMmMin<10||desired.speedMmMin>100000||
      !std::isfinite(desired.powerPercent)||desired.powerPercent<0||desired.powerPercent>100||
      desired.passes<1||desired.passes>20||
-     (desired.powerMode!="M3"&&desired.powerMode!="M4"))
+     (desired.powerMode!="M3"&&desired.powerMode!="M4")||
+     !std::isfinite(desired.lineIntervalMm)||desired.lineIntervalMm<0.05||
+     desired.lineIntervalMm>5.0)
    throw std::runtime_error("invalid virtual layer configuration");
   const auto& present=current.layers.at(id);
   if(present.name==desired.name&&present.mode==desired.mode&&
      present.speedMmMin==desired.speedMmMin&&
      present.powerPercent==desired.powerPercent&&present.passes==desired.passes&&
-     present.powerMode==desired.powerMode&&present.optimizeTravel==desired.optimizeTravel)return;
+     present.powerMode==desired.powerMode&&present.optimizeTravel==desired.optimizeTravel&&
+     present.lineIntervalMm==desired.lineIntervalMm)return;
   change([&](EditorState& state){
    auto& item=state.layers.at(id);
    item.name=desired.name;item.mode=desired.mode;
    item.speedMmMin=desired.speedMmMin;item.powerPercent=desired.powerPercent;
    item.passes=desired.passes;item.powerMode=desired.powerMode;
    item.optimizeTravel=desired.optimizeTravel;
+   item.lineIntervalMm=desired.lineIntervalMm;
   },false);
  }
  void setLayerMode(int id,const std::string& mode){
@@ -845,7 +950,8 @@ inline boost::json::object metadata(const EditorState& s){
  using namespace boost::json;object m;m["schema"]="editor-meta-1";m["nextGroup"]=s.nextGroup;array layers;
  for(auto&[id,l]:s.layers)layers.push_back(object{{"id",id},{"name",l.name},{"visible",l.visible},{"locked",l.locked},{"mode",l.mode},{"output",l.output},{"air",l.air},
    {"speedMmMin",l.speedMmMin},{"powerPercent",l.powerPercent},
-   {"passes",l.passes},{"powerMode",l.powerMode},{"optimizeTravel",l.optimizeTravel}});
+   {"passes",l.passes},{"powerMode",l.powerMode},{"optimizeTravel",l.optimizeTravel},
+   {"lineIntervalMm",l.lineIntervalMm},{"parametersVerified",l.parametersVerified}});
  m["layers"]=std::move(layers);array objects;
  for(auto&[id,o]:s.objects)objects.push_back(object{{"id",id},{"layer",o.layer},{"group",o.group}});
  m["objects"]=std::move(objects);
@@ -874,7 +980,9 @@ inline EditorState fromMetadata(Document d,const boost::json::value& v){
     x.if_contains("powerPercent")?x.at("powerPercent").to_number<double>():20.0,
     x.if_contains("passes")?int(x.at("passes").as_int64()):1,
     x.if_contains("powerMode")?std::string(x.at("powerMode").as_string()):"M4",
-    x.if_contains("optimizeTravel")?x.at("optimizeTravel").as_bool():true};}
+    x.if_contains("optimizeTravel")?x.at("optimizeTravel").as_bool():true,
+    x.if_contains("lineIntervalMm")?x.at("lineIntervalMm").to_number<double>():0.20,
+    x.if_contains("parametersVerified")?x.at("parametersVerified").as_bool():true};}
  for(const auto& item:m.at("objects").as_array()){const auto& x=item.as_object();int id=int(x.at("id").as_int64());if(s.objects.count(id))throw std::runtime_error("duplicate object meta");s.objects[id]={int(x.at("layer").as_int64()),int(x.at("group").as_int64())};}
  if(const auto* texts=m.if_contains("editableTexts")){
   for(const auto& item:texts->as_array()){

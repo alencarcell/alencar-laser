@@ -714,3 +714,722 @@ Registrar mudanças, testes e pendências.
 - Job `Qt6 UCRT64 - compile (sem laser)` => compilação Qt6 Windows PASS; etapa adicional `Test PNG embedded and layout icons (Qt6 offscreen)` PASS em ambos os modos `--raster-object-19-8-test` e `--layout-icons-19-8-test`.
 - Esse PASS é do runner Windows headless; **não equivale à validação visual nem à homologação em Windows do operador**. PENDÊNCIAS: testes `-SomenteInteracao`, `-SomenteSimulacao`, `-Abrir` na máquina real, seleção/movimentação/redimensionamento da imagem no mouse, salva/reabre cópia .alaser real, escala DPI 125/150%, clip de projeto externo e inspeção do cabeçalho Pégaso.
 - Segurança permanece: `APLICATIVO` e `main` sem alterações, máquina desconectada e comandos físicos desabilitados; PR #12 rascunho. Não liberar versão final por este CI.
+
+
+## 30/10/2026 — Curvas, Tesoura e pré-validação da mesa (experimento isolado)
+
+- Após prints do operador, identificada causa comprovada no código: `CurveDragSession::cutContourAtEdge` dividia a Bézier sem remover nenhuma aresta, portanto podia aparentar que a Tesoura não funcionava. Reescrito para remover a aresta matemática clicada (não um intervalo topológico LightBurn), preservar outras cúbicas, gerar dois caminhos quando aplicável e manter Undo/Redo. Overlay Qt passa a destacar a mesma aresta inteira.
+- Botões legados `nodes` e `bezier` ocultos da barra compacta, sem apagar as rotinas; `new_bezier` renomeado “Desenhar caminhos e curvas”, com novo glifo e tooltip. Duplo clique na curva em Seleção acessa edição de âncoras/alças. Seleção/escala/rotação completas ainda pendentes de testes e evolução.
+- Prévia mostra banner visível independente da rolagem e da opção de corte; área de validação agora usa mesa física configurada, não a área de desenho. Diagnósticos distinguem laser-ON de travel-OFF. Operação real, CAM, G-code e controles físicos permanecem bloqueados.
+- Teste portátil novo de Tesoura Bézier ligado aos gates Windows `-SomenteTesoura` e `-Abrir`, e teste Qt de desenho ajustado ao contrato de remoção real. Fonte e documentação publicadas na branch `fix/curvas-tesoura-preflight-19-8-20261030`, derivada da PR #12. Documento de escopo: `DESENVOLVIMENTO/ESPECIFICACOES/CURVAS_TESOURA_PREVALIDACAO_MESA_20261030.md`.
+- **NÃO COMPILADO NO WINDOWS / NÃO HOMOLOGADO após essas alterações.** `main`, `APLICATIVO` e base aprovada preservados; não mesclar nem habilitar máquina sem teste completo. Executar com laser desconectado os gates `-SomenteTesoura`, `-SomenteDesenho`, `-SomenteSimulacao`, depois `-Abrir` e inspeção manual em cópia de .alaser.
+
+
+## 30/10/2026 — Regressão Desenho após novo contrato da Tesoura (CI portátil PASS)
+
+- Windows `-SomenteTesoura` do operador: PASS no motor C++ 19.7/19.8, Bézier nativa e GUI Qt (foto terminal). Após a correção de aspas do script (`a8ab3326`), o teste `-SomenteDesenho` chegou ao teste C++ `preview_draw_join_19_8_standalone.cpp:115` e falhou na asserção `lifecycle.committed().contours.size()==2` (retorno Windows `-1073740791`).
+- **Causa comprovada:** contrato de teste desatualizado. Esperava a divisão não destrutiva da única aresta cúbica em dois caminhos, mas o novo motor remove efetivamente essa aresta. O teste não comprova regressão funcional por si só.
+- Atualizados testes do ciclo de vida Bézier aberto e fechado em `tests/preview_draw_join_19_8_standalone.cpp` (commit `eabe2a28`) e regressão Qt `qt6_test6.cpp` (commit `e5820ced`): remoção real, seleção, ausência de contorno fantasma, Undo fiel, Redo e abertura do anel após cortar. Nenhum afrouxamento de asserção ou reativação da divisão antiga.
+- Adicionado workflow offline de compilação+execução de três regressões C++ em Linux, `.github/workflows/portable-curves-19-8.yml`. GitHub Actions run `41096272907`, commit `fc417702`, job `portable-offline`: **SUCCESS** (desenho/união, tesoura nativa e prévia de mesa). Verificação de sintaxe PowerShell na mesma rodada também PASS. Isso NÃO equivale à validação GUI Qt em Windows nem homologação.
+- Próximo gate local: `git status --short`, `git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030`, `-SomenteDesenho`; se PASS, `-SomenteSimulacao` e `-Abrir`. Laser desconectado e `main`, `APLICATIVO`, instalação homologada preservados.
+
+
+## 30/10/2026 — Refinamento de alertas de mesa e alinhamento inspirado no LightBurn
+
+- Usuário validou visualmente que o banner de limites funciona, porém esclareceu: **objetos totalmente externos são artes de reserva; não devem provocar alerta**. Na captura: 325 trechos externos + 4 cruzando a mesa. JSON de prévia separado: laser ON 197 externos, 4 recortados, 68,98 mm de trajeto excluído. Ajustado `preview_workarea_19_8.hpp`/ `preview_dialog_19_8.hpp`: somente laser ON que CRUZA a borda aciona aviso, inclusive quando a opção de clipping é desmarcada. Estatísticas de caminhos externos continuam exportadas mas não aparecem como perigo; preservação da geometria original. Testes incluem só fora + fora/interior + cruzamento.
+- Alinhamento: acrescentados `quick_align_6` (coincidir centros X+Y com objeto de referência) e `quick_center_bed_19_8` (centralizar geometria selecionada na mesa física, não alterar formas de reserva não selecionadas). Ícones e dicas próprios; centralização considera grupos completos, não apenas membro selecionado. Adicionada ação no menu Organizar > Alinhar formas. Testes Qt de presença de botões, alinhamento central e reserva inalterada.
+- Relatório de diagnósticos enviado: `command_error=1`, 0 curvas Bézier nativas no estado coletado, 575 contornos e 14.433 nós polilinha, paint P95 33,7742 ms, max 437,87 ms. A causa do erro de comando não está descrita; não atribuir a ferramentas. Performance é uma observação, ainda sem ajuste.
+- Código na PR #13, `fix/curvas-tesoura-preflight-19-8-20261030`, sem mesclar main. `APLICATIVO` e hardware físico intactos. Revisão Qt/Windows ainda precisa de `-SomenteInteracao` e `-Abrir` + mouse real e projetos .alaser; não declarar versão final.
+
+
+## 30/10/2026 — Teste Qt de alinhamento após centralização na mesa
+
+- Print do operador em `TESTAR_19_8_WINDOWS.ps1 -SomenteInteracao`: compilação Qt concluiu, mas o caso `--layout-icons-19-8-test` retornou `Espelhamento vertical nao refletiu os nos do objeto`. A etapa seguinte `-SomenteSimulacao` já havia iniciado e não possui resultado final no print; não inferir PASS.
+- Análise do código: teste Qt usava indevidamente a soma vertical fixa `35`, válida somente antes da nova operação “Centralizar seleção na mesa”. Depois da centralização, as posições são transladadas; `Editor::mirrorY(ids,axisY)` usa o eixo atual fornecido pela interface. Não existe evidência neste print de erro real no motor de espelhamento.
+- Ajuste na branch experimental: capturar `boundsOf` **atuais** do objeto, verificar reflexão de **todos** os nós usando `y' = minY + maxY - y` e `x'=x`, garantir uma única transação no histórico e Undo de geometria exata (commit `3812a2e9`). Não foi alterado o algoritmo `mirrorY` nem o código de controle físico.
+- Regressão portátil adicional `tests/alignment_mirror_19_8_standalone.cpp`: alinha ambos os centros, translada seleção ao centro da mesa, garante que objeto de reserva fora da mesa permaneça intocado, reflete com eixo atualizado e faz Undo. Incluída no workflow CI Linux.
+- Teste Qt Windows ainda obrigatório: `git status --short`; `git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030`; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteInteracao`. Se PASS, concluir `-SomenteSimulacao` e depois `-Abrir`. Não homologar sem prova.
+
+
+## 30/10/2026 — Relatório real: Bézier sem redimensionamento e editor preso em gesto
+
+- Dois screenshots do editor Qt 19.8 em Windows: uma curva Bézier v5 selecionada e movida, mas sem alças de escala/rotação, enquanto Tesoura e exclusão funcionam. Outro print registra a mensagem `Conclua ou cancele o arraste antes de outro comando.`; o operador relata bloqueio ao deixar ferramenta Desenhar curva com geometria em curso. Eventos do coletor incluem `bezier_contour_moved` e recortes de Tesoura, mas não demonstram redimensionamento/recuperação.
+- **Causa no código:** seleção nativa era excluída do desenho e do hit test das 13 alças (`paintSelectionHandles`, `beginSelectionTransform`), ainda que a curva fosse selecionável. O clique no botão de outra ferramenta era processado dentro de `run()`, que abortava se `busy()` estivesse ativo; drafts Bézier e movimentos cuja liberação do mouse não chegasse bloqueavam a transição.
+- Alterações codificadas **apenas na branch da PR #13**: `CurveDragSession::transformSelectedContour` aplica afim sobre âncoras e ambas as alças Bézier em uma única transação Undo/Redo, sem achatamento poligonal. Qt permite usar alças de redimensionamento e rotação da seleção também para Bézier nativa, fazendo preview e commit no mouseRelease; Undo deve restaurar geometria original.
+- Troca de ferramenta passa a concluir rascunho válido e descartar incompleto; movimentos interrompidos são cancelados para liberar `busy()`. Esc mantém função de cancelamento. Atualizados tooltip e status do editor. Nenhum comando físico, G-code, transporte laser, main ou APLICATIVO alterado.
+- Regressões: `tests/native_transform_19_8_standalone.cpp` (escala, rotação, deslocamento, controles exatos e Undo/Redo) incluído em CI Linux e em `-SomenteDesenho` Windows; o teste Qt `--draw-join-19-8-test` agora arrasta alça e reproduz rascunho Bézier abandonado e liberação de mouse perdida.
+- **Pendência obrigatória:** compilar Qt6 Windows e testar as novas alças com mouse físico, zoom diferente, Ctrl+Z, clique fora, troca de ferramenta, fechamento e reabertura de cópia .alaser. Ainda não homologado; PR #13 permanece rascunho.
+
+
+## 30/10/2026 — Intervalo entre linhas (Line Interval) por camada — preview offline
+
+- Pedido: configurar o espaçamento físico nominal entre linhas de preenchimento com valores como 1,000 / 0,900 / 0,800 / 0,700 mm, principalmente nas gravações identificadas como M4. **Distinção essencial:** M4 (potência dinâmica) é independente de Line Interval (distância entre as linhas raster/Fill); não alterar M4 automaticamente ao mudar o intervalo.
+- Implementação experimental: `Layer::lineIntervalMm` com padrão 0,200 mm, faixa validada 0,050–5,000 mm; entrada numérica de três casas em **Configurações da camada** e indicador LPI teórico (25,4/intervalo). Parametrização registrada no mesmo metadado `editor-meta-1`, sem migração destrutiva; projetos antigos sem a chave assumem 0,200 mm. Configuração/Undo/Redo de camadas preservados.
+- `raster::appendFill` aceita opcionalmente `useLayerIntervals`: cada camada Fill usa seu próprio pitch em varreduras simuladas. O modo global permanece disponível e a imagem bitmap mantém seu intervalo global independente. Na prévia, opção `Fill: usar intervalo entre linhas salvo por camada`, acionada automaticamente quando existe Fill configurado com espaçamento diferente do padrão, sem mudar o comportamento inicial de projetos antigos.
+- Exportação JSON inclui `scan_line_interval_mm` global, `fill_layer_intervals_enabled` e `fill_layer_intervals_are_machine_commands=false`. M3/M4/potência seguem metadados ilustrativos; nenhum G-code, hardware, movimento ou disparo foi habilitado.
+- Regressão portátil adicional `tests/line_interval_19_8_standalone.cpp`: Fill 1,000mm (M4) em uma camada versus Fill 0,500mm (M3) em outra, fallback global 0,200mm, metadados antigos, Undo/Redo e rejeição de 0,010mm. Integrada ao CI Linux e ao gate `TESTAR_19_8_WINDOWS.ps1 -SomenteSimulacao`. Teste Qt `layerRoute198Test` ampliado com persistência, validação e fallback.
+- NÃO HOMOLOGADO: aguardar compilação Qt Windows, gate `-SomenteSimulacao`, relatório de prévia e teste manual. A pendência anterior da Tesoura Bézier (registro da coleta e Undo/Redo/linha cinza) permanece ABERTA, sem presumir correção.
+
+
+## 30/10/2026 — Correção focada: Ctrl+Z/Y e diagnóstico após Tesoura Bézier
+
+- Último print do operador: `-SomenteSimulacao` **PASS** no Windows; console informa `PASS: 1.000/0.500mm per-layer Fill, 0.200mm global fallback, old metadata, undo/redo; M3/M4 independent; offline only` e `SIMULACAO (MOVIMENTO + RASTER + CAMADAS/ROTA) PASS sintetico; controle fisico bloqueado`. Nenhuma homologação manual implícita.
+- Relato anterior: Tesoura Bézier nativa não aparecia em `scissor_attempts`; após cortar, Ctrl+Z/Y não restauravam/refaziam e aparecia apenas traço cinza.
+- **Causa observada no código:** `QtEditorLab::keyPressEvent` enviava Ctrl+Z/Y ao histórico das polilinhas quando `nativeMode_` ficava falso após um corte que removia a última Bézier. Botões, atalhos e menu também possuíam encaminhamentos distintos. `cutNativeAt` não atualizava `lastEditorGenerationSeen_` nem chamava `scissorDetail`, por isso o relatório não incluía `cut_native`.
+- Correção isolada na branch `fix/curvas-tesoura-preflight-19-8-20261030`, PR #13: `history(bool redo)` torna-se despacho único para histórico Bézier/polilinha; teclado, toolbar, atalhos e menu compartilham a mesma lógica. Após corte, o histórico nativo continua ativo mesmo sem curvas visíveis. `cutNativeAt` grava `lastEditorGenerationSeen_`, informa o corte ao coletor opt-in por `scissorDetail("cut_native", objeto, aresta)` e registra evento de Tesoura. `nativeHistory` também emite eventos `bezier_undo` e `bezier_redo`. Resumo do JSON ganhou contadores separados de undo/redo Bézier.
+- Em `drawAndJoin198Test`, teste real do Qt com mouse sintético foi ampliado: ativa coleta, corta Bézier de uma única aresta, comprova ausência da curva, verifica `scissor_attempts`, usa Ctrl+Z/Ctrl+Y e botões Desfazer/Refazer, confere o caminho restaurado exatamente e os contadores no JSON. CI Windows do próprio projeto usa `--draw-join-19-8-test`.
+- **Estado:** alterações commitadas; CI Qt Windows da rodada deve ser consultado antes de declarar PASS. Teste com mouse físico e cópia `.alaser` ainda obrigatório. PR rascunho, `main`, `APLICATIVO`, comandos de máquina e repositório privado preservados.
+- Para retomar: `git status --short`, `git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030`, `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteDesenho`, seguido de `-Abrir` somente se a suíte automática passar; testar coleta e Ctrl+Z/Y com laser fisicamente desconectado.
+
+- Ajuste de feedback visual adicional: após Undo/Redo Bézier, barra de status informa ação executada, quantidade de curvas e que a linha cinza é uma curva não selecionada (commit `c4fe237f`). Esse texto não substitui o teste de geometria; serve para evitar ambiguidade para o operador.
+
+
+## 31/10/2026 — Falha isolada do coletor na Tesoura Bézier (print real)
+
+- Operador executou `-SomenteDesenho` na branch experimental: compilação Qt completou, teste portátil de união de caminhos e teste de transformação Bézier passaram; a etapa `--draw-join-19-8-test` falhou com `Coletor nao contou Tesoura e historico nativos` (código 1). O print mostra que o teste avançou pelas verificações geométricas de corte/Undo/Redo antes de chegar à coleta.
+- **Causa comprovada no código:** `DiagnosticsCollector::record` só aceita eventos de uma lista explícita. `QtEditorLab::cutNativeAt` e `nativeHistory` enviavam `bezier_contour_scissor_cut`, `bezier_undo` e `bezier_redo`, mas os nomes não apareciam na lista de permissão de `src/diagnostics_collector.hpp`. `LabWindow::captureEvent` captura a exceção de evento desconhecido e não a propaga; por isso geometria funciona, mas o relatório fica sem contagens.
+- Correção na branch da PR #13: acrescentados nomes permitidos para edição Bézier nativa sem relaxar o filtro, sem coordenadas e sem coleta automática. Novo teste `tests/diagnostics_native_events_19_8_standalone.cpp` exige eventos de corte, Undo, Redo, rejeita nomes arbitrários e confirma que coleta OFF não registra. Integrado ao GitHub Actions C++ portátil, CMake e ao gate Windows `-SomenteDesenho`.
+- A regressão Qt existente continua exigindo coleta ativa, `cut_native` em `scissor_attempts`, contagens de corte/Undo/Redo e restauração idêntica da geometria. Nenhuma asserção foi desativada.
+- **Estado:** alteração publicada, aguarda os resultados automáticos e teste Windows com mouse real. Controle físico continua bloqueado; `main`, `APLICATIVO` e repositório privado preservados.
+- Próximo teste local após confirmar `git status --short` sem alterações conflitantes: `git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030`; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteDesenho`.
+
+
+## 31/10/2026 — Relatórios reais: Bézier fora da prévia, Fill, ícones, nós e rastreamento
+
+- **Fontes do operador:** capturas do editor Qt 19.8 e dos painéis de simulação e rastreamento; `Alencar_Laser_Previa_19_8(4).json` e `Alencar_Laser_Diagnostico_TESTE_19_7(10).json`.
+- **Evidência:** Bézier fechada selecionável/editável no editor, mas ausente na prévia, pois `showPreviewDialog` montava `Plan` somente do `EditorState.doc` (polilinhas), separado de `CurveDocument`. O relatório da prévia não tinha campos de curvas nativas. A simulação exportada é experimental, `machine_commands_sent=false`, Fill ligado e intervalos por camada ativados. A coleta registra 9 cortes Bézier, 6 Undo, 1 Redo e 4 `command_error` (motivos não incluídos no JSON; não atribuir sem reprodução).
+- **Preview / Fill resolvido no código experimental:** `preview_native_19_8.hpp` produz uma **cópia temporária** de polilinhas só para prévia, a partir das curvas cúbicas nativas (flatten com tolerância em mm, limites de nós e IDs independentes). Ela preserva a propriedade `closed`, aplica um objeto temporário por contorno, passa por rota Line ou Fill e respeita a camada. A curva matemática original não é alterada, exportada como polilinha ou quebrada em centenas de formas.
+- **Camada Bézier persistida:** `CurveContour.layer` e chave opcional `layerId` no `bezier-1` do projeto v5; arquivos antigos recebem camada 0. Novas Bézier herdam camada ativa e o botão `Enviar seleção para camada ativa` também transfere curva nativa. A troca de camada usa uma transação Undo/Redo nativa, sem `attachNative` que apagaria o histórico.
+- **Prévia:** `showPreviewDialog` passa a receber a sessão de curvas nativas, utiliza `planningSource` unido em `build`, otimização de rotas, Fill e passagens. Relatório JSON ganha `native_bezier_contours`, `native_bezier_closed`, `native_bezier_open`, `native_bezier_virtual_segments`, `native_bezier_missing_layer_fallbacks`. Não habilita G-code/GRBL.
+- **Edição de nós:** clique direito no botão Desenhar caminhos e curvas mostra ações para editar alças, armar clique para inserir âncora e excluir nó ativo (também Shift+clique e Delete). `armNativeInsertNode()` usa a mesma divisão cúbica exata e permite Esc para cancelar; histórico nativo e evento `bezier_node_inserted` preservados. Resta testar menu e interação manual no Windows.
+- **Barra superior:** `open_other` e `save_as` passam a ter glifos diferentes dos de abrir/salvar; 32px de altura homogênea, agrupamento e separador dos alinhamentos, ícones um pouco maiores.
+- **Rastrear imagem P&B:** novo parâmetro opcional `antiStaircase` reduz microdegraus de pixels somente em trechos com vários giros curtos; não altera máscaras originais nem cria nós; a UI oferece Anti-serrilhado ligado para perfis normal/logotipo, desligado em texto/traço fino. Arredondamento de cantos continua separado e opt-in. **Não é vetorização Bézier perfeita:** rever textos pequenos e vazados; o resultado é aproximado e editável.
+- **Regressões adicionadas:** `tests/preview_native_bezier_19_8_standalone.cpp` (fechada Fill, aberta Line, layer metadata/codec legados, fonte intacta e Undo/Redo); CMake, Linux CI e `-SomenteSimulacao` Windows. GUI `--draw-join-19-8-test` ampliado para inserção de nó na aresta/Undo. Teste Qt de rastreamento inclui anti-serrilhado e preservação de furos.
+- **Portões de homologação:** compilar Qt6 Windows e executar `-SomenteDesenho`, `-SomenteSimulacao`, `-Abrir`; inspeção manual em cópia `.alaser`, Bezier em Fill na camada transferida, visual de traçado, zoom e seleção; CI não substitui mouse físico.
+- **Segurança:** somente branch `fix/curvas-tesoura-preflight-19-8-20261030` PR #13; `main`, `APLICATIVO` e repositório privado preservados. GRBL/emissão física continuam bloqueados.
+
+
+## 31/10/2026 — Análise de cinco arquivos reais de referência (inspeção privada, sem importação destrutiva)
+
+- Entraram relatório de prévia JSON, diagnóstico JSON, projeto LightBurn LBRN2, log extenso de LightBurn e pacote de suporte codificado. **Não copiar os arquivos originais nem dados de licença/sistema/usuário para repositórios ou fixtures.** O pacote de suporte tem dados de licença/preferências e deve permanecer exclusivamente local.
+- **Prévia 19.8:** `native_bezier_contours=1`, `native_bezier_closed=1`, `native_bezier_virtual_segments=41`, `native_bezier_missing_layer_fallbacks=1`, `fill_layer_intervals_enabled=false`, `scan_line_interval_mm=0.2`, `partial_workarea_warning=false`; nenhuma emissão física. **Pendência identificada:** uma curva nativa foi redirecionada a camada existente porque seu `layerId` não correspondia a `EditorState.layers`; parâmetros de Fill/intervalo/velocidade podem divergir. Adicionado banner específico `preview_native_layer_warning_19_8` e campo `native_bezier_layer_mapping_requires_review`, sem modificar geometria ou habilitar GRBL.
+- **Diagnóstico 19.8:** 3 `bezier_contour_scissor_cut`, 3 `bezier_undo`, 11 `undo` polilinha, nenhum `bezier_redo` na janela coletada. `scissor_attempts` tem os 3 cortes `cut_native`, `events_dropped=0`; não afirmar Redo real validado nessa sessão.
+- **Projeto LBRN2 real:** 22 caminhos Path em 2 grupos, 361 primitivas cúbicas B e 2561 linhas L. Um Path reúne 2515 primitivas L desconectadas (2514 transições de cadeia), incluindo 356 segmentos com a mesma origem/destino: o importador conservador, que exige uma cadeia contínua por Path, **deve rejeitar o projeto completo sem modificação parcial**. Configuração registrada no arquivo (não prescrição física): Scan, intervalo 0,08 mm, 2 passes, velocidade bruta 200, potência máxima bruta 40 e secundária 20. Não importar settings de máquina.
+- **LightBurn Log real:** enorme volume de pacotes e eventos de status; inclui respostas observadas `<Run`/`<Idle`/`<Alarm`, consultas e comandos. Não confundir com operações do Alencar, que continua offline; resposta no log não prova a execução correta de uma gravação. Nenhuma licença ou identificador foi registrado aqui.
+- **Correção no inspetor somente leitura:** `reference::readLightBurn` agora inventaria grupos aninhados usando pilha de frames, conta transições desconectadas e segmentos de índice igual, e informa incompatibilidade sem afirmar importação integral. Novo teste Qt com LBRN2 completamente sintético (quatro Shapes, dois Groups) exige relatório correto e recusa atômica do importador quando houver cadeias desconectadas.
+- **Teste C++ da prévia:** fixture sintética de curva com camada inexistente exige contagem de fallback preservando `layer=999` no original.
+- **Próximos gates:** GitHub Actions Qt Windows e C++ portable; no Windows local `-SomenteDesenho`, `-SomenteSimulacao`, e `-Abrir` sem laser conectado. Para projeto real com muitos traços desconectados, primeiro inventariar ou preparar importador de subpaths seguro com representação explícita de pontos/traços, sem descartar segmentos.
+- **Segurança:** `main`, `APLICATIVO` e controle físico não alterados; branch experimental PR #13, repositório privado.
+
+
+## 31/10/2026 — Edição cirúrgica: remover só nó/lado da forma selecionada
+
+- Solicitação do operador: adicionar ação que remova **apenas um nó ou um lado** da forma selecionada, não a forma inteira nem outros objetos. O relatório local `Alencar_Laser_Diagnostico_TESTE_19_7(20261031-170205).json` mostra `bezier_node_moved=6`, `bezier_undo=4`, `command_error=2`, `marquee_selected=3` e uma exclusão de `575` formas na mesma sessão. As duas falhas de comando não têm causa detalhada; **não inventar explicação**. O relatório permanece fora do Git.
+- Ações existentes no motor: `Editor::erase(key,nodeId)` remove nó de **um subcontorno**; `Editor::removePolylineEdge(key,edge)` remove só uma aresta de polilinha e abre um contorno fechado (ou separa duas partes válidas de caminho aberto); `CurveDragSession::deleteAnchor` e `cutContourAtEdge` fazem operações nativas no Bézier. Cada operação integra histórico, Undo/Redo. Não foi reescrito o motor.
+- **Implementado no Qt, ainda experimental:** clique direito sobre geometria do objeto **já selecionado** mostra `Remover só este nó da forma selecionada` ou `Remover só este lado da forma selecionada`; entradas ficam desativadas se o cursor não encontra nó/segmento; requer exatamente uma seleção poligonal e subcaminho ativo. No modo Bézier, menu de contexto local só reconhece âncora/aresta pertencente à curva previamente selecionada. Cortes Bézier contextuais passam chave explícita ao cortador (protege curvas coincidentes). Nenhum comando toca automaticamente outras formas.
+- Novos eventos opt-in permitidos: `polyline_node_deleted` e `polyline_edge_deleted`, sem coordenadas. A barra de status descreve o comando e informa `Ctrl+Z`; tooltip da ferramenta Seleção ensina o clique direito.
+- Teste portátil `tests/selected_local_edit_19_8_standalone.cpp` cobre nó de retângulo, lado de contorno fechado, lado interno de caminho aberto que separa duas peças, objetos vizinhos intactos, operação inválida sem efeitos colaterais, Bézier nativa, Undo/Redo e privacidade da coleta. Incluído no CMake, CI portátil e `-SomenteDesenho` no Windows.
+- **Pendências de segurança e ergonomia:** diálogo de confirmação antes de excluir seleção múltipla grande (575 objetos no relatório), confirmação manual de menus/hover/DPI em tela real e rastreio mais específico dos dois `command_error` **sem registrar texto sensível**. Essas pendências não foram ocultadas nem declaradas resolvidas.
+- **Gate:** o projeto permanece exclusivamente na branch `fix/curvas-tesoura-preflight-19-8-20261030`, PR #13 não homologada; `main`, `APLICATIVO`, liberação pública e comandos físicos GRBL intocados. Testar offline com laser desconectado e cópia de `.alaser` após passar CI Qt Windows.
+
+- **Complemento de segurança nesta rodada:** quando a ação `Excluir formas selecionadas` receber **25 ou mais objetos**, o Qt solicita aprovação explícita, com `Não` como padrão. Se o usuário cancelar, nenhum objeto é apagado, nenhuma transação de Undo é consumida e o cancelamento não vira `command_error`. Essa confirmação nunca interfere na remoção localizada de um nó/segmento. O teste Qt `drawAndJoin198Test` cobre cancelamento, confirmação e recuperação dos 25 objetos por Undo. Status: modificação publicada, ainda sujeita à compilação e teste manual.
+
+
+## 31/10/2026 — Integração autorizada do pacote Work na branch experimental
+
+- Base conferida no GitHub: `2739b2b43d9147844e782d06139eb0e3e2d258da`, branch `fix/curvas-tesoura-preflight-19-8-20261030`. Os 83 blobs do ZIP de fontes originais coincidem com a árvore remota; não havia commits posteriores na branch no início da integração. Atualização protegida por expected_sha, sem force.
+- Integradas somente quatro diferenças funcionais do pacote: CMake (Qt6::Network nos testes 15/16/17 e alvo de estresse), qt6_test6.cpp (contagem de grupos na exclusão em massa, regressão de menus locais e versão de diagnóstico 19.8), qt6_test17_mission.cpp (contrato atual de clique vazio/Escape) e novo teste local_edit_stress_work.cpp. Diferenças de newline final em outros arquivos foram descartadas; nenhum fonte anterior foi substituído em bloco.
+- O workflow Qt Windows foi ampliado para compilar os alvos alterados e executar a suíte offline: desenho/menus, 20 modos adicionais de GUI, TESTE_17 interação/singleton em DPR 1/2, persistência em processos separados e estresse de 3.230 casos. Evidências em artifact windows-work-regression.
+- Estado neste commit: testes Windows aguardam execução no GitHub Actions. Resultados Linux do pacote são históricos e não são prova Windows. Registrar os links e conclusões reais em complemento após a execução.
+- Main permanece em `397341d139d974e0f3d90b79ed28604e697a81b1`. Sem merge em main, sem instalação em APLICATIVO e sem liberação física. Validação manual com mouse/DPI, projeto real e recuperação após queda de energia permanece pendente.
+
+## 31/10/2026 — Bloco experimental de atalhos offline (pendências da barra lateral)
+
+- Captura Windows do operador: a interface TESTE_19.8 abriu com 575 contornos, 13.415 nós, diagnóstico opt-in ativo e banner `MÁQUINA DESCONECTADA | EMISSÃO BLOQUEADA`; a imagem indica funcionamento visual, NÃO certifica ferramenta, desempenho ou persistência.
+- A barra lateral tinha entradas cinza para funcionalidades **já existentes em outros menus**. Esta revisão liga `⊞ Alinhar` às mesmas sete ações de Organizar (esquerda/direita/topo/base/centros X/Y/ambos) e ao centralizador da mesa; não promete distribuição automática.
+- A nova ação `⌗ Medir seleção` consulta a caixa envolvente do selecionado (inclusive grupos expandidos e prévia de curva nativa quando disponível), informando largura/altura e origem em milímetros na barra de status. É somente leitura: não calcula área real, comprimento do contorno, folga ou percurso laser.
+- O atalho `L` reutiliza o importador conservador `.lbrn2`: exige confirmação antes de substituir arte e recusa qualquer projeto incompatível integralmente, sem importação parcial silenciosa e sem importar parâmetros físicos. Não é suporte completo ao LightBurn.
+- O botão `Pré-visualizar percurso` no painel CAM passa a abrir a **mesma prévia virtual** já existente, SEM geração de G-code, disparo ou transmissão. Os outros controles CAM continuam bloqueados.
+- **Continuam propositalmente desativados:** Offset, operações booleanas (União/Subtração), SVG, DXF, potência, velocidade, passes de trabalho e qualquer comando físico; implementar só com motor próprio, rollback e regressões.
+- Teste Qt existente `--layout-icons-19-8-test` ampliado: verifica presença/estado dos quatro atalhos, submenu de alinhamentos, medição vazia e com seleção, e invariância da geometria após medir. **Pendente comprovar PASS Qt Windows desta alteração no Actions**, inspeção manual do botão, teclado, zoom/DPI e arquivos reais.
+- Rollback: apenas `DESENVOLVIMENTO/FONTE/qt/qt6_test6.cpp` e este documento modificados. `main`, `APLICATIVO`, backups, Wi-Fi/TCP e operações físicas permanecem intactos. PR #13 em rascunho.
+
+## 01/11/2026 — Correção do gate Qt e distribuição de objetos offline (PR #13)
+
+- Evidência real de CI Windows do commit `c2091e8`: compila Qt e passa `--draw-join-19-8-test`, mas o modo `--layout-icons-19-8-test` falhou com `Medir sem selecao alterou documento ou nao instruiu usuario`. Causa no código: `run()` chama `refresh()`, que substitui imediatamente a mensagem de medição no status. Não era falha geométrica nem bloqueio de compilação. Correção: o comando de medição é inteiramente somente leitura, sem `run()`, mantendo o texto visível e impedindo operação durante arraste.
+- Implementado `Editor::distributeObjects(ids,horizontal)`: distribui **espaços entre caixas envolventes** de pelo menos três unidades editáveis, mantendo primeira e última fixas; grupos completos movem juntos. Seleção com menos de três grupos independentes, grupo bloqueado/oculto, coordenadas inválidas ou sobreposição com área insuficiente é recusada ANTES de modificar o documento. É uma transação única de Undo/Redo; outros objetos não mudam. Não inclui Bézier nativa nem raster, não modifica a física da mesa.
+- Dois novos atalhos compactos (↔ horizontal e ↕ vertical) e menu `Organizar > Distribuir formas`. Não ativam offset, união, subtração, SVG, DXF, energia, G-code ou comunicação física.
+- Teste novo `tests/distribution_19_8_standalone.cpp`: espaçamento X/Y, extremos fixos, vizinhos intactos, grupos, camadas bloqueadas, seleção inválida, 3 ciclos Undo/Redo. Executado offline em Linux com `g++ -std=c++20 -O2 -Wall -Wextra -Werror -pedantic`: **PASS**. Incorporado ao CMake, CI portátil e CI Qt Windows. O `--layout-icons-19-8-test` agora verifica os botões e aciona distribuição real, com Undo.
+- **PENDENTE:** PASS integral do GitHub Actions Windows para este commit (não declarar antes), teste manual com mouse físico e DPI, validação em cópia real `.alaser`. `main`, `APLICATIVO`, arquivos originais e envio físico permanecem preservados. PR #13 continua experimental.
+
+## 01/11/2026 — Referência LightBurn: seleção contextual, etapa 1
+- Pesquisa externa na documentação oficial: seleção normal com clique, Shift adiciona, Ctrl alterna; arraste direita exige inclusão total e esquerda aceita cruzamento; alças para mover/escalar/girar; barra Numeric Edits exibe X/Y/L/A, cadeado proporcional, referência 9 pontos e rotação; propriedades mudam conforme tipo e grupo. Fontes: https://docs.lightburnsoftware.com/2.0/GetStarted/SelectingMovingSizing/ ; https://docs.lightburnsoftware.com/2.1/Reference/NumericEditsToolbar/ ; https://docs.lightburnsoftware.com/latest/Reference/ShapeProperties/ . Referência funcional, sem copiar imagens/identidade.
+- Auditoria do Qt 19.8: moldura de seleção e 13 alças, retângulo direita/ esquerda, alinhamentos, distribuição e Undo/Redo já existiam. Clique com Shift alternava/removia objeto, divergente do LightBurn. Corrigido Shift=adiciona e Ctrl=alterna, sem alterar a lógica de corte.
+- Barra contextual experimental `selection_context_19_8` abaixo dos atalhos: escondida sem seleção, exibe contagem, caixa envolvente X/Y/L/A mm somente leitura para polilinhas/grupos e Bézier nativa selecionada, mostra Agrupar/Desagrupar/Duplicar/Excluir com ativação dependente do tipo e quantidade. Reutiliza as ações e a confirmação de exclusão existentes; nada executa comandos físicos. O teste Qt `--layout-icons-19-8-test` foi ampliado para testar a visibilidade, medidas, estados dos botões e modificadores de mouse reais.
+- Não declarar paridade total: campos X/Y/L/A **editáveis**, cadeado de proporção, grade de referência de 9 pontos, rotação numérica, destaque distinto de grupos e propriedades por subtipo ainda precisam de projeto e regressões; Bézier/raster não terão transformação numérica forçada como polilinha.
+- Estado: integração exclusivamente experimental na PR #13; **CI Windows e mouse/DPI em tela real ainda pendentes nesta revisão**; `main`, `APLICATIVO`, backup e laser físico intocados.
+
+## 01/11/2026 — Edição numérica e referência de nove pontos (fase 2)
+- Faixa contextual ganhou X/Y/L/A mm em QDoubleSpinBox (duas casas decimais), cadeado de proporção inicialmente ligado e grade real 3×3. A referência selecionada determina a coordenada X/Y mostrada e o pivô fixo da escala. Entrada confirmada gera operação atômica reversível.
+- Reutilizados `Editor::moveObjects` e `Editor::scaleObjects`, que expandem membros de grupos. Camadas bloqueadas/ocultas, seleção vazia, texto com metadados editáveis, imagens raster, curvas Bézier nativas e dimensões degeneradas não são transformados numericamente; valores inválidos são recusados sem modificar o original. Nenhuma mudança no formato `.alaser` ou no código GRBL.
+- A nova regressão Qt `--layout-icons-19-8-test` confere escala proporcional e Undo/Redo, referência inferior direita, X/Y, escala sem trava, valor repetido sem histórico, desativação sem seleção. **CI Windows e teste com mouse real ainda exigidos para este commit.**
+- Apenas branch experimental e PR #13 rascunho. `main`, versão estável, backups, comunicadores e emissão física intocados.
+ 
+## 01/11/2026 — Propriedades contextuais de texto e imagem
+- Texto vetorial com metadados mostra `Texto editável selecionado`, mantém X/Y/L/A somente leitura e apresenta o botão `Editar texto` que reutiliza o editor original de conteúdo/fonte, evitando alterações sem atualização de metadados; duplicação como polilinha desabilitada nesse tipo.
+- Imagem raster selecionada mostra posição e dimensões de sua caixa em modo somente leitura, sem habilitar agrupar ou transformar como vetor. A seleção de imagem notifica a interface mesmo em clique sem movimento; continua sem comandos físicos. Curvas Bézier permanecem somente leitura no painel numérico.
+- A regressão Qt `--layout-icons-19-8-test` agora verifica estados de texto editável e imagem raster e impedimento de controles incompatíveis. CI Windows pós-commit e validação manual ainda necessários.
+
+## 01/11/2026 — Reorganização compacta da seleção (feedback visual do Windows)
+- Captura do operador: a faixa X/Y/L/A em duas linhas ocupava largura e altura excessivas e deslocava a mesa quando a seleção mudava. Agora propriedades são um **inspetor lateral direito**, aba `Seleção`, com abertura manual pelo botão `Propriedades`. A seleção comum não abre o painel, não muda aba e não altera a altura do desenho. A aba Camadas permanece selecionada por padrão.
+- Layout compacto: resumo curto, ações Agrupar/Desagrupar/Duplicar/Excluir em duas colunas, campos X/Y/L/A organizados 2×2 e proporção/grade 3×3 abaixo; usa scroll vertical na lateral. Sem seleção, painel manual permanece aberto com instrução e ações desativadas.
+- Ícones secundários repetidos, e os de funções incompletas (SVG/DXF/Offset/booleanos), foram ocultados na barra lateral (mantidos internamente apenas para callbacks e regressões). Alinhar/distribuir permanecem no menu Organizar; medir seleção ganhou ação no menu Organizar; importação LightBurn continua em Arquivo/Abrir.
+- Suíte Qt `--layout-icons-19-8-test` ampliada para garantir que selecionar não reabra painel, não altere altura do canvas, botão manual funcione, limpeza da seleção não feche a aba escolhida e atalhos redundantes não estejam visíveis. **Pendente CI Qt Windows desta revisão e validação visual/mouse/DPI em computador real.** `main`, máquinas, backup e G-code intocados.
+
+## 01/11/2026 — Refinamento de usabilidade da aba Seleção (19.8)
+- Feedback de captura Windows: a disposição lateral foi aprovada, mas campos X/Y/L/A continuam mostrando números antigos com 0 objetos selecionados, botões pequenos e abertura de Propriedades pouco clara. Corrigido: na seleção vazia, ocultar as áreas de ações/edição, limpar quatro campos com `QSignalBlocker` e mostrar instrução inequívoca; nunca modifica geometria. Re-selecionar restaura os campos com os dados reais.
+- Botão `Propriedades` agora **alterna** entre as abas Seleção e Camadas e mantém o estado marcado sincronizado mesmo na troca manual de abas. Sem mudanças na posição/altura do canvas.
+- Melhorias visuais em temas claro/escuro: cabeçalho `POSIÇÃO E TAMANHO · mm`, QDoubleSpinBox com contraste e foco visível, sem sufixos de unidade em cada campo (reduzia área útil), 2 colunas compactas, ações com maior legibilidade.
+- Teste Qt `--layout-icons-19-8-test` atualizado para alternador, canvas estável, ausência de números residuais e retorno das propriedades na próxima seleção. PR #13 rascunho, `main` e máquina física preservadas. Testes Windows deste commit ainda necessários antes de homologar.
+- Ajuste fino da regressão Qt: verificar `isHidden()` nas áreas internas em vez de `isVisible()`, que também depende da aba pai estar atualmente selecionada. Assim a suíte confirma ocultação explícita sem exigir que a aba Seleção esteja aberta.
+
+## 01/11/2026 — MÓDULO ROTATIVO POR ROLOS — ETAPA FUTURA
+- O usuário perguntou se configurações e suporte ao rolo rotativo estavam no cronograma. Auditoria do documento e da árvore Git em 01/11/2026: não havia especificação de rolo rotativo, nem função implementada/homologada.
+- Registrado no planejamento como **módulo subsequente à estabilização e homologação manual da candidata 19.8**, sem inventar prazo ou marcar pronto. Especificação em `DESENVOLVIMENTO/ESPECIFICACOES/PLANEJAMENTO_ROLO_ROTATIVO_19_9.md`.
+- Fase R1: perfil de rolo e formulário de configurações **100% offline**, com diâmetro do rolete/objeto, circunferência, mm/rotação quando aplicável, eixo/direção condicionados ao hardware real, valores salvos e modo plano preservado.
+- Fase R2: prévia em superfície cilíndrica desenrolada e aviso de ultrapassagem de circunferência, testes matemáticos/persistência e regressões Windows, ainda sem controle físico.
+- Fase R3: somente após validação separada, identificar o modelo exato do rolo e sua ligação à AlgoLaser Alpha MK2 20W, calibrar segundo manual e aprovar testes com movimento físico em missão específica. Não enviar comandos, alterar firmware ou emitir laser na 19.8.
+- Referência oficial funcional: https://docs.lightburnsoftware.com/2.1/Reference/RotaryMode/RotaryModeGCode/ .
+- Registro de cronograma apenas, nenhuma alteração em código do editor, `main`, `APLICATIVO`, dados, arquivos originais ou controladora.
+ 
+## 01/11/2026 — R1 rotativo Ortur offline + movimentos da seleção por página (referências reais)
+- Fontes fornecidas: vídeos LightBurn com moldura/13 alças, rotacionar e posicionar formas, menu `Mover seleção`; fotos da tela Rotary Setup com Roller/Chuck, eixo, mm/volta, rolete, objeto, circunferência; fotografia de rotativo Ortur do tipo rolos. **Modelo e valores de calibração NÃO confirmados**. Fotos e vídeos pessoais NÃO publicados no GitHub.
+- Criados `src/rotary_geometry_19_9.hpp` e `tests/rotary_offline_19_9_standalone.cpp`: fórmula de circunferência, graus percorridos e giro do rolete, validação de valores finitos e de perfil incompleto. Valores desconhecidos são zero/inativos, sem inventar eixo nem coeficiente.
+- Criado `qt/rotary_dialog_19_9.hpp`: acessível pelo menu `Laser > Configurar rotativo — OFFLINE`, com Rolo/Mandril, eixo candidato Y/Z/A, mm/rotação, diâmetro do rolete, diâmetro do objeto e circunferência sincronizada; espelho e perfil somente para a prévia offline. QSettings separado do projeto e testes de perfil salvo/reaberto. `Testar rotação` explicitamente desativado, sem USB/TCP, G-code, movimento ou laser.
+- Editor Qt: menu `Organizar > Mover seleção para...` implementado em nove posições da ÁREA DE DESENHO (centro, cantos, centros das bordas) com geometria atômica/Undo e isolamento de objetos não selecionados; grupo expandido e seleção bloqueada seguem regras do motor. Alças de rotação desenhadas como arcos, sem alterar 13 zonas de clique ou os algoritmos.
+- `CMakeLists.txt` e CI portável/Windows integram o teste portátil. `--layout-icons-19-8-test` ampliado para perfil Ortur offline, eixo/diâmetro/circunferência, persistência, bloqueio de botão motor e posicionamento da forma com Undo.
+- **ESTADO:** código integrado apenas à branch experimental PR #13; depende do resultado final das execuções Windows deste commit e de teste real com mouse/arquivos de cópia. Não é homologação física, nem versão 19.8 definitiva. Main/versão estável/backups/firmware/equipamento intocados.
+ 
+## 01/11/2026 — Revisão de seleção orientada e rodapé fixo (vídeo real do operador)
+- Feedback com vídeo 1280×720: seleção com contorno laranja mudava de tamanho quando o objeto girava, pois `selectionDisplayBounds()` empregava `QTransform::mapRect()` e redesenhava uma caixa **alinhada à mesa**. O usuário também considerou a aparência de alças/ícones pouco acabada e solicitou trazer posição/tamanho/proporção para a faixa inferior junto a Estimado/Decorrido.
+- Novo quadro de seleção usa quatro vértices orientados, ligados à identidade da seleção e à `geometryGeneration` para invalidar molduras após Undo/Redo, alterações ou troca de seleção. Durante giro/deslocamento/escala, o quadro, oito alças de escala, quatro de giro e centro são transformados juntos; dimensionamento por mouse passa a usar os eixos locais do objeto e transação `Editor::affineObjects` (Undo/Redo único, grupos preservados). A leitura X/Y/L/A também usa geometria local, sem crescimento visual artificial quando girado. A geometria `.alaser` não ganhou novo formato; orientação da moldura é estado **editorial transitório**.
+- X/Y/L/A, cadeado de proporção, referência de nove pontos e menu `Posicionar` foram reagrupados em linha de rodapé após os indicadores operacionais. O inspetor direito continua disponível para ações específicas, sem duplicar campos ou abrir sozinho. O bloqueio do laser não muda.
+- Ícones de ferramentas Qt renderizados em pixmap de resolução lógica 2x para nitidez; linhas de formas exibidas com pena cosmética, anti-alias e junções arredondadas. Não há alteração na geometria canônica nem nos modos Linha/Fill de fabricação; a edição padrão segue visualização de contorno.
+- Regressão `--inline-transforms-19-8-test` ampliada para exigir quadro com larguras/alturas locais invariantes após rotação e restauração correta ao desfazer. O teste do rodapé verifica campos e botão de posicionamento.
+- Os testes C++ portáteis e PowerShell passaram nas execuções consultadas, mas **a revisão Qt Windows está pendente**. Ocorreram erros transitórios de download MSYS2 nos runners e foi detectado/corrigido um conflito de nome de variável local (`names`), aguardando recompilação. **Não declarar homologação** até PASS Qt, inspeção do operador e testes com projeto de cópia em diferentes DPI.
+- PR #13 permanece experimental; `main`, máquina/laser, emissão, G-code, bases antigas, restauração e arquivos pessoais não alterados.
+ 
+## 01/11/2026 — Gerador de engrenagens vetoriais em mm (Inkscape como referência funcional)
+- Usuário enviou captura Inkscape: `Extensões > Gerar > Engrenagem` e `Barra Dentada`; pediu implementação útil no Alencar Laser, especialmente para corte de MDF/mecanismos. A base gráfica e o código foram **desenvolvidos independentemente**, sem copiar a extensão GPL do Inkscape.
+- Criados `src/gear_generator_19_9.hpp` e `tests/gear_generator_19_9_standalone.cpp`: engrenagem **externa** de dentes evolventes poligonais aproximados, com dentes 12–120, módulo em mm, ângulo de pressão 14–30°, furo central opcional. Cálculo de raio primitivo (m·z/2), base, externo e raiz, perfil fechado e furo com orientação inversa. Valida números finitos, núcleo mínimo e limite de 10 mil nós.
+- Criado `qt/gear_dialog_19_9.hpp`: prévia visual offline com círculo primitivo, parâmetros, diâmetro calculado, posição do centro X/Y e alerta quando excede área configurada. Menu `Gerar > Engrenagem paramétrica (mm)...` em `qt/qt6_test6.cpp`.
+- Geração chama `Editor::addContours(...,true,layerId,true)`, inserindo roda e furo em **uma transação Undo** e grupo. Preserva arte existente, camada ativa, sistema v5 e capacidade de selecionar/editar os contornos. O furo é contorno separado de corte. Cancelar diálogo não insere nada.
+- Gates: `alencar_test19_9_gear_offline` nos workflows Linux/Windows e script local; modo Qt `--gear-generator-19-9-test` testa campos, prévia, menu, geração de dois contornos, preservação de arte preexistente e Undo.
+- **Limitações até homologação:** involuta amostrada em segmentos retos (não curva matemática contínua), não inclui compensação de kerf/folga, adoçamento/fillet dos dentes, correção de undercut nem cálculo real de encaixe; não é certificado para engrenagens mecânicas sob carga ou tolerância de precisão. Cremalheira/engrenagem interna e engrenagens conjugadas permanecem pendentes.
+- Status: **experimental** na PR #13. Testes finais Qt Windows e mouse/DPI com MDF 3 mm pendentes. `main`, hardware, G-code, emissão, bases homologadas e backups intocados.
+
+## 01/11/2026 — Validação focada de engrenagens, pares, cremalheira e regressão Qt geral
+- Captura VS Code do operador em `C:\ProjetoAlencarLaser`: script `-SomenteEngrenagens` compilou `alencar_test7_qt6.exe` e exibiu `GEAR_OFFLINE_19_9 PASS` e `ENGRENAGENS PASS nos testes sintéticos`; retorno ao prompt sem erro. Os warnings `QDragEnterEvent` obsoleto e `range-loop-construct` não impediram essa rodada.
+- Código de módulo/passo circular sincronizados (`p = π m`), prévia opcional e referência Inkscape (19 dentes, 10 mm, 30°, furo 10 mm) implementado; o teste focado do operador confirma somente **ensaio sintético**, não experiência com mouse/arte real.
+- Par externo nominal e cremalheira trapezoidal aproximada agora foram integrados ao menu `Gerar > Engrenagens`, com diálogos/prévias independentes, vetores editáveis e Undo transacional. Ainda não há cálculo confiável de fase angular, interferência, folga, undercut, kerf nem resistência mecânica.
+- Foi examinada a execução do GitHub Actions Windows Qt run #201 (commit `70b2781`): build, regressão Bézier e teste portátil passaram, mas o **gate geral falhou em `layout-icons-19-8`**, com JSON `Painel nao foi mantido em selecao vazia`. Causa localizada: teste exigia texto antigo `Selecione`, enquanto a implementação atual mostra `Nenhuma forma selecionada...`.
+- Correção pontual do teste na branch experimental, commit `04ea03b`: valida o texto efetivo, a visibilidade do painel e os comandos Agrupar/Desagrupar desativados. CI Qt Windows integral desse hotfix **ainda requer PASS conferido**, além do teste manual local da interface.
+- Branch: `fix/curvas-tesoura-preflight-19-8-20261030`, PR #13 permanece **draft**. `main`, `APLICATIVO`, backups, GRBL, G-code, movimento e emissão física permanecem inalterados/bloqueados.
+- Teste manual seguinte (somente com equipamento desconectado): conferir as três opções do menu, visualização de raios/dentes, deslocamento de objetos, Ctrl+Z, save/reopen `.alaser` em cópia, DPI e painel Seleção. Não homologar produção sem essas evidências.
+
+## 01/11/2026 — Falha focada Ctrl+Z/moldura orientada no TESTAR_19_8_WINDOWS.ps1 -Abrir
+- Captura local do VS Code: `TESTE_19.8 recovery policy PASS`, `ROTARY_OFFLINE_19_9 PASS`, `GEAR_OFFLINE_19_9 PASS` e codec `.alaser` v5 `PASSED failed=0`; a suíte parou em `Texto direto e alças (código 1)`, com JSON `"Undo nao descartou moldura orientada antiga"`. O aplicativo não abriu pelo bloqueio do script, corretamente.
+- Inspeção da implementação em `qt/qt6_test6.cpp`: `history(false)` executa `editor.undo()`, `active_.reset()`, `selected.clear()` e `rebuild()`. Portanto `selectionFrameQuad()` deve ficar vazio após Ctrl+Z, até uma nova seleção. O teste anterior exigia incorretamente uma moldura não vazia imediatamente após Undo.
+- Correção commit `5c1f5f8`, somente no teste `--inline-transforms-19-8-test`: exige seleção vazia e ausência de moldura depois do Undo; reativa a seleção e valida quadro retangular 40 × 20 mm, sem orientação herdada do giro desfeito. A verificação original de que os nós voltam ao estado pré-rotação permanece.
+- O teste **não altera a política do editor** (Undo limpa seleção) nem libera máquina, Wi-Fi, USB, G-code ou emissão; a causa pode ser verificada por nova compilação e teste Qt Windows.
+- Gate de revalidação: atualizar branch sem perder mudanças locais e rodar `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteInteracao`; se PASS, executar `-Abrir` para suíte completa e inspeção com mouse físico. Não declarar homologação antecipadamente.
+- PR #13 draft; `main`, `APLICATIVO`, backups e firmware intocados.
+
+## 01/11/2026 — Missão específica: Oficina de Mecanismos e redesenho dos ícones/rodapé
+- Solicitação do operador: rodada exclusivamente dedicada a simulação de engrenagens conjugadas e cremalheira, projeto assistido por material/espessura/dentes/folgas, modelos didáticos (relógios, brinquedos, escolares) e revisão criteriosa dos ícones e espaços — sem textos truncados ou ícones cortados.
+- Núcleo `src/mechanism_studio_19_9.hpp`: parâmetros e predefinições para trem didático de três rodas, transmissão de brinquedo com duas rodas e pinhão-cremalheira escolar. Material MDF/compensado/acrílico, espessura, módulo, ângulo, furo, quantidade de dentes, folga e kerf de referência.
+- Cinemática idealizada: pinhões externos giram em sentidos opostos e com razão de dentes, o trem de três engrenagens alterna os sentidos, cremalheira translada em função do raio primitivo. Não simula física, não atesta engrenamento e não gera comandos físicos.
+- `qt/mechanism_studio_dialog_19_9.hpp`: área vetorial QPainter com enquadramento fixo durante a animação, Qt QTimer local de iniciar/pausar/reiniciar; materiais, parâmetros, diagnóstico textual, cancelar e inserir. Ação `Gerar > Engrenagens > Oficina de Mecanismos`. Inserir gera contornos editoriais da biblioteca numa transação Undo; não altera itens existentes.
+- Segurança de fabricação: **a folga e o kerf digitados não são aplicados ao contorno nominal**, porque o gerador atual é evolvente aproximada. O relógio não é projeto completo (falta escapamento, eixos e energia); brinquedos e projetos escolares são conjuntos didáticos e exigem avaliação mecânica antes de fabricar.
+- `src/tool_glyphs.hpp`: glifos próprios com silhuetas reconhecíveis em 32 px lógicos/2× DPR, branco/laranja, variantes claras para estado Disabled e sem dependências de fontes. Play, pause, stop, enquadrar, selecionar, caminhos, formas, salvar e alinhar redesenhados.
+- Layout Qt: barra superior com ícones 23 px; lateral 24 px nos botões 40×37; rodapé operacional limitado a 35 px, status 25 px; manter os quatro campos X/Y/L/A, proporção, referência e posicionamento legíveis; operação da máquina continua em estado `LASER OFF`, controles desativados.
+- Gates novos: CMake `alencar_test19_9_mechanisms_offline`, GitHub Actions C++ portátil e Qt Windows, script local `-SomenteEngrenagens` e teste Qt `--gear-generator-19-9-test` ampliado para modelos, animação, ícones, rodapé e Undo.
+- Especificação detalhada: `DESENVOLVIMENTO/ESPECIFICACOES/MISSAO_19_9_MECANISMOS_LAYOUT.md`.
+- Status: **EXPERIMENTAL na PR #13; aguardando PASS de toda a CI Qt Windows e teste manual de mouse, DPI e reabertura `.alaser`.** `main`, instalador aprovado, `APLICATIVO`, hardware, USB de controle, G-code, movimento, potência e emissão **intocados/bloqueados**.
+
+## 02/11/2026 — Aprovação provisória da prancha de ícones
+- O proprietário avaliou a prancha gerada a partir de seus rabiscos e ressaltou que **a versão apresentada não reproduziu fielmente seus desenhos**. A prancha foi **aceita somente de forma provisória** como direção de trabalho, para permitir avanço gradual e refinamentos por função.
+- **Fonte de referência prioritária:** os rabiscos originais enviados pelo proprietário; a prancha interpretada é uma referência secundária, não deve substituir as formas/semânticas originais nem ser chamada de biblioteca oficial definitiva.
+- A adoção provisória **não significa** que os ícones PNG da prancha foram individualizados, vetorizados, homologados ou integrados ao executável. Não substituir o código `src/tool_glyphs.hpp` automaticamente com base apenas na imagem ilustrativa.
+- Refinar progressivamente, principalmente a direção e a geometria exatas das setas (espelhamentos e deslocamentos), alinhamento, distribuir, edição de nós, arquivo/sistema e controles de operação. Priorizar legibilidade em 20–24 px e proporção sem cortes, com estados normal/ativo/desabilitado.
+- Antes de integrar novos glifos: confrontar **rabisco original × ícone proposto × função real do comando**. Se a leitura visual divergir, refazer sem alterar a lógica do comando. Validar em 100%/200% DPI e rodapé compacto, sem textos truncados.
+- PR #13 permanece experimental; `main`, versão homologada e emissão física continuam intocados/bloqueados.
+
+## 02/11/2026 — Refino progressivo dos ícones a partir dos rabiscos
+- O proprietário autorizou avançar após aceitar provisoriamente a prancha anterior, ressalvando que **não seguia fielmente seus desenhos**. Implementada primeira família de ícones referenciada nos rabiscos, preservando identidade visual preto/laranja.
+- Diagnóstico técnico decisivo: `src/tool_glyphs.hpp` criava pixmap de 64×64 com DPR=2 **e aplicava também `p.scale(2,2)`**. O desenho saía dos limites efetivos de 32×32, provocando os ícones em fragmentos nas capturas. Removida a segunda escala e adicionadas margens de segurança em glifos grandes.
+- Desenhos refeitos/novos: espelhar horizontal e vertical (eixos corretos), espelhamento em linha inclinada (somente catálogo), alvo alinhar centros, distribuição horizontal/vertical, igualar largura/altura, arquivo/salvar/importar, monitor com olho, dispositivo, desenho de nós, adicionar/remover/excluir nós, curvas/retas, formas geométricas, direção por oito setas, rotativo e posição inicial.
+- `alencarSketchIconIds()` é **catálogo de referência**, não significa que todos os comandos foram implementados nem ligados à UI. Ações de operação física continuam desabilitadas.
+- `--icon-pack-19-9-test` em `qt/qt6_test6.cpp`: inspeciona imagem real Qt dos glifos, margens, densidade, diferenciação de pares semânticos e gera `RESULTADO_ICONES_19_9.json` + `PRANCHA_ICONES_REAIS_19_9.png`. Integrado à suíte Qt Windows e `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteIcones` (isolado), além de `-SomenteEngrenagens`.
+- Documento de mapeamento: `DESENVOLVIMENTO/ESPECIFICACOES/ICONOGRAFIA_RABISCOS_19_9.md`. Referência principal segue sendo a imagem manuscrita do proprietário.
+- Branch PR #13 **draft**; verificar PASS do gate Qt Windows e comparar prancha renderizada em 100%/200% DPI com os rabiscos antes de aprovar. Não modificar `main`, instalador homologado, `APLICATIVO`, backups, GRBL, G-code, movimento ou emissão.
+
+## 02/11/2026 — Evidência local de regressões e falha específica de margens
+- Captura do proprietário no VS Code mostra **BUILD E REGRESSOES AUTOMATIZADAS PASSARAM**, incluindo geometria de engrenagens, três modelos da Oficina de Mecanismos, teste de codec `.alaser` v5, tesoura/camadas, geometria, política de recuperação e demais módulos; ainda surgem mensagens `QFont::setPointSize: Point size <= 0` e a própria suíte exige **AVALIAÇÃO VISUAL**.
+- A captura local **não prova** a auditoria de ícones `--icon-pack-19-9-test`. O GitHub Actions Windows Qt da versão `178c1b9` compilou, mas falhou especificamente no gate `icon-pack-19-9`: nove glifos de edição de nós e Bézier tocavam a borda do pixmap de 64 px.
+- Identificados: `add_node`, `remove_node`, `delete_edge`, `smooth_node`, `corner_node`, `line_to_curve`, `curve_to_line`, `axis_align`, `new_bezier`. Esses resultados são objetivos (pixels na margem), não apenas opinião estética.
+- Correção `e6a5c1`: recolher alças, pontos, curvas e badges +/−/X para dentro da área segura 32×32. Não modifica interações do editor, arquivos, hardware nem esquema de dados.
+- Gate exigido antes de marcar iconografia aprovada: novo **PASS Qt Windows**, arquivo `PRANCHA_ICONES_REAIS_19_9.png`, teste manual dos símbolos em 100% e 200% DPI e confronto com rabiscos originais. PR #13 permanece draft.
+
+## 02/11/2026 — Correção de margem dos glifos adicionar/remover nó
+- Captura local do usuário ao executar a auditoria de ícones `-SomenteIcones`: build Qt concluído, mas `RESULTADO_ICONES_19_9.json` devolveu FAIL: `Margem ou tinta ruim: add_node: ink=1196, border=4; remove_node: ink=1196, border=4`. O gate interrompeu corretamente a execução.
+- Inspeção de `src/tool_glyphs.hpp`: os dois símbolos compartilham o badge circular +/- originalmente centrado em (24,7), raio 5, com caneta 2,4 px; essa geometria alcançava a borda física superior da imagem HiDPI.
+- Commit `676ad3b`: deslocar o badge ao centro (24,9), raio 4,5, reposicionando + e − no interior da grade 32×32; **não aumentar a tolerância da auditoria**.
+- Commit `e59144e`: estender auditoria de pares visuais para exigir que adicionar/remover nó e novo/importar não tenham os mesmos pixels.
+- Os avisos QFont/setPointSize do build são independentes da falha. O resultado ainda exige novo PASS de `-SomenteIcones` e CI Windows Qt, mais inspeção da prancha PNG real.
+- PR #13 continua **draft**, sem alterações em `main`, `APLICATIVO`, instalador homologado, movimentos, G-code ou emissão física.
+
+## 02/11/2026 — Refino de ícones ambíguos e integração real ao menu Gerar
+- Retomada específica após aprovação do teste `-SomenteIcones` na captura do operador e três gates PASS no GitHub, mantendo aprovação **visual provisória** e o manuscrito como referência principal.
+- Corrigida iconografia semântica em `src/tool_glyphs.hpp`: `settings` (engrenagem única de ajuste), `gear_simple` (engrenagem isolada), `mechanism` (duas engrenagens de diâmetros diferentes na diagonal), `gear_pair` (duas engrenagens iguais lado a lado) e `rack` (cremalheira com pinhão), com margens de segurança do QPainter em DPI alto.
+- `line_to_curve` e `curve_to_line` agora mostram claramente origem e destino (reta em cima/curva embaixo ou inverso), com destaque laranja no resultado, ao contrário da seta quase idêntica da versão anterior.
+- `smooth_node` recebeu representação adicional de tangentes; `corner_node` manteve o vértice agudo, sem alças, coerente com os rabiscos.
+- `qt/qt6_test6.cpp`: comandos reais `Gerar > Engrenagens` (simples, par, cremalheira, oficina) agora têm ícones atribuídos. Auditoria Qt exige distância visual entre 18 pares semânticos **em 20px** e exporta `PRANCHA_CRITICOS_19_9.png` (20/24/58 px) além da prancha completa.
+- Mapeamento e contrato no arquivo `DESENVOLVIMENTO/ESPECIFICACOES/ICONOGRAFIA_RABISCOS_19_9.md`. PR #13 segue draft. Homologar só após PASS da versão atual no GitHub Actions e comparação da prancha com desenho original (inclusive 100%/200% DPI).
+- Todo o trabalho é **visual/editorial**: não muda motores geométricos, CAM, firmware, backups, `main`, `APLICATIVO` ou bloqueio de emissão física.
+
+## 02/11/2026 — Refinamento de alto contraste: Adicionar nó versus Remover nó
+- Auditado o gate Qt Windows run #284 (commit `4030b21`): compilação C++/Qt e testes portáteis bem-sucedidos, mas `--icon-pack-19-9-test` devolveu FAIL por baixa diferença entre `add_node` e `remove_node` em 20 px: **8 pixels diferentes**, abaixo do mínimo definido de 18.
+- A solução **não reduz a exigência do teste**: código `src/tool_glyphs.hpp` agora apresenta `add_node` com badge **laranja sólido e + escuro**, e `remove_node` com badge **escuro, contorno laranja e − claro**, ambos integralmente dentro da grade e mantendo linha/nó de fundo idênticos.
+- Commits `94e4174` e `99d7fa9` (tipagem explícita da caneta Qt para compilação estável). Sem alterações em regras de edição, Undo, G-code ou interface física.
+- Plano de validação: exigir CI Qt Windows PASS, então recuperar `PRANCHA_CRITICOS_19_9.png` e comparar fidelidade/legibilidade com os rabiscos nas escalas 20, 24 e 58 px. O catálogo permanece **provisório** até validação visual pelo proprietário.
+- Preservados `main`, `APLICATIVO`, instaladores homologados, backups e bloqueio GRBL/laser/emissão. PR #13 segue draft.
+
+## 02/11/2026 — Qt Windows PASS após reexecução do gate por falha do MSYS2
+- CI Qt Windows da PR #13, workflow run `41481861640` (tentativa de reexecução dos jobs falhos), foi repetido usando `rerun_failed_workflow_run_jobs` após erro anterior de download das bases MSYS2. A reexecução **passou** instalação, compilação, regressão Bézier, suíte offline completa e salvamento das evidências, sem necessidade de alterar código ou relaxar exigências. Executou o código em `08135d780ed369792bcdf5a4047f720766a37323`.
+- Artefato GitHub Actions: `windows-work-regression`, ID `13159509801`, 55 arquivos; registros localizados em `work_results/icon-pack-19-9/`.
+- Relatório `RESULTADO_ICONES_19_9.json`: `status=PASS`, `icons_verified=70`, `perceptual_pairs_checked=18`, `minimum_20px_distinct_pixels=18`, `dpi_2x=true`, `hardware_commands_sent=false`.
+- Relatório `RESULTADO_LAYOUT_ICONES_19_8.json`: PASS (alinhamento, espelhar vertical, centralização, integridade da arte e controles físicos desabilitados).
+- Relatório `RESULTADO_ENGRENAGENS_19_9.json`: PASS (prévia, contornos editáveis, pares nominais, cremalheira, Oficina de Mecanismos, Undo e preservação de arte; **não é homologação mecânica**).
+- As imagens `PRANCHA_CRITICOS_19_9.png` (20/24/58 px) e `PRANCHA_ICONES_REAIS_19_9.png` foram extraídas do artefato e inspecionadas; ícones completos e sem recorte evidente, inclusive Adicionar/Remover nó. **Aprovação visual pelo proprietário ainda pendente**, sobretudo fidelidade fina aos rabiscos em 100%/200% DPI no Windows.
+- Resultado: gates automatizados C++, PowerShell e Qt Windows aprovados. **PR #13 continua draft**; não fazer merge na `main`, não publicar nova versão homologada, não modificar `APLICATIVO`, não ativar hardware/GRBL/Wi-Fi de controle/G-code/movimento/emissão física sem testes e aprovação separados.
+
+
+## 02/11/2026 — Mitigacao experimental de renderizacao em projeto denso
+- Evidencia: 417 contornos e 122.390 nos, render p95 252,333 ms, p99 1127,8413 ms, max 1505,4573 ms e 6 command_error sem causa especifica.
+- Commit 8b9df99 no Qt: MinimalViewportUpdate substitui BoundingRectViewportUpdate, e anchors isolados fora da viewport sao descartados antes do desenho. O Qt continua salvando estado do QPainter.
+- SEM homologacao de desempenho: medir com mesmo arquivo e gestos no Windows; reverter se houver artefatos ou regressao. Projetos originais e dados permanecem intocados.
+- PENDENTE: diagnostico de erros categorizado, instrumentacao de render, simplificacao opt-in com Undo, e painel redimensionavel.
+- A comunicacao fisica continua BLOQUEADA. Futuro modo de diagnostico conectado deve ser exclusivamente somente leitura, com escolha explicita de dispositivo, timeout, desconexao, sem G-code, movimento, homing ou emissao, e validacao de seguranca antes de habilitar a UI.
+- PR #13 draft; main e APLICATIVO preservados.
+
+
+## 02/11/2026 — Importacao LBRN2 com subcaminhos independentes (experimental)
+- Arquivo real WALLE.lbrn2 recebido: LightBurn 2.0.05, 3406 Path, 526 Rect, 126 Ellipse, 19 Group, 7 Text, 5 Bitmap. Preflight anterior registrou 93 transicoes entre tracos desconectados e zero segmentos de comprimento zero.
+- `lightburn_geometry_import.hpp`: `decodePathPieces` separa sequencias L/B quando proximo inicio difere do ultimo fim, reutiliza decodePath conservador por trecho; flatten cria contornos separados, sem linha artificial, com camada/grupo herdado. Commits 4f113b6 e 644eef7.
+- GUI permite prosseguir para parser em caso de subcaminhos separados, mas continua bloqueando segmentos zero; commit f57f79f. O importador ainda rejeita Text e Bitmap como tipos nao suportados; arquivo WALLE completo NAO pode ser declarado importavel.
+- **Sem compilacao Windows, teste automatico Qt ou homologacao nesta alteracao.** Validar importacao de arquivo sintetico multipart (dois caminhos independentes, fechado/aberto, Bezier, undo), comparacao geometricamente exata e WALLE real em modo atomico; nenhum documento pode ser alterado se houver tipo nao suportado.
+- Main, APLICATIVO, firmware e comunicacao fisica permanecem inalterados/bloqueados.
+
+
+## 02/11/2026 — Modo visual adaptativo de alto volume, experimento Rayforge
+- Referencia arquitetural analisada: Rayforge 1.13.2 separa a representacao em canvas da geometria editavel. A implementacao em Qt 6 e original, sem transferencia de GTK/Python ou dependencias externas.
+- Novo `src/dense_render_policy_19_9.hpp`: acima de 80.000 nos, o viewport desliga antialiasing e SmoothPixmapTransform apenas na visualizacao, restaurando-os em documentos menores. Nenhum ponto, contorno, path, grupo, layer ou arquivo .alaser e alterado.
+- Qt reverte `MinimalViewportUpdate` para `BoundingRectViewportUpdate`; ao mudar estilo de 32+ objetos, suprime atualizacoes intermedias com NoViewportUpdate e solicita apenas um repaint final. Metricas JSON incorporam `fast_dense_display` e `viewport_update_strategy`.
+- Teste C++ portatil `tests/test_dense_render_policy_19_9.cpp` para limites 80.000/80.001 e 31/32; compilacao Qt Windows e benchmark real **AINDA PENDENTES**.
+- Baseline real: 415 contornos, 120.081 nos, paint p50 73,8873 ms, p95 1062,0717 ms, p99 1125,2906 ms, max 1615,7267 ms, hit-test p95 159,6687 ms. Repetir com mesma copia e gestos; manter original e registrar memoria. Se a performance regredir, reverter commit; nao habilitar laser.
+- Nao habilitar comunicacao fisica, movimento, G-code ou laser. PR #13 segue draft; main e APLICATIVO intactos.
+
+
+## 02/11/2026 — Mudanca de prioridade do proprietario: OTIMIZACAO E FLUIDEZ
+- O proprietario encerrou os testes do dia e determinou que a proxima fase seja **exclusivamente performance, responsividade e estabilidade do Qt Windows**, antes de novas funcionalidades, iconografia e integracoes.
+- Plano tecnico detalhado: `DESENVOLVIMENTO/ESPECIFICACOES/PRIORIDADE_FLUIDEZ_19_9.md`. Baseline de 120 mil nos; medir `rebuild()`, `pathOf`, paint, hit-test, selecao, Tesoura e Undo. Implementar correcoes incrementais reversiveis e exigir A/B real no Windows.
+- O commit de modo visual adaptativo `7ae2ef9` esta publicado, mas seu ganho ainda nao foi confirmado no Windows. Nao afirmar sucesso de performance nem trabalhos em segundo plano.
+- PR #13 permanece draft, `main`, `APLICATIVO` e comunicacao fisica do laser preservados/bloqueados.
+
+
+## 02/11/2026 — Inicio da implementacao da otimizacao do historico
+- Otimizacao experimental das operacoes de `Editor::change/undo/redo`: remover copia profunda extra usando movimentacao de estados, mantendo limite original de 40 passos e sem mexer em arquivos do usuario.
+- Diagnostico Qt adicionado para quantificar payload de nos retidos no historico (limite inferior, diferente de RSS) e script Windows de medicao RAM/CPU por processo.
+- Teste portatil especifico para roundtrip Undo/Redo e estimativa de historico; script de desempenho Windows com CSV.
+- Especificacao: `DESENVOLVIMENTO/ESPECIFICACOES/MEMORIA_HISTORICO_19_9.md`.
+- PENDENTE: compilacao e teste Windows, medicao no arquivo de 120 mil nos; sem nova liberacao fisica.
+
+
+## 03/11/2026 — Otimizacao experimental do arraste de selecao em massa
+- A partir de 32 itens selecionados, usa um `QGraphicsItemGroup` temporario de previsualizacao: um movimento de pai por evento de mouse, em vez de centenas de setPos. Restaura posicao de cada item e desfaz grupo na liberacao/cancelamento, sem alterar o documento ate o commit unico.
+- Instrumentacao no JSON: `grouped_drag_starts`, `grouped_drag_frame_updates`; teste GUI `--grouped-drag-19-9-test`, executavel via `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteFluidez`. Falha deve interromper o teste, nao liberar main.
+- Opt-out: variavel de ambiente `ALENCAR_DISABLE_GROUPED_DRAG=1` para comparar caminho antigo/novo sem recompilar; o grupo de previsualizacao usa Z=9 para preservar a ordem visual sobre objetos nao selecionados.
+- Ainda **nao medido** com 122 mil nos; requer Qt Windows PASS, inspeção visual, comparacao no mesmo arquivo e Undo/Redo. Branch PR #13 draft; main/APLICATIVO/hardware preservados.
+
+
+## 03/11/2026 — Diagnostico 122.390 nos e fix do manipulador central
+- JSON real confirmou `paint_p95_ms=1569.4323`, `paint_max_ms=3119.7382`, `hit_test_p95_ms=180.9861`, `rebuild_p95_ms=32.1031`, `style_apply_p95_ms=3.0168`. As 2 movimentacoes (417 e 263 objetos) ocorreram com `grouped_drag_starts=0`.
+- Caminho Qt antes nao otimizado: `updateSelectionTransform()` (controle central, h=12) aplicava `setTransform` a todos os itens por evento. Corrigido na branch experimental para uso de grupo temporario a partir de 32 itens e nenhum ajuste em geometria canonica; novo `grouped_transform_starts` e `grouped_transform_frame_updates`.
+- Adicionado teste GUI `--grouped-center-transform-19-9-test` ao comando `-SomenteFluidez`, com validacao de geometria, release, Undo/Redo. `transform_preview_p95_ms` permite comparar custo do gesto; `ALENCAR_DISABLE_GROUPED_DRAG=1` desliga os dois modos otimizados para comparacao.
+- **Nao compilado/testado no Windows nesta rodada**. Nao confundir teste anterior da rota de arraste sobre contorno com validacao do manipulador central. Proxima etapa: atualizar branch com cuidado, compilar `-SomenteFluidez`, testar com copia do projeto pesado e exportar JSON. Prioridade seguinte: custo de pintura Qt (P95 > 1.5 s).
+- main, APLICATIVO, instalador e controle da maquina sem mudancas. PR #13 draft.
+
+
+## 03/11/2026 — Solicitação: abrir outro projeto quando a área de desenho estiver vazia
+- **Pedido do operador — pendente, nao implementar durante a medicao de fluidez:** ao excluir todas as formas e escolher `Arquivo > Abrir` outro trabalho, o aplicativo nao deve exigir que se escolha um destino para salvar um desenho vazio. Deve permitir continuar com abertura do proximo arquivo sem salvar um documento sem conteudo.
+- **Criterio de vazio:** verificar todo o conteudo realmente salvavel (contornos/polilinhas, curvas Bezier, texto, imagem/raster e demais objetos persistidos), nao apenas `doc.contours.size()==0`. Guias, mesa, grade e elementos de UI nao contam como trabalho.
+- **Protecao contra perda de dados:** diferenciar (A) documento novo/vazio sem conteudo a preservar -> abrir direto, sem aviso de salvar; (B) projeto previamente salvo e modificado pela exclusao total -> nunca sobrescrever o original silenciosamente; disponibilizar `Descartar alteracoes e abrir`, `Cancelar` e, se apropriado, `Salvar`, sem obrigar a escolher um nome para um trabalho vazio; (C) documento com conteudo persistente -> manter fluxo normal de alteracoes nao salvas. Em caso de ambiguidade, priorizar confirmacao nao destrutiva.
+- **Criterios de aceite:** novo documento nunca editado; novo documento com objetos criados e totalmente excluidos; arquivo existente aberto e todo excluido; documento com somente imagem; somente texto; somente curva Bezier; documento com camadas/guias sem conteudo; documento com alteracoes nao salvas. Confirmar que cancelar preserva o estado anterior e abrir efetivamente substitui o trabalho somente apos escolha autorizada.
+- **Status:** requisito registrado para ciclo posterior de usabilidade. Nenhum codigo de abertura, salvamento ou validacao foi modificado nesta solicitacao. Prioridade imediata continua benchmark de renderizacao com 122.390 nos.
+
+
+## 03/11/2026 — Falha real de inicializacao interativa
+- Captura Windows: apos `ABRIR_19_9_WINDOWS.ps1` localizar com sucesso o runtime UCRT64 e a DLL `libminizip-1.dll`, o executavel `alencar_test7_qt6.exe` encerrou sem abrir o editor, informando `terminate called after throwing an instance of 'std::out_of_range'` e `what(): map::at`; PowerShell reportou codigo `-1073740791`. **Nao e erro de DLL nem prova de falha de renderizacao**.
+- O teste offline `-SomenteFluidez` havia passado, mas nao exercita todos os caminhos de inicializacao interativa (incluindo estado persistente e recuperacao). Nao considerar startup homologado.
+- Novo instrumento, commit `cda9a82`: `SCRIPTS/DIAGNOSTICAR_FECHAMENTO_19_9_WINDOWS.ps1`, executa GDB MSYS2 UCRT64, se instalado, com argumentos da inicializacao real e registra backtrace local em `RELATORIOS/DIAGNOSTICOS`. Sem reset de preferencias, reinstalacao ou mudancas do projeto. Pode ser necessario instalar o debugger oficial (`mingw-w64-ucrt-x86_64-gdb`) com pacman no MSYS2 UCRT64.
+- **Pendencia critica:** receber stack trace com funcao/linha para corrigir a causa precisa do acesso `map::at`. Nao mascarar a excecao nem eliminar dados de recuperacao e configuracoes. Enquanto isso, nao declarar a candidata pronta, nao fazer merge, nao mudar main/APLICATIVO ou liberar laser.
+
+
+## 03/11/2026 — REGRESSAO DE FLUIDEZ REPORTADA PELO USUARIO (P0)
+- O usuario relatou **piora grave dos travamentos** ao testar o projeto de 417 contornos/122390 nos, pediu avaliacao real da viabilidade. Parar a expansao de recursos; prioridade absoluta e recuperar estabilidade e eliminar reconstrucoes integrais desnecessarias.
+- Comparativo de JSONs locais: paint P95 1569 -> 1010 ms e hit-test P95 181 -> 20 ms, mas rebuild P95 32 -> 823 ms e max 63 -> 1482 ms. Sessoes com operacoes diferentes, sem inferencia causal nem homologacao. O gesto de controle central acionou agrupamento (1 inicio, 6 frames, preview P95 ~0,825 ms); problema maior parece ocorrer fora da transformacao temporaria.
+- Codificacao atual: `finishSelectionTransform` continua chamando `rebuild()`, que recria a `QGraphicsScene` inteira; pintura continua com P95 > 1 s. O arquivo LightBurn `ampulheita do tempo.lbrn2` tambem expôs suporte ausente a elipse com `Rx/Ry`; falha de importação separada.
+- Script `SCRIPTS/ABRIR_19_9_WINDOWS.ps1` atualizado com `-ModoCompatibilidade` para desligar somente o agrupamento experimental nesta sessao (rollback dinamico, sem alterar projeto). Nao garante resolucao de congelamento; seguir com comparacao controlada.
+- Plano consolidado: `DESENVOLVIMENTO/ESPECIFICACOES/PLANO_ESTABILIZACAO_19_9_20261103.md`. A branch continua draft; main, APLICATIVO, instalador e hardware sem modificacoes. Nenhum ganho definitivo afirmado. Evitar novas mudancas de desempenho sem testes Qt Windows e evidencia de latencia.
+
+
+## 03/11/2026 — Analise dos dois TXT GDB enviados
+- `FECHAMENTO_GDB_19_9_20261103_144436.txt`: incompleto; registra apenas 3 mensagens `New Thread`, sem backtrace.
+- `FECHAMENTO_GDB_19_9_20261103_145204.txt`: `GDB exit code: 0`, processo Windows `Inferior 1 (process 9700) exited normally`, nenhuma pilha de falha. Aviso OLEAUT32 `Biblioteca não registrada` sem correlação comprovada com `map::at`. O fechamento anormal anterior **não se repetiu nesta captura**; não declarar erro solucionado.
+- Nova opcao experimental `-CapturarExcecao` no script `SCRIPTS/DIAGNOSTICAR_FECHAMENTO_19_9_WINDOWS.ps1` (commit `e76b72b`): usa catchpoint `catch throw std::out_of_range` e tenta gerar backtrace antes do terminate se a excecao ocorrer. O suporte ao filtro tipado depende das capacidades do GDB/libstdc++; ainda nao validado no Windows. Modo normal original preservado.
+- Se fechar normalmente ou nao reproduzir a excecao, relatorio continua inconclusivo; nenhuma alteracao na `main`, instalador, controle laser ou projetos. Prioridade estabilizacao full rebuild e pintura permanece.
+
+
+## 03/11/2026 — Falha ao abrir ampulheita do tempo.lbrn2 e GDB catchpoint
+- Usuario reproduziu falha ao abrir `ampulheita do tempo.lbrn2` e o GDB informou **"Excecao capturada"**; captura de tela registra TXT local `RELATORIOS/DIAGNOSTICOS/FECHAMENTO_GDB_19_9_20261103_160816.txt`. **O TXT nao foi enviado**, portanto a funcao exata do `std::out_of_range/map::at` permanece desconhecida; codigo de saida 0 refere-se ao GDB, nao a sucesso do editor.
+- Arquivo do usuario inspecionado em leitura: original e copia (1) identicos SHA256 `65638a6fd7425fa69e1af47d02182eee57e372f42fd46e1608b7de0cdffbe86d`, XML LightBurn 2.1.02, 2134 shapes (2133 Path, 1 Ellipse). Elipse usa Rx=Ry=1.7500045, sem W/H. Existem 16401 segmentos Bezier B e 1275 linhas L, equivalente a aprox. 397 mil nos com tesselação de 24 por B; excede cap atual de 250 mil.
+- Hotfix experimental branch PR #13: `lightburn_geometry_import.hpp` aceita Rx/Ry com validação estrita, exige consistencia se W/H tambem informados, preflight de limite inferior de nos antes do flatten (evita gasto massivo antes da recusa), cap durante flatten por raiz. Sem importar parcialmente ou tocar no arquivo original.
+- Teste isolado `alencar_test19_9_lbrn2_safe_import` (Qt Core/Gui), flag `-SomenteImportacaoSegura` no validador Windows, opcional `-ArquivoLbrn2 <caminho>` para conferir recusa esperada do arquivo real. **Compilacao/testes Windows pendentes**. Nao afirmar que o crash foi corrigido ate examinar o TXT e executar teste.
+- O proximo projeto de suporte real deve preservar caminhos cubicos nativos ou oferecer simplificação autorizada e medida; nao elevar 250 mil a cegas. Prioridades: diagnostico do mapa::at pela pilha GDB, estabilizacao de UI, importador nativo. Nenhum comando físico liberado e nenhum merge.
+
+
+## 03/11/2026 — GDB 16h08: excecao TRATAVEL no parser, nao prova de crash
+- O TXT enviado `FECHAMENTO_GDB_19_9_20261103_160816.txt` registra `Thread 1 hit Catchpoint 1 (exception thrown)` com pilha `__cxa_throw -> alaser::lightburn::readShape -> readGeometry -> LabWindow::openFilePath -> LabWindow::open`.
+- Atenção: o script antigo usava `catch throw std::out_of_range`, mas o próprio GDB advertiu `did not find exception probe (does libstdcxx have SDT probes?)`; o filtro por tipo **não estava confiável**. Foi capturada a PRIMEIRA exceção disparada no parser, possivelmente `std::runtime_error("Dimensoes ausentes para Rect/Ellipse")` do executável anterior, que `openFilePath` JÁ trata com uma mensagem e retorno.
+- `GDB exit code 0` se refere ao depurador. A interrupção num `__cxa_throw` tratado não demonstra crash real nem comprova o defeito `map::at` anterior. O GDB em modo batch encerra a sessão ao bater no catchpoint — isso pode ser visto pelo operador como "programa fechou".
+- O arquivo LightBurn fornecido está íntegro: 2.133 Path, 1 Ellipse Rx/Ry; compartilhamentos resolvidos indicam 16.401 comandos B e 1.275 L, gerando **no mínimo 394.899 pontos** antes de certos pontos iniciais, acima do limite de 250 mil. O patch preventivo `8ff890f` evita conversão excessiva antes da recusa e lê Rx/Ry, porém **não permite importação integral do arquivo de grande dimensão**; requer importação Bézier nativa para preservar a geometria.
+- Alteração no depurador: commit `1415eb6` oferece `-CapturarEncerramento` (alias `-CapturarExcecao` agora equivalente) parando em `std::terminate` ou `abort`, não mais na primeira exceção tratada. Não testado em Windows; pode falhar por ausência de símbolos. NÃO pedir repetição do mesmo teste sem necessidade.
+- Próximo gate de segurança: executar `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteImportacaoSegura -ArquivoLbrn2 <caminho_local_copia>`; o teste deve produzir PASS de recusa ANTECIPADA com arquivo grande, sem abrir GUI. Não declarar editor estável ou importação bem-sucedida.
+
+
+## 03/11/2026 — PASS no Windows: teste seguro LBRN2 19.9
+- Evidencia do operador via captura do VS Code: `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\TESTAR_19_8_WINDOWS.ps1" -SomenteImportacaoSegura` compilou `alencar_test19_9_lbrn2_safe_import.exe` com Qt e executou o teste focado.
+- Saida registrada: `PASS LightBurn 19.9: Rx/Ry, strict dimensions, early node budget, no laser` e `LBRN2 SAFE: PASS para validacoes de leitura e recusa antecipada.`
+- **Escopo do PASS:** testes sinteticos de interpretacao Rx/Ry e rejeicao do excesso de nos; **sem `-ArquivoLbrn2`**, portanto nao significa que `ampulheita do tempo.lbrn2` foi validado no executavel, nem prova estabilidade do editor ou solucao do `map::at` historico.
+- Proxima implementacao prioritaria: importador de Bezier cubicas nativas (preservando vertices, controles, primitivas desconectadas e integridade), com fase de parsing desacoplada da GUI e limite de recursos. Nao elevar artificialmente limite de 250 mil nos, nao fazer tesselação fixa de 24 subdivisoes por curva; registrar testes de equivalencia de geometria, undo/redo e carga.
+- PR #13 draft, main, APLICATIVO e maquina sem modificacoes.
+
+
+## 03/11/2026 — Primeira etapa de importação Bézier nativa (SEM GUI)
+- Novo leitor `DESENVOLVIMENTO/FONTE/src/lightburn_native_import_19_9.hpp`: lê Path B/L e LineOpen/LineClosed diretamente em `CurveDocument`, preservando âncoras, handles e `XForm`, camadas e fechamento, sem tesselação fixa de 24 retas por cúbica.
+- Auditoria independente do arquivo `ampulheita do tempo(1).lbrn2` (SHA256 `65638a6fd7425fa69e1af47d02182eee57e372f42fd46e1608b7de0cdffbe86d`): 2.134 Shapes (2.133 Path, 1 Ellipse), **17.947 âncoras** e **16.417 arestas cúbicas** (16 da elipse representada por aproximação cúbica), **1.530 arestas retas**. Exige-se equivalência exata de contagens no teste nativo Windows; o esquema anterior geraria cerca de 397 mil pontos poligonais. Nenhuma forma do usuário foi enviada ao repositório.
+- Adicionados `tests/lightburn_native_19_9.cpp`, alvo CMake `alencar_test19_9_lbrn2_native`, comando `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteBezierNativo` (opcional `-ArquivoLbrn2 <arquivo_real>`), e especificação `DESENVOLVIMENTO/ESPECIFICACOES/IMPORTADOR_BEZIER_NATIVO_19_9_20261103.md`.
+- **Ainda não compilado no Qt Windows nem integrado à interface.** O usuário não deve tentar importar seu arquivo grande pela UI antiga; o fluxo de importação novo é apenas de leitura até comprovar integridade e desempenho. Sem merge nem alterações em main/APLICATIVO/hardware.
+
+
+## 03/11/2026 — Importador nativo PASS no Windows; gate de persistência reforçado
+- Captura Windows confirma `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteBezierNativo` com `PASS native LBRN2 19.9: cubic control points, transforms, shared references, topology, no laser`. A compilação do alvo `alencar_test19_9_lbrn2_native.exe` passou. **Somente testes sintéticos**: a chamada não teve `-ArquivoLbrn2`.
+- Após esse PASS, testes foram ampliados para ida/volta exata `encodeCurves/decodeCurves` (bits de float64, IDs, layers, handles, fechamento e edgeKind) e persistência real `.alaser` v5 (ZIP, checksums, geometry) via `buildEditedIntegratedProject`, `writeIntegratedProject` e `readIntegratedProject`, gerando ZIP somente em diretório temporário e exigindo `fabricationEnabled=false`. CMake passou a incluir Boost JSON e MiniZip/ZLIB no alvo.
+- **A nova revisão de roundtrip não foi executada no Windows.** Repetir `-SomenteBezierNativo`; depois, com `-ArquivoLbrn2 <caminho_do_arquivo_real>`, confirmar `roundtrip_exact=true` e contagens 2134/2134/17947/16417/1530. Evitar abrir o arquivo via interface antiga enquanto isso.
+- Somente após essas verificações conectar o leitor ao editor por caminho experimental opt-in e operação transacional. Nenhuma alteração em main, APLICATIVO, instalador ou máquina física.
+
+
+## 03/11/2026 — PASS real ZIP sintético e integração GUI experimental desativada por padrão
+- Operador mostrou no Windows o PASS `PASS native LBRN2 19.9: cubic controls, shared refs, native v5 ZIP exact reopen, fabrication off` para arquivo **sintético**. Trata-se do PASS da revisão com codec ZIP/JSON, não comprova importação do `.lbrn2` real, fluidez geral ou estabilidade do editor.
+- Avanço desta rodada: `qt6_test6.cpp` agora inclui `lightburn_native_import_19_9.hpp` e um fluxo de importação nativa **opt-in via `ALENCAR_NATIVE_LBRN2_PREVIEW_19_9=1`**, DESLIGADO por padrão. Leitura e validação antes de qualquer substituição; confirmação humana com padrão No; `ensureSafeToReplace` preserva documentos com alterações; importa só geometria e deixa `projectPath` vazio para não escrever sobre o LightBurn original.
+- Teste GUI isolado `--native-import-gui-19-9-test` criado com fixture sintética, falha de parser sem modificar o desenho anterior, renderização de 2 contornos nativos e ida/volta `.alaser` v5 temporária. Teste Windows `TESTAR_19_8_WINDOWS.ps1 -SomenteBezierNativoUI` compila e executa esse gate; JSON `RESULTADO_IMPORTACAO_NATIVA_GUI_19_9.json`.
+- **Esta integração e seu teste ainda NÃO foram compilados nem executados no Windows**; não declarar PASS GUI nem pedir abrir o arquivo real pela interface. Próxima ação humana: fechar editor, preservar `git status`, atualizar branch e rodar `-SomenteBezierNativoUI`; após PASS, usar `-SomenteBezierNativo -ArquivoLbrn2 "<caminho da cópia>"` para auditoria do arquivo real sem UI.
+- PR #13 draft, não alteradas `main`, `APLICATIVO`, instalador e emissão física.
+
+
+## 03/11/2026 — PASS Qt GUI nativo e auditoria real com seletor
+- Evidencia visual enviada pelo operador do VS Code: `TESTAR_19_8_WINDOWS.ps1 -SomenteBezierNativoUI` terminou com `PASS native LBRN2 19.9: cubic controls, shared refs, native v5 ZIP exact reopen, fabrication off` e `BEZIER NATIVO GUI 19.9: PASS sintetico. Arquivo real e fluidez ainda pendentes.`
+- Este PASS confirma compilacao Qt e regressao GUI sintetica: um `.lbrn2` sintético pode ser importado no modo nativo em memória, com preservação de arquivo de origem e `.alaser` v5 temporário. Não comprova que o arquivo `ampulheita do tempo.lbrn2` real abre integralmente ou que os travamentos foram eliminados.
+- Adicionado `SCRIPTS/VALIDAR_LBRN2_REAL_19_9.ps1`: abre seletor de arquivos Windows quando `-ArquivoLbrn2` está ausente, exige arquivo `.lbrn2`, registra SHA256 antes e depois e invoca o gate **offline** `-SomenteBezierNativo -ArquivoLbrn2 <caminho>`. Não usa a GUI do editor e não altera o arquivo original nem conecta laser. Requer teste na máquina do operador; sem prova real de PASS ainda.
+- Próxima ação após atualizar a branch (preservando mudanças locais): `powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\VALIDAR_LBRN2_REAL_19_9.ps1"`, escolher uma cópia do arquivo LightBurn real. Exigir `REAL LBRN2: sourceShapes=2134 nativeContours=2134 nativeAnchors=17947 cubicEdges=16417 straightEdges=1530` e `AUDITORIA LBRN2 REAL 19.9: PASS offline`, senão investigar parser. Não habilitar a variável da GUI real até a auditoria passar.
+- PR #13 draft, sem merge na main nem alterações em instalador/APLICATIVO, sem emissão fisica.
+
+
+## 03/11/2026 — Retomada 19.9: ampulheta real, camadas e pintura Qt
+- **PASS no Windows — LBRN2 real:** 2.134 shapes/contornos nativos, 17.947 âncoras, 16.417 cúbicas, 1.530 retas, roundtrip_exact=true e SHA256 preservado.
+- **PASS Windows — SomenteBezierNativoUI:** regressão sintética de GUI e arquivo .alaser v5. A abertura real posterior foi comprovada por screenshot, arquivo ampulheta.alaser e relatórios.
+- **Medição real GUI:** Qt 6.12.0, paint P95=496.693 ms, input-to-paint P95=452.9751 ms, RSS=155820032 bytes e hit-test P95=0.0061 ms; Tesoura, mover nó/contorno e undo registrados. Lentidão da pintura P0, ainda não solucionada.
+- **Falha real de metadados:** 2.130 curvas Bezier layerId=1, 4 layerId=0; design/layers.json tinha somente camada 0. A prévia aplicava 2.130 fallbacks de camada.
+- **Correções experimentais na PR #13 draft:** cb0ce7a (Layer.parametersVerified), fc4b6b4 (reconstrução não destrutiva dos IDs de camada no importador e nos projetos v5 antigos), 831c149 (contador de parâmetros não verificados), 28758e6 (aviso de prévia), 086e7ca (construção Qt e teste GUI estendidos). Essas mudanças NÃO possuem PASS Windows nesta nova revisão.
+- **Diagnóstico e segurança:** as camadas recriadas não importam velocidade/potência/Fill de máquina; parâmetros permanecem virtuais e sinalizados. Geometria, ID, histórico, edição e fabricação física separados. Não mexer na main, APLICATIVO, instalador ou emissão laser.
+- Especificação detalhada: DESENVOLVIMENTO/ESPECIFICACOES/AUDITORIA_CAMADAS_BEZIER_E_PINTURA_19_9_20261103.md; issue GitHub #18.
+- **Próximo gate, quando operador voltar:** fechar editor, conferir git status --short, preservar alterações locais, git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030, executar SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteBezierNativoUI. Se PASS, importar somente COPIA do projeto real e comparar renderizações e metadados; nunca sobrescrever o original.
+- **CI remoto:** ações em GitHub aparecem como falha sem logs acessíveis; não declarar compilação/homologação nem deduzir causa.
+
+
+## 04/11/2026 — Otimização seletiva Bézier e benchmark A/B offline
+- Base confirmada pelo operador em 03/11: commit 3c66678, SomenteBezierNativoUI = PASS, JSON inclui layer_ids_preserved, legacy_missing_layers_repaired_in_memory e unverified_parameters_preserved = true. Não equivale a homologação de fluidez.
+- Problema P0 permanece: sessão ampulheta.alaser com 2.134 curvas, paint P95=496.693 ms e input-to-paint P95=452.9751 ms. Evitar inferir ganhos sem benchmark controlado.
+- Código novo experimental na PR #13 draft: 41473c7 (seleção/arraste não remonta 2.134 caminhos, remove segunda construção total após Tesoura e testa caminho não selecionado), 1bb7b09 (perfil de background/foreground e refresh de caminhos), e67dd50 (toggle ALENCAR_NATIVE_LEGACY_SELECTION_REBUILD_19_9=1 para A/B reversível), 2eb4b7c (modo --native-paint-bench-19-9-test no Qt para medir 24 repaints e 12 ciclos de seleção).
+- Novo script SCRIPTS/BENCHMARK_BEZIER_REAL_19_9.ps1 (3294d4e): seleciona arquivo LightBurn .lbrn2, cria cópia temporária, valida SHA256, compila/testa GUI por padrão, executa bench offline com --native-paint-bench-19-9-test, remove a cópia em finally, deixa JSON agregado em RELATORIOS/AUDITORIAS/GITHUB_19_8/BEZIER_PERFORMANCE_19_9. Modo otimizado por padrão; -ModoLegado para comparar mesma geometria e executável.
+- Especificação DESENVOLVIMENTO/ESPECIFICACOES/BENCHMARK_FLUIDEZ_BEZIER_19_9_20261104.md (4c0de44) descreve controles A/B e critérios de aceite. Testes locais deste turno apenas revisão estática do código/refs; sem Qt6 Widgets no ambiente, **COMPILAÇÃO WINDOWS E MEDIÇÃO REAL AINDA PENDENTES**.
+- Próximo passo quando operador voltar: fechar editor, preservar git status, git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030 e executar SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteBezierNativoUI. Se PASS e HEAD incluir novos commits, executar BENCHMARK_BEZIER_REAL_19_9.ps1 (selecionar copia .lbrn2), depois -ModoLegado -SemCompilar com mesmo arquivo. Comparar 3 pares, mesmo DPI/viewport; enviar os dois JSONs. Baseline 496.7 ms de sessao manual não é diretamente comparável com 24 repaints sincronizados.
+- Nenhum arquivo do usuário enviado ao GitHub, nenhum merge na main, APLICATIVO ou instalador atualizado, nenhum comando GRBL/G-code/laser habilitado.
+
+
+## 04/11/2026 — Hotfix PowerShell 5.1 no benchmark real
+- Evidencia do VS Code: git pull --ff-only fez fast-forward ate 0f75953; execucao de SCRIPTS/BENCHMARK_BEZIER_REAL_19_9.ps1 falhou ANTES do benchmark com ParserError: string sem terminador na linha 101, chave esperada para try/finally e bloco incompleto.
+- Causa provavel identificada: caractere Unicode travessao U+2014 em Write-Host de script .ps1 em UTF-8 sem BOM, vulneravel ao parser/decoder do Windows PowerShell 5.1.
+- Hotfix no commit d1eb4cd: todo o script em ASCII (verificacao estatica), mensagem em hifen ASCII e tratamento de JSON de erro sem depender da propriedade error quando ausente. Nenhum codigo de laser, geometria, main, APLICATIVO ou instalador alterado.
+- Novo teste pendente no Windows: atualizar branch preservando git status; validar parser PS 5.1; executar benchmark com copia LightBurn, sem hardware; compartilhar JSON. Nenhum PASS de benchmark real registrado ate agora.
+
+
+## 04/11/2026 — Comparação A/B exigindo o mesmo SHA-256
+- Os dois benchmarks reais deram PASS individual com 2.134 contornos, geometria preservada e sem conexão física, mas **não eram mesmo arquivo**: otimizado SHA256 prefixo 0DDD1F, legado prefixo 65638A. NUNCA tratar o resultado como comparação A/B homologada só por contornos iguais.
+- Resultados observados (não comparáveis causalmente): otimizado paint P95 573,6805 ms e seleção 11.413,4883 ms/12 ciclos, builds globais=0 e seletivos=12; legado paint P95 597,272 ms e seleção 18.476,1195 ms/12 ciclos, builds globais=51.216 e seletivos=0.
+- A mudança de política de reconstrução é observável; ganho de tempo A/B ainda não comprovado. Repaint P95 perto de 0,6 s permanece pendência importante.
+- Criado script SCRIPTS/COMPARAR_BEZIER_AB_19_9.ps1 (commit b3c045c) que seleciona a origem LightBurn uma unica vez, fixa SHA-256, roda otimizado e legado com -SemCompilar, garante mesmo DPI, viewport, versao Qt, contornos, amostras e modo, grava JSON agregado e recusa pares divergentes. Parametro opcional -Repeticoes 1..5 alterna ordem. Script ASCII para PowerShell 5.1; ainda nao executado no Windows.
+- Proxima acao local: git status --short, git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030, fechar editor/desconectar hardware e rodar powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\COMPARAR_BEZIER_AB_19_9.ps1". Enviar JSON agregado para avaliar. Manter main e instalador intocados.
+
+
+## 04/11/2026 — Primeiro par A/B válido (mesmo SHA) e isolamento de pintura Qt
+- **PASS A/B real com MESMO arquivo SHA-256** prefixo 0DDD1F, 2.134 contornos em ambos os modos. Otimizado: paint P95 559,2831 ms, 12 ciclos seleção 12.525,5236 ms, full path builds 0, selective 12. Legado: paint P95 541,4907 ms, 12 ciclos seleção 12.887,6773 ms, full path builds 51.216, selective 0. SHA-256 preservado, sem laser.
+- Redução dos tempos brutos na seleção (incluindo processEvents e desenho) aproximadamente +2,81% em favor do otimizado. Pintura P95 **3,29% pior** no otimizado neste par; não é ganho estável de FPS. Linha de resumo impressa parece divergente do cálculo direto; conferir JSON bruto. O gargalo de pintura persiste.
+- Novos commits experimentais: 86c4e8a e 6b0baf5 = 12 repaints com native QGraphicsPathItems temporariamente invisíveis (benchmark apenas) e contagem de 24 amostras do baseline intacta, para separar custo de Qt viewport e itens; a7df8c1 = runner exibe P95 fundo/frente/cena oculta; 796c8a9 e e10f8bd = comparador compila/testa uma vez por padrao, recebe -SemCompilar, imprime tempos brutos e percentuais, salva novos campos e usa sintaxe ASCII para PS5.1.
+- **Ainda não testado no Windows após estes commits.** Fechar editor e desconectar laser; conferir git status para preservar arquivos locais; git pull --ff-only; executar powershell -NoProfile -ExecutionPolicy Bypass -File ".\\SCRIPTS\\COMPARAR_BEZIER_AB_19_9.ps1" -Repeticoes 1 (compila Qt em modo sintetico por padrao e seleciona uma unica origem para ambos modos). Relatorio agregado continua em RELATORIOS/AUDITORIAS/GITHUB_19_8/BEZIER_PERFORMANCE_19_9. Repetir ate 3 pares apenas se o primeiro passar.
+- Sem alteracao em main, APLICATIVO, instalador, arquivos reais ou comandos da maquina. Sem prova suficiente para habilitar cache rasterizado ou sacrificar nitidez das curvas.
+
+
+## 04/11/2026 — A/B valido, sem ganho de tempo; nova experiencia de invalidacao Qt
+- Captura de operador confirmando COMPARACAO_AB_19_9 com UMA origem LightBurn, SHA256 identico nos dois modos e PASS do par; 2.134 contornos. Otimizado: paint P95 559.2831 ms, selecao 12.525,5236 ms/12 ciclos, full path builds 0 e selective 12. Legado: paint P95 541.4907 ms, selecao 12.087,6773 ms/12 ciclos, full path builds 51.216 e selective 0. Otimizado ~3,3% PIOR na pintura e ~3,6% PIOR nos ciclos nesta rodada. Nao homologar ganho de fluidez com apenas um par.
+- Conclusao: a reconstrucao global das curvas foi reduzida, mas o custo de repaint/scene continua dominante. A documentacao Qt6 distingue full viewport repaint e invalidacao de regioes pequenas (doc.qt.io/qt-6/qgraphicsview.html).
+- EXPERIMENTO NOVO, ainda NAO compilado no Windows: commit 326be7f usa invalidacao localizada na troca de selecao nativa, incluindo bbox da curva antiga/nova e alcas de controle, com margem de 20 px. Rollback opcional ALENCAR_NATIVE_LEGACY_FULL_VIEWPORT_ON_SELECT_19_9=1 para retornar repaint global sem tocar na geometria. Contadores de repaint local/full e fracao de viewport pintada adicionados ao JSON manual.
+- Commit 6756b6e acrescenta metricas do tamanho do repaint na fase de selecao ao benchmark real: native_local_repaint_requests_delta, native_full_repaint_requests_delta, selection_paint_events, selection_viewport_paint_bbox_fraction_p95 e legacy_full_viewport_on_select. Nao alterar geometria, arquivo original, main, APLICATIVO, instalador ou hardware.
+- PR #13 permanece draft. Os commits 326be7f e 6756b6e nao possuem PASS Qt/Windows ainda. Proxima tarefa do operador: primeiramente fornecer JSONs de pintura da rodada A/B ja concluida para diagnosticar background vs foreground; depois atualizar branch e executar gate -SomenteBezierNativoUI antes de qualquer medicao da nova invalidacao.
+
+
+## 04/11/2026 — Gargalo dos itens Qt e experimento de cache isolado
+- A/B validado no Windows, mesma origem SHA256, 2.134 contornos, PASS sem hardware. Pintura P95 com curvas visiveis: otimizado 563,2402 ms, legado 544,2971 ms. Ciclos de selecao 10.637,6105 vs 12.369,3043 ms (-14% otimizado). Fundo P95 ~0,43ms, foreground P95 ~0,015ms. Pintura com itens Bezier ocultos ~0,91ms vs ~1,14ms, forte indicio de gargalo nos itens QGraphicsPathItem/culling/rasterizacao. Nao usar diferenca entre P95s independentes para afirmar percentual exato.
+- EXPERIMENTO separado, por padrao DESLIGADO no Qt, na mesma PR #13 draft: cache DeviceCoordinateCache para itens pequenos elegiveis no BENCHMARK somente, max. estimado 256x256 pixels/item e total 24 MiB; preserva geometria nativa e producao OFF. Adicionados diagnosticos RSS, quantidade itens cacheados, diferenca visual calculada apenas em memoria, sem exportar screenshots. Commits ada7796, 558e475, 4b33cf0, bb48437, e275051, 17d1d04.
+- NOVO script SCRIPTS/COMPARAR_CACHE_BEZIER_19_9.ps1 (PowerShell 5.1 ASCII) seleciona UMA origem, compila o gate por padrao e compara mesmo projeto SEM cache vs CACHE_DEVICE. Guarda SHA256 original e verifica Qt, viewport, DPR, contornos, imagem em memoria, integridade e ausencia de hardware.
+- Documento detalhado: DESENVOLVIMENTO/ESPECIFICACOES/EXPERIMENTO_CACHE_QT_BEZIER_19_9_20261104.md. Nenhuma compilacao Windows ou medicao real desta nova revisao; nao afirmar ganho, nao mesclar main/APLICATIVO nem atualizar instalador.
+- Proximo passo com operador: preservar git status --short, atualizar cuidadosamente branch experimental, fechar editor/desconectar laser e executar SCRIPTS/COMPARAR_CACHE_BEZIER_19_9.ps1. Enviar JSON agregado, avaliar paint P95, RSS e divergencias visuais. Zoom, pan, selecao, Tesoura e undo permanecem gates de fidelidade.
+
+
+## 04/11/2026 — Falha protegida de importacao LBRN2 com grupos
+- Captura do operador: gate GUI sintetico Qt PASS, mas `COMPARAR_CACHE_BEZIER_19_9.ps1` abortou o primeiro caso `SEM_CACHE` com `LBRN2 native: group hierarchy not yet preserved`. Origem SHA256 prefixo 6134EE, diferente da ampulheta antes validada 0DDD1F. Arquivo original permaneceu intacto; sem comando de laser. Nenhum benchmark de cache foi medido.
+- Causa confirmada em `DESENVOLVIMENTO/FONTE/src/lightburn_native_import_19_9.hpp`: rejeicao deliberada de `Group`/`children` para preservar hierarquia que CurveDocument atual nao representa. Nao remover o bloqueio nem transformar grupos em curvas independentes sem metadados.
+- Commit 9cde3eb: COMPARAR_CACHE_BEZIER_19_9.ps1 faz preflight read-only via XmlReader seguro (DTD proibido, sem resolucao externa), conta Groups/Shapes aninhados e aborta ANTES da compilacao. Requer selecionar projeto compativel. Sem alteracao do desenho original.
+- Commit 0fd3d3f: gate sintético GUI agora valida recusa de fixture agrupada sem destruir trabalho em andamento nem alterar arquivo .lbrn2. Modificacoes ainda sem PASS Windows.
+- Issue #19 criada para implementar suporte fiel a grupos no editor nativo: IDs, XForm/ordem, persistencia .alaser, selecao e undo sem flatten silencioso.
+- Proxima tarefa Windows: preservar alterações locais com `git status --short`, atualizar branch fast-forward se seguro, executar `-SomenteBezierNativoUI`, depois `COMPARAR_CACHE_BEZIER_19_9.ps1` selecionando a MESMA copia de ampulheta .lbrn2 ja validada (SHA prefixo 0DDD1F), NAO o arquivo agrupado. Nao desagrupar o original para contornar a protecao. Compilacao e benchmark de cache ainda pendentes.
+
+
+## 04/11/2026 — Benchmark cache DeviceCoordinateCache PASS real; zoom QA opt-in
+- Evidencia Windows real comparacao com SHA256 igual (prefixo 0DDD1F), 2134 contornos: sem cache paint P95=564.7993 ms, com Qt DeviceCoordinateCache paint P95=45.7089 ms, reducao inicial 91.91%. Selecao 12 ciclos passou de 3124.638 ms para 757.3224 ms. Ambos `PASS OTIMIZADO` e SHA original preservado; laser desconectado.
+- Cache aplicado a 2134 itens, estimativa bytes 656992; RSS do processo com cache (snapshot final) 110809088 bytes. Visual screenshot comparado em memoria: 0% pixels com diferenca >8 niveis/canal, max 2. Fundo/foreground P95 ~0.47/0.016 ms. Ainda NAO homologar: teste no zoom fixo e repaints apos warmup, apenas um par.
+- Warning Windows `QFont::setPointSize: Point size <= 0 (-1)` apareceu nas duas execucoes, nao fatal; nao atribuir melhoria ou falha ao warning sem investigar fonte.
+- Registrado em GitHub issue #18. Nenhum comando GRBL, main/APLICATIVO/instalador inalterados, cache segue DESLIGADO no editor de producao e somente opt-in no benchmark.
+- Novo gate opcional de zoom QA em 1x/2x/4x relativo ao fit inicial: commit 7217662 Qt captura imagens em memoria com e sem cache em cada escala, registra pix diff e tempo P95, preserva curvas. Runner Windows commit 7e62680 inclui -AuditarZoom com -CacheDispositivo; comparador commit e5175b2 inclui -AuditarZoom e seleciona a origem LightBurn uma unica vez. Nenhum pixel ou geometria exportado em imagens.
+- Estas MUDANCAS de zoom ainda NAO foram compiladas/testadas no Windows. Proximo gate: preservar git status, atualizar a branch experimental quando seguro, fechar editor e desconectar laser, rodar `powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\COMPARAR_CACHE_BEZIER_19_9.ps1 -AuditarZoom` e selecionar a mesma origem de SHA 0DDD1F. Validar tres escalas, integridade, viewport, RSS e divergencias. Depois QA manual de zoom/pan, Tesoura, undo e selected handles antes de habilitar cache em editor.
+
+
+## 04/11/2026 — Zoom QA detectou vista vazia, corrigido benchmark
+- Screenshot do operador: A/B do cache com mesmo SHA dentro do par (prefixo 65638A), 2134 curvas, P95 sem cache ~472,36 ms, com cache ~41,41 ms (-91,23%) no enquadramento inicial. Ambas execucoes PASS e SHA da origem preservado. Importante: origem difere de outros testes com prefixo 0DDD1F.
+- Zoom 1x tinha 2134 itens cacheados, P95 ~42,52 ms; zoom 2x tinha SOMENTE 1 item cacheado, P95 ~4,88 ms; zoom 4x nao tinha nenhum item cacheado, P95 ~0,87 ms. Esses tempos NAO comprovam aceleracao de zoom. Auditoria anterior ampliava a partir de canto fixo da mesa com fitInView(0,0,400/fator,400/fator), possivelmente ocultando a arte. Comparacoes visuais de duas imagens vazias podem dar falsas aprovacoes.
+- Hotfix 86a8af7 (NAO testado ainda no Windows): centro da auditoria calculado a partir dos contornos reais, mede regioes visiveis por bounding box e pixels de traco comparados com a viewport sem curvas; falha quando a arte fica vazia; mede P95 sem cache e com cache em cada escala. Nao grava imagens nem modifica curvas.
+- Hotfix 9e7d142: PowerShell mostra visibilidade, arte em pixels, P95 com/sem cache e alerta quando nenhuma curva foi cacheada. Hotfix a36e07b e bccc2f7: comparador reclassifica zoom sem cache como INCONCLUSIVE, preserva SHA e impede suposta homologacao apenas por P95 baixo.
+- Proximo gate: preservar git status, atualizar branch experimental somente se seguro, fechar editor e desconectar laser, rodar `powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\COMPARAR_CACHE_BEZIER_19_9.ps1 -AuditarZoom` usando mesma copia LightBurn. Se zoom 2x/4x nao possuir arte efetivamente visivel, teste deve falhar explicitamente. Se visivel mas cache=0, teste nao deve alegar ganho.
+- Tudo continua experimental na PR #13: sem merge para main, APLICATIVO, instalador, controle fisico. Eficiencia de zoom e qualidade real permanecem pendentes.
+
+
+## 04/11/2026 — Central de Auditoria GitHub filtrada (Issue #20)
+- Objetivo aprovado pelo usuario: registrar evidencias tecnicas de testes Windows no repositorio sem depender de prints, preservando a privacidade e os originais.
+- Infraestrutura adicionada somente na branch experimental \`fix/curvas-tesoura-preflight-19-8-20261030\`:
+  - \`SCRIPTS/REGISTRAR_AUDITORIA_GITHUB_19_9.ps1\` prepara JSON filtrado de dois formatos conhecidos: \`AUDITORIA_CACHE_ZOOM_19_9_*.json\` e \`COMPARACAO_CACHE_19_9_*.json\`. Usa whitelist e verifica SHA de relatorio, identifica apenas prefixo da origem e nunca copia nomes/caminhos, JSON completos, projetos, logs ou fotos. Por padrao nao envia; \`-Publicar\` exige acao explicita e faz commit/push somente de \`AUDITORIA_GITHUB/\`.
+  - \`SCRIPTS/TESTAR_CENTRAL_AUDITORIA_19_9.ps1\` autoteste offline com repo Git temporario, fixture, parser, indice, verificacao de privacidade e rejeicao de campo inesperado. AINDA NAO EXECUTADO NO WINDOWS.
+  - \`AUDITORIA_GITHUB/README.md\` com fluxo e salvaguardas; \`AUDITORIA_GITHUB/INDICE.json\` com ZERO registros ate coleta no PC.
+- \`RELATORIOS/\` permanece ignorada pelo Git; o script nao habilita laser, nao altera main/APLICATIVO/instalador e nao implica homologacao. Primeiro executar o autoteste em Windows; depois preparar, inspecionar e publicar separadamente apenas os dados filtrados.
+- Entrada de continuidade para outros chats: \`AUDITORIA_GITHUB/README.md\`, \`AUDITORIA_GITHUB/INDICE.json\`, Issue #20 e Issue #18 (benchmark Qt). O registro no GitHub ate aqui e codigo/documentacao, nao uma prova de envio dos JSON reais.
+- Comandos Windows seguros, a partir de \`C:\ProjetoAlencarLaser\` e apos \`git status --short\`: \`git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030\`; \`powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\TESTAR_CENTRAL_AUDITORIA_19_9.ps1"\`; apos PASS, \`powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\REGISTRAR_AUDITORIA_GITHUB_19_9.ps1"\`. Publicacao opcional somente apos revisao usando \`-Publicar\`.
+
+
+## 05/11/2026 — Central de Auditoria: sessoes de interacao (Issue #20)
+- Verificado no GitHub: primeira publicacao de 04/11/2026 gravou AUDITORIA_GITHUB/INDICE.json com records_count=2 (cache A/B e zoom); main e producao preservadas.
+- Criado SCRIPTS/GERAR_SESSAO_INTERACAO_19_9.ps1: registra localmente os estados manuais PASS/FAIL/NOT_TESTED de selecao, arraste, zoom/pan, Tesoura e undo/redo. O status agregado sempre e MANUAL_REVIEW_PENDING; nao e teste automatico do editor.
+- O script MEDIR_MEMORIA_WINDOWS_19_9.ps1 (ja existente) fornece CSV passivo de RAM/CPU. O novo gerador pode importar o CSV e registrar amostras, RSS P95/max e CPU P95. PID, caminho, nome do projeto e CSV bruto nao sao exportados.
+- SCRIPTS/REGISTRAR_AUDITORIA_GITHUB_19_9.ps1 reconhece tipo interaction_session, filtra metadados permitidos, incorpora no indice e permite publicacao apenas mediante -Publicar explicito. SHA do projeto e opcional; somente prefixo segue para o GitHub.
+- Testes sinteticos: TESTAR_CENTRAL_AUDITORIA_19_9.ps1 ampliado e TESTAR_SESSAO_INTERACAO_19_9.ps1 criado. Workflow .github/workflows/central-auditoria-19-9.yml ampliado para ambos.
+- ESTADO: codigo publicado em branch experimental fix/curvas-tesoura-preflight-19-8-20261030. Os runs recentes da Central de Auditoria no GitHub Actions aparecem failure; logs ainda nao foram acessiveis na consulta. Nenhum PASS Windows do fluxo novo foi confirmado. NAO homologar.
+- Proximos passos: git status --short; git pull --ff-only; executar os dois autotestes offline no PowerShell 5.1; somente depois registrar gestos reais com laser desconectado, preparar relatórios filtrados SEM publicar, inspecionar, e optar por -Publicar.
+- Continuidade: AUDITORIA_GITHUB/README.md, AUDITORIA_GITHUB/INDICE.json, Issue #20 e Issue #18. Producao, instalador, Wi-Fi e GRBL intocados.
+
+
+## 05/11/2026 — Dois autotestes de auditoria PASS local no Windows
+- Captura do operador apos git pull --ff-only: TESTAR_CENTRAL_AUDITORIA_19_9.ps1 PASS para dois esquemas, campos privados rejeitados, indice, validacao negativa e sem transmissao.
+- TESTAR_SESSAO_INTERACAO_19_9.ps1 PASS para geracao offline, CSV de memoria sintetico, SHA, privacidade, status de homologacao pendente. Fixture: 2 casos, 1 FAIL proposital, 3 amostras; NAO SAO TESTES REAIS do editor.
+- Registros da captura foram criados em repositorio temporario; NAO publicar o teste sintetico como sessao real. Issue #20 atualizada.
+- Proxima verificacao: abrir editor experimental com script ABRIR_19_9_WINDOWS.ps1 e laser desconectado; monitorar RAM usando MEDIR_MEMORIA_WINDOWS_19_9.ps1 em outro terminal; testar fisicamente selecao, arraste, zoom/pan, Tesoura, undo/redo numa copia e registrar estados manuais via GERAR_SESSAO_INTERACAO_19_9.ps1. Depois preparar relatorio filtrado SEM -Publicar e revisar.
+- A homologacao do editor e o workflow de CI seguem pendentes. Continuar preservando main/APLICATIVO/instalador e emissao fisica.
+
+
+## 05/11/2026 — Otimizacao experimental do overlay de arraste (opt-in)
+- Diagnostico real TESTE_19.8 do operador: 195 eventos, selecoes/arrastes ~558-575 objetos, paint P95=208.7439 ms, MAX=663.3852 ms, viewportPaintBBox P95=1, inputToPaint P95=58.2393 ms. Causa isolada ainda NAO COMPROVADA; correlacao com full viewport update no mouseMove(shapeDragging_) motivou o experimento.
+- Em DESENVOLVIMENTO/FONTE/qt/qt6_test6.cpp, implementada invalidacao local apenas do overlay da moldura/alcas antes/depois do movimento usando QRegion. FLAG EXPLICITA `ALENCAR_LOCAL_DRAG_OVERLAY_19_9=1`; comportamento legacy segue como DEFAULT. Qt invalida os items movidos sozinho. Ha fallback full viewport se pontos nao finitos/limites invalidos. Nao altera geometria canonica, Undo/Redo, arquivo .alaser, emissao ou maquina.
+- Novos contadores de diagnostico: drag_overlay_local_experiment_19_9, drag_overlay_local_requests_19_9, drag_overlay_full_fallbacks_19_9. Teste Qt --grouped-drag-19-9-test estendido para verificar flag e contadores junto com integridade/Undo/Redo.
+- SCRIPTS/ABRIR_19_9_WINDOWS.ps1 aceita `-TestarRepinturaLocal` (variavel de processo restaurada ao finalizar), SCRIPTS/COMPARAR_DRAG_OVERLAY_19_9.ps1 compila build Qt experimental e executa A/B sintetico de 40 objetos OFF/ON gerando JSON local. Nenhum envio automatico ao GitHub.
+- Especificacao e passos: DESENVOLVIMENTO/ESPECIFICACOES/EXPERIMENTO_DRAG_OVERLAY_19_9_20261105.md. PROXIMO GATE: executar no Windows com laser desconectado, depois duas sessoes reais com mesma copia (OFF/ON), zoom/selecoes/Tesoura/undo, medir P95/artefatos. CI da branch ainda apresenta failure sem causa verificada; NAO afirmar PASS, nem homologar.
+- Branch fix/curvas-tesoura-preflight-19-8-20261030 apenas; main, APLICATIVO, instalador, Wi-Fi/GRBL e laser fisico preservados. Reversao por flag: iniciar sem `-TestarRepinturaLocal`.
+
+
+## 05/11/2026 — Linker Permission denied no A/B de arraste: build isolado
+- Captura do Windows: compilacao do Qt terminou ate link, mas `ld.exe` falhou em `cannot open output file alencar_test7_qt6.exe: Permission denied` durante [2/2] Linking. Warnings anteriores (`-Wrange-loop-construct`, `misleading-indentation`) nao sao a causa. Provavel bloqueio por exe aberto, mas causa/PID nao confirmados; teste A/B nao executado.
+- Hotfix commit 22b92d5 no SCRIPTS/COMPARAR_DRAG_OVERLAY_19_9.ps1: agora usa DESENVOLVIMENTO/FONTE/build_WINDOWS_DRAG_AB_19_9, isolado do build_WINDOWS_GIT_19_8/Alencar Laser aberto. Nao mata processos; verifica se a propria copia de teste esta em uso, e -SemCompilar evita exe mais antigo que a fonte.
+- Docs atualizadas em DESENVOLVIMENTO/ESPECIFICACOES/EXPERIMENTO_DRAG_OVERLAY_19_9_20261105.md. Operador deve fazer `git pull --ff-only` e repetir `powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\COMPARAR_DRAG_OVERLAY_19_9.ps1` sem -SemCompilar, laser desconectado. Resultado nao homologado ate PASS do A/B real.
+
+
+## 05/11/2026 — PASS A/B Qt de arraste localizado no Windows (40 objetos)
+- Captura do Windows apos build isolado confirmou `[3/3] Linking CXX executable alencar_test7_qt6.exe` sem Permission denied e `PASS: Qt baseline e opt-in, 40 objetos, geometria, Undo/Redo, sem hardware.` pelo COMPARAR_DRAG_OVERLAY_19_9.ps1.
+- Relatorio local (nao publicado): RELATORIOS/AUDITORIAS/GITHUB_19_8/DRAG_OVERLAY_19_9/COMPARACAO_DRAG_OVERLAY_19_9.json. Warnings de C++/Qt nao foram falhas de compilacao.
+- Issue #18 atualizada com essa evidencia; o PASS e **sintetico** de integridade, nao comprovacao de ganho real P95 nem fidelidade da GUI em ~575 objetos. Continua PENDENTE zoom/pan real, rastros de moldura, P95 mouse e CPU.
+- Proximo gate: abrir o mesmo projeto copiado em duas sessoes independentes: launcher ABRIR_19_9_WINDOWS.ps1 normal (OFF) e depois com -TestarRepinturaLocal (ON), laser desconectado; repetir os mesmos gestos/zoom e exportar diagnosticos individuais. Validar paint P95/P99, input_to_paint P95, viewportPaintBBox P95, contadores de overlay, undo/redo e qualidade visual; manter flag desligada por padrao.
+
+
+## 05/11/2026 — Correção do protocolo A/B manual: mesmo executável
+- O A/B sintetico OFF/ON compilou e passou (40 objetos, geometria, Undo/Redo) no build isolado build_WINDOWS_DRAG_AB_19_9, sem enviar comandos para laser. Arquivo JSON permanece local.
+- Detectado risco: ABRIR_19_9_WINDOWS.ps1 antigo apontava para build_WINDOWS_GIT_19_8, diferente do exe A/B recém-compilado. Commit a3d28f8 adicionou -UsarBuildDragAB e exige essa flag quando -TestarRepinturaLocal. Mesma compilacao deve ser usada no OFF e no ON.
+- Comandos corretos apos git pull: `powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -UsarBuildDragAB` (OFF); fechar; `powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ABRIR_19_9_WINDOWS.ps1" -UsarBuildDragAB -TestarRepinturaLocal` (ON). Testar copia do mesmo projeto, laser desconectado, exportar diagnósticos separadamente e comparar paint/input P95, repintura, RSS e artefatos.
+- Gate de GUI real ainda pendente; nao divulgar ganho P95 nao medido. Documentacao DESENVOLVIMENTO/ESPECIFICACOES/EXPERIMENTO_DRAG_OVERLAY_19_9_20261105.md revisada.
+
+
+## 05/11/2026 — Launcher A/B: relatorios OFF/ON isolados
+- Captura do operador: executou ABRIR_19_9_WINDOWS.ps1 -UsarBuildDragAB -TestarRepinturaLocal, runtime/flag reconhecidos e exibiu Abrindo editor experimental, mas o prompt PowerShell retornou. O binario Qt modo --interactive usa app.exec(); retorno do prompt significa processo terminou, nao prova qualidade visual, duracao nem gestos.
+- Identificado risco de sobrescrita: ambos os modos passavam RELATORIOS/AUDITORIAS/GITHUB_19_8/sessao para o executavel; codigo Qt escreve SESSAO_INTERATIVA_TESTE_6.json nessa pasta ao sair.
+- Hotfix commit 1cb9da3 no SCRIPTS/ABRIR_19_9_WINDOWS.ps1: cria diretorio unico para modo OFF/ON com data/hora e sufixo, imprime duracao/codigo de saida e caminho de telemetria gerada. Nada publicado automaticamente; arquivos continuam em RELATORIOS ignorada pelo Git.
+- Proximo gate: git pull --ff-only; executar OFF e depois ON no mesmo executavel A/B isolado (fechando primeiro), fazer mesmos gestos/copia de projeto, confirmar caminhos JSON distintos, comparar medidas e observar artefatos. Ainda nao homologar performance real.
+
+
+## 05/11/2026 — OFF/ON real concluídos e comparador observacional
+- Capturas: editor Qt candidato abriu; modo OFF 98.9 s, codigo 0, JSON salvo em pasta DRAG_AB_19_9_OFF_*; modo ON 69.1 s, codigo 0, JSON salvo em DRAG_AB_19_9_ON_*. Mesmo executavel build_WINDOWS_DRAG_AB_19_9. Maquina declarada desconectada nas capturas.
+- Foto do editor mostra selecao de 575 contornos, 13415 nos, mas zoom/enquadramento diferentes. NAO inferir ganho por duracao da sessao (uso e nao performance).
+- Verificacao do codigo Qt: telemetria automatica SESSAO_INTERATIVA_TESTE_6.json inclui paint_count, paint_p95_ms, input_to_paint_samples/p95, memoria RSS, Qt/plataforma/DPR; NAO inclui paint P99, viewport bbox fraction, contadores de overlay nem resumo de gestos.
+- Criado SCRIPTS/COMPARAR_SESSOES_GUI_DRAG_REAL_19_9.ps1 (commits 0f03767 e 709f05d) para localizar automaticamente os ultimos OFF/ON, conferir ambientes, comparar P95 de pintura e entrada ate pintura, amostras e RAM; alerta discrepancias e emite JSON SOMENTE local em RELATORIOS/.../DRAG_OVERLAY_19_9/. Sempre status OBSERVATIONAL_NOT_HOMOLOGATED.
+- Proximo comando no Windows: git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030; powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_SESSOES_GUI_DRAG_REAL_19_9.ps1". Conferir saida antes de qualquer conclusao. Nenhum novo JSON foi publicado no GitHub, apenas codigo/docs. Main, instalador e hardware preservados.
+
+
+## 05/11/2026 — Comparação real GUI OFF/ON: gate inconclusivo
+- Captura de PowerShell COMPARAR_SESSOES_GUI_DRAG_REAL_19_9.ps1: pintura P95 OFF=176.0124 ms (390 amostras), ON=233.938 ms (139 amostras), delta ON=-32.91% no tempo (pior ON); input_to_paint P95 OFF=38.0386 ms, ON=33.6162 ms (11.63% melhor no ON); RSS final OFF=92475392 bytes e ON=88862720 bytes.
+- GATE INCONCLUSIVO: amostras 390 vs 139 (razao 0.3564), zoom e gestos nao identicos, sem P99 nem comparacao de geometria. NAO concluir otimizacao causal ou homologar. Flag ALENCAR_LOCAL_DRAG_OVERLAY_19_9 permanece OFF por padrao.
+- Commit 8105fac: comparador local inclui comparison_gate INCONCLUSIVE quando ha warnings, paint_sample_balance_ratio, controlled_gestures_confirmed=false, speedup_claim_allowed=false; codigo compilavel/execucao desse patch no Windows ainda nao verificados. O source Qt/instalador/main/hardware nao foram alterados nesta etapa.
+- Issue #18 atualizada; nenhum novo JSON completo enviado ao GitHub. Proximo teste: minimo 3 pares OFF/ON de gestos repetiveis com copia igual, viewport/zoom identicos e duracao/carga equivalentes; comparar P95/P99, input-to-paint, artefatos de moldura, Undo e Tesoura antes de decidir.
+
+
+## 06/11/2026 — Teste QT controlado 575 contornos, 3 pares A/B
+- A comparação manual anterior de 05/11 foi INCONCLUSIVA: paint P95 OFF 176,0124 ms / 390 amostras, ON 233,938 ms / 139 amostras. Sem igualdade de gestos/zoom; nao concluir causalidade.
+- Nova implementacao somente na branch fix/curvas-tesoura-preflight-19-8-20261030: DESENVOLVIMENTO/FONTE/qt/qt6_test6.cpp ganhou modo CLI `--controlled-drag-575-19-9-test` usando o CSV de fixture normalizada 575 contornos/13415 nos, viewport 1180x680, zoom 1.2, 144 movimentos QTest deterministas, medindo P50/P95/P99 paint, P95 input->paint, bbox viewport, contadores overlay, amostras; valida todos os nos e Undo/Redo apos arraste, sem maquina.
+- SCRIPTS/COMPARAR_DRAG_CONTROLADO_575_19_9.ps1 compila Qt isolado pelo teste anterior 40 objetos e faz 6 processos na ordem OFF-ON-ON-OFF-OFF-ON, cada um sobre a mesma fixture e binario; compara medianas das 3 rodadas de cada modo, bloqueia result JSON se alguma rodada falhar e classifica equilibrio de amostras. Salva somente RELATORIOS/.../DRAG_OVERLAY_19_9/CONTROLADO_575_*/RESUMO_AB_CONTROLADO_575_19_9.json. NAO envia GitHub.
+- Commits principais: 635467d (modo Qt), 7b5f90d (orquestrador), 635f050 (correcao PS5.1), 5539cee (documentacao). Antes de executar, git pull --ff-only; apos teste Windows sem laser usar `powershell -NoProfile -ExecutionPolicy Bypass -File '.\SCRIPTS\COMPARAR_DRAG_CONTROLADO_575_19_9.ps1'`. Nao usar -SemCompilar no primeiro teste.
+- ESTADO NA DATA: codigo registrado no GitHub; ainda NAO compilado, executado nem homologado pelo Windows. Proximo gate: print do terminal com 6 rodadas e resumo JSON; PASS sintetico nao comprova fidelidade visual, performance GPU real, ou corte seguro. OFF permanece DEFAULT, main/APLICATIVO/instalador/laser preservados.
+
+
+## 06/11/2026 — Resultado A/B controlado 575: regressao ON, bloqueio
+- Captura do PowerShell (6 rodadas OFF-ON-ON-OFF-OFF-ON; 575 contornos, 13415 nos, 144 movimentos; sample-balance=1,000) confirmou gate tecnico `CONTROLLED_SYNTHETIC_MEASURED_MANUAL_PENDING` sem comandos de maquina. Todos os dados brutos permanecem em RELATORIOS locais.
+- Medianas P95 paint: OFF 29,784 ms / ON 40,8599 ms => ON 37,19% mais lento. P99 paint OFF 30,546 ms / ON 44,891 ms => ON 46,96% mais lento. P95 entrada->pintura OFF 35,1264 ms / ON 47,1889 ms => ON 34,34% mais lento. Resultado vale ao teste controlado; ainda sem homologacao visual em GPU/uso real.
+- DECISAO: NAO PROMOVER repintura localizada ao modo padrao, main/instalador/produção. Flag ALENCAR_LOCAL_DRAG_OVERLAY_19_9 segue opt-in e OFF por padrao. Questao #18 atualizada no GitHub com dados.
+- Commit 46c3c2a: comparador 575 informa `performance_gate=REGRESSION_OBSERVED_DO_NOT_PROMOTE` quando P95 e P99 ambos >=10% piores e `automatic_promotion_allowed=false` sempre; adiciona bbox viewport medianas e contadores ON ao proximo relatorio. Codigo atualizado, nao rerodado no Windows.
+- Commit 20d7421 e hotfix a0643c9: novo script `SCRIPTS/ANALISAR_DRAG_CONTROLADO_575_19_9.ps1` relê o RESUMO local ja existente (sem Qt/recompilacao), mostra as seis rodadas, bbox_p95, contadores local e fallbacks, calcula bloqueio. Execute apos git pull: `powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\ANALISAR_DRAG_CONTROLADO_575_19_9.ps1"`.
+- Proxima avaliacao: observar se a área retangular da seleção cobre a viewport e se Qt/BoundingRectViewportUpdate agrega QRegion em repintura extensa; NAO atribuir causa sem valores detalhados. Se relevante, projetar fallback adaptativo com opt-in separado, passar novamente por A/B controlado e testes visuais antes de adotar.
+
+
+## 06/11/2026 — P95 regressao confirmada e tentativa de cache de frame (modo 2)
+- Captura do Windows com ANAlISAR_DRAG_CONTROLADO_575_19_9.ps1: todas 6 rodadas, 144 amostras pintura em cada; bbox P95 OFF=1,000, ON1=0,299478...; ON1 teve 432 requisicoes locais e nenhum fallback. P95 pintura 29,784 OFF vs 40,8599 ON1 (+37,19%); P99 pintura 30,546 vs 44,891 (+46,96%); input_paint P95 35,1264 vs 47,1889 (+34,34%); gate `REGRESSION_OBSERVED_DO_NOT_PROMOTE`. OFF continua padrao.
+- Revisao de fonte constatou `selectionQuadScene()` -> `selectedBounds()` -> percorrer contornos e os nos selecionados sem frame orientado em cada repaint/mouse ON1; custo plausivel mas nao provado. ON1 nao deve ser promovido, apesar da bbox menor.
+- Commit 5e15d4c no DESENVOLVIMENTO/FONTE/qt/qt6_test6.cpp implementou nova variante 2: `ALENCAR_LOCAL_DRAG_OVERLAY_19_9=2` ativa repintura QRegion, mas cacheia `selectionQuadScene()` uma vez antes de shapeDragging, atualiza pela delta da previa sem recalcular os bounds em cada movimento e limpa ao finalizar. `1` continua legado ON1, ausente OFF. Instrumentacao exporta `overlay_cached_bounds_enabled` e `drag_overlay_cached_experiment_19_9`. Nenhum controle fisico.
+- Commit 1199136 e hotfix 2907374 alteraram SCRIPTS/COMPARAR_DRAG_CONTROLADO_575_19_9.ps1 para aceitar `-ModoOtimizado 2` e validar se cache ligado apenas nas rodadas ON. Script preserva 6 rodadas OFF/ON, mesmo fixture+binario, reporte somente local. Documentacao atualizada AE73558.
+- ESTADO: arquivos publicados na branch experimental, **SEM compilacao Qt Windows nem PASS** da variante 2 neste momento. O teste anterior 40 objetos e a variante 1 nao aprovam a variante 2. Proxima acao Windows (laser desligado e editor fechado): git pull --ff-only, depois powershell -NoProfile -ExecutionPolicy Bypass -File '.\SCRIPTS\COMPARAR_DRAG_CONTROLADO_575_19_9.ps1' -ModoOtimizado 2. Conferir P95/P99, geometria/Undo/Redo e gate; QA visual pendente.
+- `main`, `APLICATIVO`, instalador, Wi-Fi, GRBL e maquina fisica nao alterados; nenhuma telemetria bruta publicada no GitHub.
+
+
+## 06/11/2026 — ON2 reprovado; ON3 guarda de densidade implementada, nao validada
+- Captura Windows: Qt recompilado e teste 40 objetos PASS; 6 rodadas 575 contornos/13415 nos e 144 movimentos por rodada em OFF/ON2, razao de amostras 1,000. Resultado REGRESSION_OBSERVED_DO_NOT_PROMOTE: P95 pintura OFF=16,4751 / ON2=30,4121 ms (+84,59% mais lento); P99 17,8071 / 32,2839 (+81,30%); P95 input-to-paint 19,8845 / 32,9958 (+65,94%). Bbox P95 OFF=1,000 ON2=0,300; 432 requests locais e 0 fallbacks. Reducao de bbox nao representou beneficio. OFF default preservado.
+- Causa detalhada ainda nao confirmada: ON2 evitou selectedBounds() por evento mas continua mais lento; Qt QRegion, clipping e dessincronia de paint sao hipoteses, nao certezas. OFF obtido em outra rodada (comparacao ON1) nao deve ser comparado diretamente ao OFF ON2.
+- Implementado na branch experimental modo 3 ALENCAR_LOCAL_DRAG_OVERLAY_19_9=3 (commit e95ca46): repintura localizada cacheada apenas para ate 127 itens; para >=128 itens usa repaint legado como OFF. Contador drag_overlay_dense_legacy_updates_19_9 registra a protecao e novos campos nos JSONs.
+- Orquestrador COMPARAR_DRAG_CONTROLADO_575_19_9.ps1 aceita -ModoOtimizado 3, exige 0 requests locais e >=144 atualizacoes legadas por rodada ON3, e valida Undo/Redo e fixture sem maquina. Commit e21f960. Docs atualizadas 2e85d50.
+- STATUS: novo modo ON3 ainda nao compilado/rodado no Windows e nao homologado. Nao afirmar ganho de desempenho. Proximo passo sem laser: git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030; powershell -NoProfile -ExecutionPolicy Bypass -File '.\SCRIPTS\COMPARAR_DRAG_CONTROLADO_575_19_9.ps1' -ModoOtimizado 3.
+- Sem merge em main, instalador/APLICATIVO/laser intocados; issue #18 acompanha regressao e gates.
+
+
+## 06/11/2026 — ON3 passou no fallback denso, sem prova de aceleracao
+- Print Windows do comparador controlado Qt confirma 6/6 rodadas OFF/ON3 (575 contornos, 13415 nos, 144 eventos em cada, ratio de amostras 1,000); gate tecnico CONTROLLED_SYNTHETIC_MEASURED_MANUAL_PENDING; performance_gate inicial SYNTHETIC_RESULTS_MANUAL_REVIEW_REQUIRED; sem hardware ou push.
+- Medianas por modo nesta sessao: pintura P95 OFF=26,5319 ms / ON3=16,2325 ms (-38,82% no tempo), P99 OFF=28,6906 ms / ON3=19,6974 ms (-31,35% no tempo), input_to_paint P95 OFF=31,5267 ms / ON3=20,0532 ms (-36,39%). Bbox de repaint P95 OFF=1,000 ON3=1,000, pedidos locais ON3=0 e fallbacks locais=0. O teste exige >=144 dense_legacy_updates por rodada ON3.
+- INTERPRETACAO CRITICA: para 575 contornos o ON3 DEVE executar a MESMA politica de repaint total do OFF, por seguranca. As diferencas de tempo nao provam ganho causado pelo ON3 e sao compativeis com variacao entre execucoes de testes sintéticos. Nao promover ON3 como otimizacao por esses numeros; nem extrapolar para selecoes pequenas.
+- Commits 325eccb e 75205ba ajustam scripts de COMPARAR/ANALISAR o controle 575: gate especial EQUIVALENT_REPAINT_POLICY_NO_SPEEDUP_CLAIM em modo 3, campos explicitos same_repaint_policy_as_off/speedup_claim_allowed=false, verificacao de >=144 updates legados e 0 requests locais no ON3. Estes ajustes de scripts foram enviados ao GitHub, mas ainda NAO foram reexecutados no PowerShell Windows.
+- Proximo desenvolvimento deve investigar custos das fases de pintura Qt, nao insistir em QRegion denso. Manter OFF default, main/APLICATIVO/instalador/laser intactos; homologacao visual, zoom e tesoura pendentes.
+
+
+## 06/11/2026 — ON3 fallback validado e nova medicao por fases Qt
+- Captura Windows: ANALISAR_DRAG_CONTROLADO_575_19_9.ps1 atualizado executou, identificou modo 3, todas as 6 rodadas de 144 amostras, local_requests ON3=0, dense_legacy_updates=144 em cada ON3, bbox P95 OFF/ON3=1,000, classificacao correta EQUIVALENT_REPAINT_POLICY_NO_SPEEDUP_CLAIM. PASS fallback de seguranca, NENHUM ganho causal comprovado.
+- Os tempos OFF/ON3 da mesma sessao (pintura P95 26,5319/16,2325 ms, P99 28,6906/19,6974 ms) nao provam melhoria porque a politica de repaint foi a mesma no caso de 575 objetos.
+- Commit dd29d0e: Qt controlado 575 limpa backgroundMs e foregroundMs junto com paintMs e adiciona contagem + P95/P99 de cada fase, sem alterar comportamento da renderizacao ou geometria. Commit b95db50: COMPARAR_DRAG_CONTROLADO_575_19_9.ps1 exige amostragem das fases, escreve as metricas por rodada e mostra medianas de fundo e foreground.
+- ATENCAO: P95 de paint/background/foreground sao quantis diferentes e nao sao aditivos, nem permitem subtracao direta para inferir a causa das regressoes ON1/ON2. Visa localizar fases custosas antes de desenvolver otimizacao nova.
+- Documentacao do experimento atualizada em commit 4bd4971. Estado: novas metricas estao publicadas apenas na branch experimental, NAO compiladas/rodadas no Windows apos essa mudanca. Proximo gate: git pull --ff-only, rodar COMPARAR_DRAG_CONTROLADO_575_19_9.ps1 -ModoOtimizado 3 com laser desconectado e Alencar Laser fechado; observar P95 de fundo e foreground e registrar resultados sem afirmar ganho.
+- main/APLICATIVO/instalador/controle da maquina permanecem intactos; OFF padrao e homologacao de producao pendente.
+
+
+## 06/11/2026 — Qt paint breakdown: fase e residual por frame
+- Captura Windows do comparador -ModoOtimizado 3: 6 rodadas com 575 contornos/13415 nos e 144 movimentos cada, equilibrio 1.000. Medianas (ms): P95 pintura OFF=27.1715 ON3=18.3440; P99 27.6833/22.0882; fundo P95 0.3766/0.3761; foreground P95 5.7734/7.5510; input-to-paint P95 31.9594/22.1668. Bbox P95 1.000/1.000, pedidos de QRegion local ON3=0, fallbacks QRegion=0. Gate EQUIVALENT_REPAINT_POLICY_NO_SPEEDUP_CLAIM; ganhos observados NAO sao atribuiveis a ON3 no fixture denso (mesma politica do OFF).
+- Novo estudo codigo: PaintPhaseProbe199 ja mede fundo e foreground. Nenhuma subtracao de P95 entre distribuicoes independentes e valida. Commit 81a3565 instrumenta cada QGraphicsView::paintEvent para acumular tempo de fundo e foreground DENTRO do mesmo frame e calcular residual pareado (total - fundo - foreground). O residual e inclusivo de QGraphicsItems vetoriais, clipping, compositor e overhead Qt, nao custo isolado dos vetores.
+- Commit 3741394 exige, no comparador de 6 rodadas, que amostras pareadas coincidam com paint_samples e zero eventos invalidos, registra P95/P99 residual e imprime medianas. Documentacao em commit 6ce7c63. Codigo permanece EXPERIMENTAL: nao compilado nem rodado no Windows apos estas mudancas.
+- Proximo gate: git pull --ff-only, COMPARAR_DRAG_CONTROLADO_575_19_9.ps1 -ModoOtimizado 3, com editor fechado e maquina desconectada; inspecionar primeiro fundo, foreground e residual pareado, depois avaliar instrumentacao especifica para pintura de itens se residual dominar. Nao promover para producao.
+
+
+## 06/11/2026 — Residual pareado Qt medido no Windows; proximo gargalo em QGraphicsItems/Qt
+- O Windows recompilou Qt e concluiu 6 rodadas controladas OFF/ON3 (575 contornos, 13415 nós, 144 movimentos por rodada), razão de amostras=1,000 e gate EQUIVALENT_REPAINT_POLICY_NO_SPEEDUP_CLAIM, sem hardware. Relatório local CONTROLADO_575_20261106_120330_0e9c2e54/RESUMO_AB_CONTROLADO_575_19_9.json. O nome é local e não autoriza publicação de dado bruto.
+- Medianas (ms): paint P95 OFF=20,4655 ON3=18,5438; paint P99 OFF=24,05 ON3=23,2665; background P95 0,3474/0,3616; foreground P95 5,3614/4,2877; **residual inclusivo pareado P95 15,6687/14,3611**; input→paint P95 23,6377/23,3827. Bbox 1,000/1,000, requests locais ON3 0, fallback QRegion 0.
+- Medição residual por frame concluída, conforme Qt commit 81a3565 e script commit 3741394. Residual = total paintEvent - background deste frame - foreground deste frame. NÃO é custo exclusivo de contornos/vetores, pois inclui QGraphicsItems, composição, clipping, e outros custos Qt. Percentis independentes não devem ser somados/subtraídos para atribuir custo.
+- A política de pintura ON3 para 575 é idêntica ao OFF, portanto diferenças observadas dos tempos NÃO são ganho causal do modo ON3; manter speedup_claim_allowed=false, OFF como padrão e sem promoção.
+- Fonte Qt inspecionada: itens comuns são QGraphicsPathItem criados por scene_.addPath(...), incluindo contornos. Próximo plano recomendável: instrumentação específica de paint de itens usando abordagem que preserve o pipeline atual; NÃO ligar QGraphicsView::IndirectPainting para capturar drawItems, porque muda o algoritmo Qt moderno. Primeiro auditoria e teste isolado; nenhum novo código de otimização de itens foi publicado ainda.
+- Issue #18 atualizada e associada a esta medição. Main, APLICATIVO, instalador e transporte do laser preservados.
+
+
+## 06/11/2026 — Fase 20: testes vetoriais com coleta automatica opt-in
+- A pedido do operador, continuar a rotina de coleta automatica com um comando PowerShell: compila o Qt experimental, roda 6 casos sinteticos OFF/ON3, gera relatorios locais e avalia gates; sem comunicacao com laser nem alteracao de producao.
+- qt6_test6.cpp (commits 76b067e/1218d16) ganhou probe opt-in ALENCAR_VECTOR_PAINT_PROBE_20=1, com subclasse TimedContourPathItem20 somente em testes. Quando desligado, o editor mantem scene_.addPath normal. Mede somatorio de pintura de contornos por paintEvent, contagens de chamadas e residual nao-contorno inclusivo; a instrumentacao tem custo proprio e NAO comprova ganho real.
+- COMPARAR_DRAG_CONTROLADO_575_19_9.ps1 (commit ccc42e1) recebe -ColetarVetores, roda 6 processos/144 movimentos, verifica contagens e restaura ambiente. COLETAR_FASE20_VETORES_AUTO.ps1 (commit d344502) serve de entrada unica, exige relatorio PASS sintetico + equivalencia OFF/ON3, guarda JSON local em CONTROLADO_575_FASE20_* e nao faz push. Documentacao 4ef1230.
+- Proximo comando local com editor fechado e laser desconectado: git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030; powershell -NoProfile -ExecutionPolicy Bypass -File '.\SCRIPTS\COLETAR_FASE20_VETORES_AUTO.ps1'. Ainda SEM compilacao/execucao do novo instrumento no Windows. Nunca declarar PASS, melhoria de P95 ou homologacao sem os logs da maquina.
+- Modo OFF default. ON3 usa fallback de repaint completo para 575; main/APLICATIVO/instalador e emissoes de maquina preservados.
+
+
+## 06/11/2026 — Fase 20 vetorial PASS Windows; proxima leitura das chamadas de paint()
+- Captura do PowerShell: COLETAR_FASE20_VETORES_AUTO.ps1 compilou o Qt experimental, obteve PASS em 40 objetos e 6/6 rodadas OFF/ON3 (575 contornos/13415 nos, 144 movimentos cada), equilibrio de amostras=1,000, sem hardware. Gate sintetico CONTROLLED_SYNTHETIC_MEASURED_MANUAL_PENDING e performance EQUIVALENT_REPAINT_POLICY_NO_SPEEDUP_CLAIM. Telemetria bruta permanece no PC e nao foi publicada.
+- Medianas P95 em ms: pintura total OFF=18,4479 ON3=17,0858; fundo=0,3954/0,3361; foreground=4,1531/4,0123; restante inclusivo pareado=14,5981/13,0582; pintura de contornos via TimedContourPathItem20=10,6169/9,8734; restante sem contorno inclusivo=4,0409/3,4317; input->paint=22,1615/20,9132. P99 vetorial OFF=13,5177 ON3=11,091. Bbox P95=1/1, zero requests local QRegion ON3.
+- Interpretacao: a sonda instrumentada apresenta custo material de pintura vetorial, mas ainda NAO identifica gargalo de cada caminho. A sonda altera a medicao e P95 de fases diferentes nao pode ser somado nem convertido em porcentagem. ON3 e OFF usam mesma repintura nesta fixture, logo menor P95 ON3 NAO e prova de aceleracao.
+- Issue #18 registrada com dados agregados em 06/11/2026. Commit 633fe66 criou novo ANALISAR_FASE20_VETORES_AUTO.ps1: leitura local automatica (sem Qt/build/hardware, nao altera relatorios) da ultima pasta CONTROLADO_575_FASE20_*, validacao de 6 rodadas e exibicao por rodada da quantidade P95 de paint() de contornos, P95/P99 vetorial e restante. Ainda NAO foi executado no Windows.
+- Proximo comando: git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030; powershell -NoProfile -ExecutionPolicy Bypass -File '.\SCRIPTS\ANALISAR_FASE20_VETORES_AUTO.ps1'. Preservar OFF default, main, instalador, APLICATIVO e laser.
+
+
+## 06/11/2026 — Fase 20b: 575 paint calls por frame, coleta automatica de hotspots
+- Captura Windows de ANALISAR_FASE20_VETORES_AUTO.ps1: seis rodadas OFF/ON3, 144 amostras por rodada, todos os 575 contornos renderizados em cada frame no cenario de viewport completa. P95 pintura vetorial OFF=10,6169 ms ON3=9,8734 ms; restante sem contorno OFF=4,0409 ms ON3=3,4317 ms. Com a politica repaint igual em ambos, nao existe aceleracao causal demonstrada. Chamadas 575 por frame nao sao bug automaticamente: full viewport repaint exige redesenho de toda a selecao no caso de teste.
+- Fase 20b na branch experimental: commit 263c791 adiciona, apenas com ALENCAR_VECTOR_PAINT_PROBE_20=1, perfil de QGraphicsPathItem::paint por contorno acumulado em memoria com numero de nos, numero de elementos QPainterPath, chamadas, duracao somada e maximo por chamada. Exporta SOMENTE buckets de nos (1-8,9-32,33-128,129+) e top10 por custo (rank, complexidade, chamadas, media e maximo), SEM IDs, coordenadas, paths nem artes. Desligado, editor permanece com QGraphicsPathItem stock.
+- Commit 91f791b valida consistencia entre buckets, chamadas e total, registra parcela do tempo somado pelos dez contornos mais custosos e chamadas medias por frame em cada rodada. Nao confundir parcela de soma de duracoes com razao de P95 diferentes. Commit 7a4ba1e atualiza o analisador para mostrar faixas de nos e top 10, podendo ler tambem relatórios anteriores. Commit 321f928 faz o lançador COLETAR_FASE20_VETORES_AUTO.ps1 executar automaticamente o analisador apos o A/B. Nenhum push dos JSONs locais.
+- ESTADO: codigo de Fase20b escrito na branch e reconsultado, NAO compilado nem executado no Windows. O proximo comando continua o mesmo: git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030; powershell -NoProfile -ExecutionPolicy Bypass -File '.\SCRIPTS\COLETAR_FASE20_VETORES_AUTO.ps1'. O teste executa seis rodadas no build isolado, mede e sumariza. Laser desconectado, editor fechado, principal OFF, nada promovido para producao.
+- GATE apos coleta: validar 575 itens por frame, distribuicao de custo por complexidade, top10, integridade geométrica e Undo/Redo; analisar se custo esta concentrado em poucos contornos antes de decidir cache/raster ou simplificacao de paths. Nao alterar vetores ou histórIco por antecipacao.
+
+
+## 06/11/2026 — Correção compilação Fase 20b: acesso privado QtEditorLab
+
+- Windows 11 (captura e log completo do operador, 06/11/2026): após `git pull` e `COLETAR_FASE20_VETORES_AUTO.ps1`, o g++ não compilou `qt6_test6.cpp`. Erro C++: `ContourPaintProbe20 QtEditorLab::contourProbe20_` is private within this context; 7 acessos externos em `controlledDenseDrag199Test()` (reset, tamanho, iteração, comparação e ranking). Os demais avisos `-Wmisleading-indentation`, `-Wrange-loop-construct` e API Qt deprecated são avisos, NÃO a causa desse bloqueio.
+- **Nenhum teste de 575 rodou; nenhum PASS foi gerado** nesta tentativa. O lançador interrompeu adequadamente após falha da compilação; nada foi enviado ao laser e não houve homologação.
+- Commit **`da6fcbf`** corrige o problema sem tornar o membro `private` público: adiciona métodos `contourPaintStats20() const noexcept` (acesso somente leitura ao vetor de estatísticas, na classe) e `resetContourPaintStats20() noexcept`; atualiza todos os acessos externos na função sintética. Todas as ocorrências `v.contourProbe20_` foram removidas da implementação.
+- Revisão estática no GitHub concluída; **o novo commit NÃO foi recompilado/testado ainda no Windows**. Nenhuma alegação de PASS ou melhoria de desempenho. Flag vetorial somente em teste experimental, `main`, `APLICATIVO`, instalador e comunicação laser preservados.
+- Próximo passo de um só comando no PowerShell do usuário, Alencar Laser fechado e laser fisicamente desconectado:
+
+```powershell
+cd C:\ProjetoAlencarLaser
+git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao atualizar' }
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COLETAR_FASE20_VETORES_AUTO.ps1"
+```
+
+- Se falhar novamente, coletar o primeiro erro vermelho com arquivo/linha (não somente avisos), interromper a análise de performance até compilar. Se passar, analisar histogramas de nós e ranking top 10 com os relatórios locais. Não publicar dados brutos.

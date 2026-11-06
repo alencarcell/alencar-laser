@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteIcones, [switch]$SomenteHistorico, [switch]$SomenteFluidez, [switch]$SomenteImportacaoSegura, [switch]$SomenteBezierNativo, [switch]$SomenteBezierNativoUI, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -103,6 +103,127 @@ try {
         '-DCMAKE_CXX_COMPILER=C:/msys64/ucrt64/bin/g++.exe'
     Checar-Saida 'Configuracao CMake'
 
+
+
+    if ($SomenteBezierNativoUI) {
+        Write-Host 'BEZIER NATIVO GUI 19.9: compilacao isolada e teste de importacao sem operador/hardware.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 1 --target alencar_test19_9_lbrn2_native alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt do importador nativo e editor'
+        $nativo = Join-Path $build 'alencar_test19_9_lbrn2_native.exe'
+        & $nativo
+        Checar-Saida 'Teste do codec Bezier nativo'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $dest = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\native_gui_19_9'
+        New-Item -ItemType Directory -Path $dest -Force | Out-Null
+        & $app --native-import-gui-19-9-test '-' $dest
+        Checar-ResultadoQt 'Importacao nativa GUI com ZIP v5 e arquivo original intacto' (Join-Path $dest 'RESULTADO_IMPORTACAO_NATIVA_GUI_19_9.json')
+        Write-Host 'BEZIER NATIVO GUI 19.9: PASS sintetico. Arquivo real e fluidez ainda pendentes.' -ForegroundColor Green
+        return
+    }
+    if ($SomenteBezierNativo) {
+        Write-Host 'BEZIER NATIVO 19.9: parser LBRN2 offline, sem conversao 24x.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test19_9_lbrn2_native
+        Checar-Saida 'Compilacao Qt parser Bezier nativo'
+        $nativo = Join-Path $build 'alencar_test19_9_lbrn2_native.exe'
+        if (-not (Test-Path -LiteralPath $nativo -PathType Leaf)) { throw "Teste de curvas nativas ausente: $nativo" }
+        if (-not [string]::IsNullOrWhiteSpace($ArquivoLbrn2)) {
+            if (-not (Test-Path -LiteralPath $ArquivoLbrn2 -PathType Leaf)) {
+                throw "Arquivo LightBurn nao encontrado: $ArquivoLbrn2"
+            }
+            & $nativo $ArquivoLbrn2
+        } else {
+            & $nativo
+        }
+        Checar-Saida 'Regressoes da importacao nativa Bezier'
+        Write-Host 'BEZIER NATIVO 19.9: PASS offline. GUI, leitura e salvamento no editor continuam pendentes.' -ForegroundColor Green
+        return
+    }
+    if ($SomenteImportacaoSegura) {
+        Write-Host 'LBRN2 SAFE 19.9: Rx/Ry, limite antecipado e rejeicao integral.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test19_9_lbrn2_safe_import
+        Checar-Saida 'Compilacao do parser LightBurn seguro'
+        $safe = Join-Path $build 'alencar_test19_9_lbrn2_safe_import.exe'
+        if (-not (Test-Path -LiteralPath $safe -PathType Leaf)) { throw "Teste seguro ausente: $safe" }
+        if (-not [string]::IsNullOrWhiteSpace($ArquivoLbrn2)) {
+            if (-not (Test-Path -LiteralPath $ArquivoLbrn2 -PathType Leaf)) {
+                throw "Arquivo .lbrn2 nao encontrado: $ArquivoLbrn2"
+            }
+            & $safe $ArquivoLbrn2
+        } else {
+            & $safe
+        }
+        Checar-Saida 'Teste de integridade do importador LightBurn'
+        Write-Host 'LBRN2 SAFE: PASS para validacoes de leitura e recusa antecipada.' -ForegroundColor Green
+        Write-Host 'Nao significa que o arquivo real foi importado ou que o editor inteiro esta estabilizado.'
+        return
+    }
+    if ($SomenteFluidez) {
+        Write-Host 'FLUIDEZ 19.9: teste GUI de arraste agrupado e regressao do historico.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 1 --target alencar_test19_9_history_memory alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt e historico 19.9'
+        $core = Join-Path $build 'alencar_test19_9_history_memory.exe'
+        & $core
+        Checar-Saida 'Historico Undo/Redo'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $dirFluidez = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\fluidez_19_9'
+        New-Item -ItemType Directory -Path $dirFluidez -Force | Out-Null
+        & $app --grouped-drag-19-9-test '-' $dirFluidez
+        Checar-ResultadoQt 'Arraste agrupado Qt (40 objetos)' (Join-Path $dirFluidez 'RESULTADO_ARRASTE_AGRUPADO_19_9.json')
+        & $app --grouped-center-transform-19-9-test '-' $dirFluidez
+        Checar-ResultadoQt 'Transformacao central agrupada Qt (40 objetos)' (Join-Path $dirFluidez 'RESULTADO_TRANSFORMACAO_CENTRAL_19_9.json')
+        Write-Host 'FLUIDEZ 19.9: PASS funcional. Performance real de 120 mil nos ainda precisa ser medida.' -ForegroundColor Green
+        return
+    }
+    if ($SomenteHistorico) {
+        Write-Host 'HISTORICO 19.9: copia unica e Undo/Redo; teste local offline.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test19_9_history_memory
+        Checar-Saida 'Compilacao do teste de historico'
+        $exe = Join-Path $build 'alencar_test19_9_history_memory.exe'
+        if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw "Executavel do historico ausente: $exe"
+        }
+        & $exe
+        Checar-Saida 'Regressao de memoria do historico'
+        Write-Host 'HISTORICO 19.9 PASS (offline). Qt Windows e performance real ainda exigem validacao.' -ForegroundColor Green
+        return
+    }
+    if ($SomenteIcones) {
+        Write-Host 'ICONES ALENCAR 19.9: glifos reais Qt em 1x/2x, sem hardware.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6
+        Checar-Saida 'Compilacao Qt do atlas de icones'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\icones_19_9'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --icon-pack-19-9-test $fixture $destino
+        Checar-ResultadoQt 'Auditoria de glifos da prancha manuscrita' (Join-Path $destino 'RESULTADO_ICONES_19_9.json')
+        Write-Host "PRANCHA_REAL: $(Join-Path $destino 'PRANCHA_ICONES_REAIS_19_9.png')" -ForegroundColor Green
+        return
+    }
+    if ($SomenteEngrenagens) {
+        Write-Host 'ENGRENAGENS 19.9: geometria C++ e formulario Qt offline.' -ForegroundColor Cyan
+        & $cmake --build $build --parallel 2 --target alencar_test19_9_gear_offline alencar_test19_9_mechanisms_offline alencar_test7_qt6
+        Checar-Saida 'Compilacao focada do gerador'
+        $core = Join-Path $build 'alencar_test19_9_gear_offline.exe'
+        & $core
+        Checar-Saida 'Regressoes de passo, par e cremalheira nominais'
+        $mechanisms = Join-Path $build 'alencar_test19_9_mechanisms_offline.exe'
+        & $mechanisms
+        Checar-Saida 'Biblioteca de mecanismos e animacao matematica offline'
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\engrenagens'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --gear-generator-19-9-test $fixture $destino
+        Checar-ResultadoQt 'Formulario Inkscape e criacao atomica' (Join-Path $destino 'RESULTADO_ENGRENAGENS_19_9.json')
+        $iconDir = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\icones_19_9'
+        New-Item -ItemType Directory -Path $iconDir -Force | Out-Null
+        & $app --icon-pack-19-9-test $fixture $iconDir
+        Checar-ResultadoQt 'Auditoria de iconografia contra rabiscos' (Join-Path $iconDir 'RESULTADO_ICONES_19_9.json')
+        Write-Host "PRANCHA REAL: $(Join-Path $iconDir 'PRANCHA_ICONES_REAIS_19_9.png')" -ForegroundColor Cyan
+        Write-Host 'ENGRENAGENS PASS nos testes sinteticos. Mecanica, kerf e maquina NAO homologados.' -ForegroundColor Green
+        return
+    }
     if ($SomenteMarca) {
         Write-Host 'IDENTIDADE PEGASO_V1: compila Qt e testa o carregamento opcional, sem hardware.' -ForegroundColor Cyan
         Compilar-QtComDiagnostico
@@ -123,6 +244,24 @@ try {
         Checar-Saida 'Compilacao standalone de snap, Auto-Join e Bezier'
         & $testExe
         Checar-Saida 'Teste standalone de desenho'
+        $nativeSource = Join-Path $fontes 'tests\native_transform_19_8_standalone.cpp'
+        $nativeExe = Join-Path $build 'native_transform_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $nativeSource -o $nativeExe
+        Checar-Saida 'Compilacao isolada de escala e rotacao Bezier'
+        & $nativeExe
+        Checar-Saida 'Regressao Bezier nativa: escala, rotacao e Undo'
+        $diagSource = Join-Path $fontes 'tests\diagnostics_native_events_19_8_standalone.cpp'
+        $diagExe = Join-Path $build 'diagnostics_native_events_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $diagSource -o $diagExe
+        Checar-Saida 'Compilacao do coletor Bezier nativo'
+        & $diagExe
+        Checar-Saida 'Coleta opt-in de Tesoura, Undo e Redo Bezier'
+        $localSource = Join-Path $fontes 'tests\selected_local_edit_19_8_standalone.cpp'
+        $localExe = Join-Path $build 'selected_local_edit_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $localSource -o $localExe
+        Checar-Saida 'Compilacao dos nos e lados selecionados'
+        & $localExe
+        Checar-Saida 'Edicao localizada de nos/lados preserva outras formas e Undo/Redo'
         Compilar-QtComDiagnostico
         $app = Join-Path $build 'alencar_test7_qt6.exe'
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
@@ -139,6 +278,18 @@ try {
     }
     if ($SomenteSimulacao) {
         Write-Host 'PREVIA OFFLINE: teste C++20 independente + Qt com relatorio JSON.' -ForegroundColor Cyan
+        $intervalSource = Join-Path $fontes 'tests\line_interval_19_8_standalone.cpp'
+        $intervalExe = Join-Path $build 'line_interval_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $intervalSource (Join-Path $fontes 'src\boost_json_impl.cpp') -o $intervalExe
+        Checar-Saida 'Compilacao do intervalo Fill por camada'
+        & $intervalExe
+        Checar-Saida 'Regressao de Line Interval por camada e metadata'
+        $nativePreviewSource = Join-Path $fontes 'tests\preview_native_bezier_19_8_standalone.cpp'
+        $nativePreviewExe = Join-Path $build 'preview_native_bezier_19_8_standalone.exe'
+        & $gpp -std=c++20 -O2 -Wall -Wextra $nativePreviewSource (Join-Path $fontes 'src\boost_json_impl.cpp') -lminizip -lz -o $nativePreviewExe
+        Checar-Saida 'Compilacao standalone da previa Bezier'
+        & $nativePreviewExe
+        Checar-Saida 'Previa Bezier fechada em Fill, camada e compatibilidade v5'
         $bedSource = Join-Path $fontes 'tests\preview_workarea_19_8_standalone.cpp'
         $bedExe = Join-Path $build 'preview_workarea_19_8_standalone.exe'
         & $gpp -std=c++20 -O2 -Wall -Wextra -I (Join-Path $fontes 'src') $bedSource (Join-Path $fontes 'src\boost_json_impl.cpp') -lminizip -lz -o $bedExe
@@ -232,6 +383,8 @@ try {
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
         $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\interacao'
         New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --gear-generator-19-9-test $fixture $destino
+        Checar-ResultadoQt 'Gerador de engrenagens offline' (Join-Path $destino 'RESULTADO_ENGRENAGENS_19_9.json')
         & $app --layout-icons-19-8-test $fixture $destino
         Checar-ResultadoQt 'Barra compacta, alinhamento e espelhamento' (Join-Path $destino 'RESULTADO_LAYOUT_ICONES_19_8.json')
         & $app --raster-object-19-8-test $fixture $destino
@@ -295,9 +448,9 @@ try {
         # Este gate precisa incluir tanto a geometria C++ dos recortes sucessivos
         # quanto o hover real Qt; um PASS grafico isolado nao homologa a Tesoura.
         Write-Host 'TESOURA: compilando nucleo 19.7/19.8 e regressao GUI Qt, offline.' -ForegroundColor Cyan
-        & $cmake --build $build --parallel 2 --target alencar_test7_qt6 alencar_test19_7_scissors_layers alencar_test19_8_scissors_span
+        & $cmake --build $build --parallel 2 --target alencar_test7_qt6 alencar_test19_7_scissors_layers alencar_test19_8_scissors_span alencar_test19_8_native_scissors_realcut
         Checar-Saida 'Compilacao Qt e nucleos Tesoura'
-        foreach ($nome in @('alencar_test19_7_scissors_layers', 'alencar_test19_8_scissors_span')) {
+        foreach ($nome in @('alencar_test19_7_scissors_layers', 'alencar_test19_8_scissors_span', 'alencar_test19_8_native_scissors_realcut')) {
             $executavel = Join-Path $build ($nome + '.exe')
             if (-not (Test-Path -LiteralPath $executavel -PathType Leaf)) { throw "Teste da Tesoura ausente: $executavel" }
             Write-Host "TESTANDO: $nome" -ForegroundColor Cyan
@@ -320,7 +473,14 @@ try {
         'alencar_test19_6_rules',
         'alencar_test19_7_scissors_layers',
         'alencar_test19_8_scissors_span',
+        'alencar_test19_8_native_scissors_realcut',
         'alencar_test19_8_recovery_policy',
+        'alencar_test19_9_rotary_offline',
+        'alencar_test19_9_gear_offline',
+        'alencar_test19_9_mechanisms_offline',
+        'alencar_test19_9_history_memory',
+        'alencar_test19_9_lbrn2_safe_import',
+        'alencar_test19_9_lbrn2_native',
         'alencar_test_v5_codec_regression'
     )
     & $cmake --build $build --parallel 2 --target $alvos
@@ -404,6 +564,12 @@ try {
     New-Item -ItemType Directory -Path $refino -Force | Out-Null
     & $app --refine-curves-trace-19-8-test $fixture $refino
     Checar-ResultadoQt 'Curvas de texto, P&B, coleta Tesoura' (Join-Path $refino 'RESULTADO_REFINO_19_8.json')
+    $dirFluidez = Join-Path $destino 'fluidez_19_9'
+    New-Item -ItemType Directory -Path $dirFluidez -Force | Out-Null
+    & $app --grouped-drag-19-9-test '-' $dirFluidez
+    Checar-ResultadoQt 'Arraste agrupado Qt 19.9' (Join-Path $dirFluidez 'RESULTADO_ARRASTE_AGRUPADO_19_9.json')
+    & $app --grouped-center-transform-19-9-test '-' $dirFluidez
+    Checar-ResultadoQt 'Transformacao central agrupada Qt 19.9' (Join-Path $dirFluidez 'RESULTADO_TRANSFORMACAO_CENTRAL_19_9.json')
     Write-Host 'BUILD E REGRESSOES AUTOMATIZADAS PASSARAM. AVALIACAO VISUAL AINDA NECESSARIA.' -ForegroundColor Green
     if ($Abrir) {
         Write-Host 'Abrindo editor em modo de desenvolvimento; mantenha o laser desconectado.' -ForegroundColor Yellow

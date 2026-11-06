@@ -4,10 +4,12 @@
 #include "workspace_dimensions.hpp"
 #include "lightburn_reference_inspector.hpp"
 #include "lightburn_geometry_import.hpp"
+#include "lightburn_native_import_19_9.hpp"
 #include "diagnostics_collector.hpp"
 #include "persistent_session_store.hpp"
 #include "recovery_policy.hpp"
 #include "tool_glyphs.hpp"
+#include "dense_render_policy_19_9.hpp"
 #include "serial_observer_win.hpp"
 #include "zoom_precision_196.hpp"
 #include "grbl_tcp_rules_196.hpp"
@@ -21,16 +23,22 @@
 #include "branding_pegaso_19_8.hpp"
 #include "raster_project_19_8.hpp"
 #include "render_chunks.hpp"
+#include "rotary_dialog_19_9.hpp"
+#include "gear_dialog_19_9.hpp"
+#include "gear_compound_dialog_19_9.hpp"
+#include "mechanism_studio_dialog_19_9.hpp"
 #include <QApplication>
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QGraphicsPathItem>
+#include <QGraphicsItemGroup>
 #include <QGraphicsRectItem>
 #include <QGraphicsPixmapItem>
 #include <QImageReader>
 #include <QSlider>
 #include <QContextMenuEvent>
 #include <array>
+#include <tuple>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPainterPathStroker>
@@ -104,6 +112,7 @@
 #include <QDateTime>
 #include <QTemporaryDir>
 #include <QCryptographicHash>
+#include <QSet>
 #include <QFileDialog>
 #include <QSysInfo>
 #include <QLineF>
@@ -119,6 +128,7 @@
 #include <psapi.h>
 #endif
 #include <QPaintEvent>
+#include <QRegion>
 #include <map>
 #include <optional>
 #include <cmath>
@@ -296,8 +306,53 @@ protected:
  }
 };
 
+// Phase 20: opt-in contour paint probe. The normal editor continues to use
+// stock QGraphicsPathItem through QGraphicsScene::addPath.
+struct ContourPaintStats20{
+ int nodeCount=0;
+ int pathElements=0;
+ quint64 calls=0;
+ double elapsedMs=0.;
+ double maxMs=0.;
+};
+struct ContourPaintProbe20{
+ bool collect=false;
+ double currentMs=0.;
+ int currentCalls=0;
+ // Indexed only in memory; never export IDs, paths, or coordinates.
+ std::vector<ContourPaintStats20> itemStats;
+};
+class TimedContourPathItem20 final:public QGraphicsPathItem{
+ ContourPaintProbe20* probe_;
+ std::size_t itemIndex_;
+public:
+ TimedContourPathItem20(const QPainterPath& path,const QPen& pen,
+                        ContourPaintProbe20* probe,std::size_t index)
+  :QGraphicsPathItem(path),probe_(probe),itemIndex_(index){setPen(pen);}
+ void paint(QPainter* painter,const QStyleOptionGraphicsItem* option,
+            QWidget* widget=nullptr)override{
+  if(!probe_||!probe_->collect){
+   QGraphicsPathItem::paint(painter,option,widget);return;
+  }
+  QElapsedTimer timer;timer.start();
+  QGraphicsPathItem::paint(painter,option,widget);
+  const double elapsed=timer.nsecsElapsed()/1e6;
+  probe_->currentMs+=elapsed;
+  ++probe_->currentCalls;
+  if(itemIndex_<probe_->itemStats.size()){
+   auto& stats=probe_->itemStats[itemIndex_];
+   ++stats.calls;stats.elapsedMs+=elapsed;
+   stats.maxMs=std::max(stats.maxMs,elapsed);
+  }
+ }
+};
+
 class QtEditorLab final:public QGraphicsView{
+ ContourPaintProbe20 contourProbe20_;
+ const bool contourPaintProbeOptIn20_=
+   qEnvironmentVariable("ALENCAR_VECTOR_PAINT_PROBE_20")=="1";
  QGraphicsScene scene_;
+ bool fastDenseDisplay_=false; // visual mode only; canonical vector data unchanged
  WorkspaceConfig workspace_{};
  bool workspaceGuides_=false;
  bool workspaceDark_=true;
@@ -309,6 +364,7 @@ class QtEditorLab final:public QGraphicsView{
  CurveDragSession* nativeSession_=nullptr;
  bool nativeMode_=false;
  bool nativeEditHandles_=false; // Select mode moves native contours; Bézier mode edits anchors/handles.
+ bool nativeInsertArmed_=false; // Single click on selected Bezier edge adds anchor, menu-only action.
  bool lastNativeAction_=false;
  uint64_t lastEditorGenerationSeen_=0;
  bool fillPreview_=false; // Editor LightBurn mostra linhas por padrao.
@@ -324,6 +380,18 @@ class QtEditorLab final:public QGraphicsView{
  std::map<Key,QGraphicsPathItem*> nativeItems_;
  std::optional<CurveHit> nativeSelectedPart_;
  std::optional<Key> nativeStyledKey_;
+ // Diagnostics only: count QPainterPath constructions, not scene repaints.
+ // No paths, coordinates, or project data leave the local process.
+ quint64 nativeFullPathBuilds_=0,nativeSelectivePathBuilds_=0;
+ quint64 nativeSelectionLocalRepaints_=0,nativeSelectionFullRepaints_=0;
+ // Benchmark-only cache experiment. Never enabled in production/editor by default.
+ quint64 nativeDeviceCacheItems199_=0,nativeDeviceCacheEstimateBytes199_=0;
+ const bool nativeLegacyFullViewportOnSelect_=
+   qEnvironmentVariable("ALENCAR_NATIVE_LEGACY_FULL_VIEWPORT_ON_SELECT_19_9")=="1";
+ // A/B rollback: only pure-selection operations rebuild all native paths
+ // when explicitly enabled, never by default. Geometry stays canonical.
+ const bool nativeLegacySelectionRebuild_=
+   qEnvironmentVariable("ALENCAR_NATIVE_LEGACY_SELECTION_REBUILD_19_9")=="1";
  bool nativePressing_=false;
  bool middlePanning_=false;
  QPointF middlePanLast_{};
@@ -338,7 +406,32 @@ class QtEditorLab final:public QGraphicsView{
  QPointF shapeDragStart_{};
  QPointF shapePreviewDelta_{};
  std::optional<QRectF> shapePreviewBounds_;
+ // Cached at drag start in mode 2. The document's geometry remains unchanged
+ // until mouse release; only the scene-space preview delta moves this frame.
+ std::optional<std::array<QPointF,4>> dragOverlayBaseQuad199_;
  std::vector<QGraphicsPathItem*> shapePreviewItems_;
+ QGraphicsItemGroup* shapePreviewGroup_=nullptr; // transient preview only, never document geometry
+ static constexpr std::size_t kGroupedDragThreshold=32;
+ int groupedDragStarts_=0,groupedDragFrameUpdates_=0;
+ // A/B opt-in: Qt already invalidates moving scene items automatically;
+ // explicit viewport updates here are only for the selection foreground.
+ // Rollback immediately: unset ALENCAR_LOCAL_DRAG_OVERLAY_19_9.
+ // 0/default: full viewport update; 1: QRegion recomputed;
+ // 2: QRegion with cached frame; 3: cached frame only for SMALL selections.
+ // On >=128 preview items, mode 3 uses legacy updates for safety.
+ const QByteArray dragOverlayMode199_=qgetenv("ALENCAR_LOCAL_DRAG_OVERLAY_19_9");
+ const bool localDragOverlay199_=
+   dragOverlayMode199_=="1"||dragOverlayMode199_=="2"||dragOverlayMode199_=="3";
+ const bool cachedDragOverlay199_=dragOverlayMode199_=="2"||dragOverlayMode199_=="3";
+ const bool denseGuardDragOverlay199_=dragOverlayMode199_=="3";
+ static constexpr std::size_t kLocalizedOverlayMaxItems199=127;
+ quint64 dragOverlayLocalRequests199_=0,dragOverlayFullFallbacks199_=0;
+ quint64 dragOverlayDenseLegacyUpdates199_=0;
+ bool shouldUseLocalDragOverlay199()const noexcept{
+  return localDragOverlay199_&&
+    (!denseGuardDragOverlay199_||
+     shapePreviewItems_.size()<=kLocalizedOverlayMaxItems199);
+ }
  // Alcas independentes dos dados; commit unico no mouseRelease.
  bool transformDragging_=false;
  int transformHandle_=-1; // 0..7 tamanho; 8..11 rotacao; 12 move pelo centro
@@ -347,9 +440,21 @@ class QtEditorLab final:public QGraphicsView{
  double transformSx_=1.,transformSy_=1.,transformAngle_=0.;
  QPointF transformMoveDelta_{};
  QTransform selectionPreviewTransform_{};
+ // A moldura de edição não é a caixa envolvente axis-aligned. Sua orientação
+ // é transitória, vinculada à seleção e à geração da geometria (Undo seguro).
+ std::optional<std::array<QPointF,4>> orientedFrame_;
+ std::set<int> orientedFrameIds_;
+ uint64_t orientedFrameGeneration_=0;
+ std::array<QPointF,4> transformQuad_{};
+ double transformAffineA_=1.,transformAffineB_=0.,
+        transformAffineC_=0.,transformAffineD_=1.;
  std::vector<int> transformIds_;
  std::vector<QGraphicsPathItem*> transformItems_;
+ QGraphicsItemGroup* transformPreviewGroup_=nullptr; // center-handle preview only
+ int groupedTransformStarts_=0,groupedTransformFrameUpdates_=0;
  bool nativeContourPressing_=false;
+ bool nativeTransformDragging_=false;
+ Key nativeTransformKey_{};
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
  std::vector<Pt> pencilPoints_;
  bool bezierDrawing_=false,bezierPressed_=false;
@@ -496,7 +601,8 @@ class QtEditorLab final:public QGraphicsView{
    for(const auto& [id,_]:editor.state().objects)obj=std::max(obj,id+1);
    for(const auto& c:nativeSession_->committed().contours)
     obj=std::max(obj,c.key.object+1);
-   const Key key=nativeSession_->addEditablePath(std::move(points),closed,obj);
+   const Key key=nativeSession_->addEditablePath(std::move(points),closed,obj,
+      drawingLayer?drawingLayer():0);
    lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
    createNativeItems();
    ++toolCreates;
@@ -595,22 +701,67 @@ class QtEditorLab final:public QGraphicsView{
   }catch(const std::exception& ex){if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));}
  }
 
+ // RAII covers early returns from drawForeground; measurements remain local.
+ struct PaintPhaseProbe199 {
+  QElapsedTimer timer;
+  std::vector<double>& samples;
+  double* samePaintAccum=nullptr;
+  explicit PaintPhaseProbe199(std::vector<double>& target,double* sum=nullptr)
+   :samples(target),samePaintAccum(sum){timer.start();}
+  ~PaintPhaseProbe199(){
+   const double elapsed=timer.nsecsElapsed()/1e6;
+   if(samples.size()>=10000)samples.erase(samples.begin(),samples.begin()+5000);
+   samples.push_back(elapsed);
+   if(samePaintAccum)*samePaintAccum+=elapsed;
+  }
+ };
  QElapsedTimer clock_;qint64 pendingInput_=-1;
  double nativePxPerMm()const{
   auto m=viewportTransform();return std::max(1e-9,std::min(
    std::hypot(m.m11(),m.m12()),std::hypot(m.m21(),m.m22())));
  }
+ // Paint selection overlays only where the former/current native contour
+ // appears. Include Bézier control handles, which may lie outside the curve.
+ QRect nativeSelectionDirtyRect199(const std::optional<Key>& key)const{
+  if(!key)return {};
+  auto item=nativeItems_.find(*key);
+  if(item==nativeItems_.end())return {};
+  const QTransform xform=viewportTransform();
+  QRectF pixels=xform.mapRect(item->second->sceneBoundingRect());
+  if(nativeEditHandles_&&nativeSession_){
+   if(const auto* curve=findNativeCurve(nativeSession_->visible(),*key)){
+    for(const auto& n:curve->nodes){
+     for(const Pt pt:{n.anchor,n.handleIn,n.handleOut}){
+      const QPointF v=xform.map(toQt(pt));
+      pixels=pixels.united(QRectF(v,QSizeF(1,1)));
+     }
+    }
+   }
+  }
+  return pixels.toAlignedRect().adjusted(-20,-20,20,20)
+      .intersected(viewport()->rect());
+ }
  void updateNativePaths(bool all){
   if(!nativeSession_)return;
+  QElapsedTimer nativePathProfiler;nativePathProfiler.start();
   auto selectedKey=nativeSession_->selected();
   // Durante drag, apenas o item ativo recebe setPath; selecao troca estilo
   // somente do item anterior/novo, nunca dos 575 outros contornos.
   bool selectionChanged=nativeStyledKey_!=selectedKey;
+  QRect nativeSelectionDirty;
+  if(selectionChanged&&!all&&!nativeLegacyFullViewportOnSelect_){
+   nativeSelectionDirty=nativeSelectionDirtyRect199(nativeStyledKey_);
+   nativeSelectionDirty=nativeSelectionDirty.united(nativeSelectionDirtyRect199(selectedKey));
+  }
   for(const auto& c:nativeSession_->visible().contours){
    auto it=nativeItems_.find(c.key);if(it==nativeItems_.end())continue;
    const bool selected=selectedKey&&*selectedKey==c.key;
    const bool wasSelected=nativeStyledKey_&&*nativeStyledKey_==c.key;
-   if(all||selected)it->second->setPath(nativeCurvePath(c));
+   if(all||selected){
+    it->second->setPath(nativeCurvePath(c));
+    if(all)++nativeFullPathBuilds_;
+    else ++nativeSelectivePathBuilds_;
+   }
    if(all||(selectionChanged&&(selected||wasSelected))){
     QPen pen(selected?QColor(239,109,25):QColor(71,91,105));
     pen.setCosmetic(true);pen.setWidthF(selected?2.0:1.2);
@@ -619,7 +770,23 @@ class QtEditorLab final:public QGraphicsView{
    }
   }
   nativeStyledKey_=selectedKey;
-  if(all||selectionChanged)viewport()->update();
+  if(all)viewport()->update();
+  else if(selectionChanged){
+   if(nativeLegacyFullViewportOnSelect_){
+    ++nativeSelectionFullRepaints_;
+    viewport()->update();
+   }else if(!nativeSelectionDirty.isEmpty()){
+    ++nativeSelectionLocalRepaints_;
+    viewport()->update(nativeSelectionDirty);
+   }
+   // QGraphicsPathItem::setPen/setPath independently invalidates its geometry.
+   // Overlay handles need only the old/new contour rectangle, not the canvas.
+  }
+  sample(all?nativeFullRefreshMs:nativeSelectiveRefreshMs,
+         nativePathProfiler.nsecsElapsed()/1e6);
+ }
+ void updateNativeSelection199(){
+  updateNativePaths(nativeLegacySelectionRebuild_);
  }
 
  std::vector<int> expandedSelection()const{
@@ -657,55 +824,114 @@ class QtEditorLab final:public QGraphicsView{
    return shapePreviewBounds_->translated(shapePreviewDelta_);
   if(transformDragging_)
    return selectionPreviewTransform_.mapRect(transformBounds_);
+  if(nativeMode_&&!nativeEditHandles_&&nativeSession_&&nativeSession_->selected()){
+   const auto it=nativeItems_.find(*nativeSession_->selected());
+   if(it!=nativeItems_.end())return it->second->path().boundingRect();
+  }
   return selectedBounds();
  }
+ static std::array<QPointF,4> quadFromRect(const QRectF& r){
+  return {r.topLeft(),r.topRight(),r.bottomRight(),r.bottomLeft()};
+ }
+ bool orientedFrameValid()const{
+  return !nativeMode_&&orientedFrame_&&orientedFrameIds_==selected&&
+         orientedFrameGeneration_==editor.geometryGeneration;
+ }
+ std::optional<std::array<QPointF,4>> selectionQuadScene()const{
+  if(transformDragging_){
+   auto points=transformQuad_;
+   for(auto& p:points)p=selectionPreviewTransform_.map(p);
+   return points;
+  }
+  if(nativeMode_&&!nativeEditHandles_&&nativeSession_&&nativeSession_->selected()){
+   const auto it=nativeItems_.find(*nativeSession_->selected());
+   if(it!=nativeItems_.end())return quadFromRect(it->second->path().boundingRect());
+  }
+  if(shapeDragging_&&cachedDragOverlay199_&&dragOverlayBaseQuad199_&&
+     shouldUseLocalDragOverlay199()){
+   auto cached=*dragOverlayBaseQuad199_;
+   for(auto& p:cached)p+=shapePreviewDelta_;
+   return cached;
+  }
+  if(selected.empty()||tool!=Tool::Select)return {};
+  std::optional<std::array<QPointF,4>> points;
+  if(orientedFrameValid())points=*orientedFrame_;
+  else if(const auto bounds=selectedBounds())points=quadFromRect(*bounds);
+  if(points&&shapeDragging_)for(auto& p:*points)p+=shapePreviewDelta_;
+  return points;
+ }
+ static QPointF middle(QPointF a,QPointF b){return (a+b)/2.;}
+ std::array<QPointF,13> handlesForQuad(const std::array<QPointF,4>& q)const{
+  const auto map=viewportTransform();
+  std::array<QPointF,4> c;
+  for(int i=0;i<4;++i)c[size_t(i)]=map.map(q[size_t(i)]);
+  const QPointF center=middle(c[0],c[2]);
+  std::array<QPointF,13> handles{
+   c[0],middle(c[0],c[1]),c[1],middle(c[1],c[2]),
+   c[2],middle(c[2],c[3]),c[3],middle(c[3],c[0]),
+   c[0],c[1],c[2],c[3],center
+  };
+  for(int i=0;i<4;++i){
+   const QPointF v=c[size_t(i)]-center;
+   const double len=std::max(1e-8,std::hypot(v.x(),v.y()));
+   handles[size_t(8+i)]=c[size_t(i)]+v*(24./len);
+  }
+  return handles;
+ }
  std::array<QPointF,13> selectionHandles(const QRectF& bounds)const{
-  const QPointF tl=viewportTransform().map(bounds.topLeft());
-  const QPointF br=viewportTransform().map(bounds.bottomRight());
-  const double x0=tl.x(),x1=br.x(),y0=tl.y(),y1=br.y();
-  const double cx=(x0+x1)*.5,cy=(y0+y1)*.5;
-  return {QPointF(x0,y0),QPointF(cx,y0),QPointF(x1,y0),
-   QPointF(x1,cy),QPointF(x1,y1),QPointF(cx,y1),
-   QPointF(x0,y1),QPointF(x0,cy),
-   QPointF(x0-17,y0-17),QPointF(x1+17,y0-17),
-   QPointF(x1+17,y1+17),QPointF(x0-17,y1+17),
-   QPointF(cx,cy)};
+  return handlesForQuad(quadFromRect(bounds));
  }
  void paintSelectionHandles(QPainter* p)const{
-  if(tool!=Tool::Select||selected.empty()||nativeMode_)return;
-  auto bounds=selectionDisplayBounds();if(!bounds)return;
-  const QPointF topLeft=viewportTransform().map(bounds->topLeft());
-  const QPointF bottomRight=viewportTransform().map(bounds->bottomRight());
-  const QRectF pixel(topLeft,bottomRight);
-  const auto handles=selectionHandles(*bounds);
-  p->save();p->resetTransform();p->setBrush(Qt::NoBrush);
-  QPen edge(QColor(238,154,60),1,Qt::DashLine);edge.setCosmetic(true);p->setPen(edge);
-  p->drawRect(pixel.normalized());
+  if(tool!=Tool::Select||nativeEditHandles_)return;
+  auto quad=selectionQuadScene();if(!quad)return;
+  const auto handles=handlesForQuad(*quad);
+  QPolygonF outline;
+  for(const auto& point:*quad)outline<<viewportTransform().map(point);
+  p->save();p->resetTransform();p->setRenderHint(QPainter::Antialiasing,true);
+  p->setBrush(Qt::NoBrush);
+  QPen edge(QColor(243,158,66),1.1,Qt::DashLine);
+  edge.setCosmetic(true);p->setPen(edge);p->drawPolygon(outline);
   for(int h=0;h<13;++h){
-   const QPointF point=handles[size_t(h)];
+   const QPointF at=handles[size_t(h)];
    p->setPen(QPen(QColor("#182633"),1));
-   p->setBrush(h==12?QColor("#FFAE45"):(h>=8?QColor("#49BCF4"):QColor("#F3F5F7")));
+   p->setBrush(h==12?QColor("#FFAE45"):(h>=8?QColor("#55C8F4"):QColor("#F3F5F7")));
    if(h==12){
-    p->drawRect(QRectF(point-QPointF(5.,5.),QSizeF(10.,10.)));
-    p->drawLine(point+QPointF(-3,0),point+QPointF(3,0));
-    p->drawLine(point+QPointF(0,-3),point+QPointF(0,3));
-   }else if(h>=8)p->drawEllipse(point,4.,4.);
-   else p->drawRect(QRectF(point-QPointF(4.,4.),QSizeF(8.,8.)));
+    p->drawEllipse(at,4.,4.);
+    p->drawLine(at+QPointF(-2.,0),at+QPointF(2.,0));
+   }else if(h>=8){
+    p->setBrush(Qt::NoBrush);p->setPen(QPen(QColor("#55C8F4"),1.7));
+    p->drawArc(QRectF(at.x()-6,at.y()-6,12,12),35*16,260*16);
+   }else p->drawRect(QRectF(at-QPointF(3.5,3.5),QSizeF(7,7)));
   }
   p->restore();
  }
  void cancelSelectionTransform(){
-  for(auto* item:transformItems_)item->setTransform(QTransform());
+  if(transformPreviewGroup_){
+   // Remove the temporary parent with an identity transform. Qt preserves
+   // every child scene transform during destroyItemGroup().
+   transformPreviewGroup_->setTransform(QTransform());
+   scene_.destroyItemGroup(transformPreviewGroup_);
+   transformPreviewGroup_=nullptr;
+  }else{
+   for(auto* item:transformItems_)item->setTransform(QTransform());
+  }
   transformItems_.clear();transformIds_.clear();
   transformDragging_=false;transformHandle_=-1;
+  nativeTransformDragging_=false;nativeTransformKey_={};
   transformSx_=transformSy_=1.;transformAngle_=0.;transformMoveDelta_={};
   selectionPreviewTransform_=QTransform();
+  transformAffineA_=transformAffineD_=1.;
+  transformAffineB_=transformAffineC_=0.;
   viewport()->update();
  }
  bool beginSelectionTransform(QPointF position){
-  if(tool!=Tool::Select||nativeMode_||selected.empty()||busy())return false;
-  const auto bounds=selectedBounds();if(!bounds)return false;
-  const auto handles=selectionHandles(*bounds);
+  if(tool!=Tool::Select||busy()||nativeEditHandles_)return false;
+  const bool native=nativeMode_&&nativeSession_&&nativeSession_->selected();
+  if(!native&&(nativeMode_||selected.empty()))return false;
+  const auto bounds=selectionDisplayBounds();if(!bounds)return false;
+  const auto quad=selectionQuadScene();
+  if(!quad)return false;
+  const auto handles=handlesForQuad(*quad);
   int h=-1;double distance=11.;
   // Preferir o ponto central quando a selecao e grande suficiente.
   if(QLineF(position,handles[12]).length()<=7.){h=12;distance=7.;}
@@ -714,6 +940,13 @@ class QtEditorLab final:public QGraphicsView{
    if(d<distance){h=i;distance=d;}
   }
   if(h<0)return false;
+  if(native){
+   nativeTransformKey_=*nativeSession_->selected();
+   const auto it=nativeItems_.find(nativeTransformKey_);
+   if(it==nativeItems_.end())return false;
+   nativeTransformDragging_=true;
+   transformItems_.push_back(it->second);
+  }else{
   transformIds_=expandedSelection();
   for(int id:transformIds_){
    if(!editable(editor.state(),id)){cancelSelectionTransform();return false;}
@@ -721,18 +954,36 @@ class QtEditorLab final:public QGraphicsView{
    if(found!=itemsByObject_.end())
     transformItems_.insert(transformItems_.end(),found->second.begin(),found->second.end());
   }
+  }
   if(transformItems_.empty()){cancelSelectionTransform();return false;}
   transformDragging_=true;transformHandle_=h;transformBounds_=*bounds;
-  transformAnchor_=h>=8?bounds->center():QPointF{};
+  transformQuad_=*quad;
+  transformAnchor_=h>=8?middle((*quad)[0],(*quad)[2]):QPointF{};
   transformSx_=transformSy_=1.;transformAngle_=0.;
+  // Real operator sessions commonly move multi-selection using center handle.
+  // Keep native Bezier and rotate/scale on the established path; only
+  // translation (h=12) uses one temporary Qt parent for >=32 items.
+  if(!native&&h==12&&transformItems_.size()>=kGroupedDragThreshold&&
+     !qEnvironmentVariableIsSet("ALENCAR_DISABLE_GROUPED_DRAG")){
+   QList<QGraphicsItem*> members;
+   members.reserve(qsizetype(transformItems_.size()));
+   for(auto* item:transformItems_)members.append(item);
+   transformPreviewGroup_=scene_.createItemGroup(members);
+   transformPreviewGroup_->setZValue(9);
+   transformPreviewGroup_->setAcceptedMouseButtons(Qt::NoButton);
+   transformPreviewGroup_->setFlag(QGraphicsItem::ItemIsSelectable,false);
+   ++groupedTransformStarts_;
+  }
   return true;
  }
  void updateSelectionTransform(QPointF pointer,Qt::KeyboardModifiers mods){
   if(!transformDragging_)return;
+  QElapsedTimer transformProfiler;transformProfiler.start();
   QTransform t;
   if(transformHandle_==12){
-   const QPointF origin=viewportTransform().map(transformBounds_.center());
-   QPointF delta=mapToScene(pointer.toPoint())-transformBounds_.center();
+   const QPointF pivot=middle(transformQuad_[0],transformQuad_[2]);
+   const QPointF origin=viewportTransform().map(pivot);
+   QPointF delta=mapToScene(pointer.toPoint())-pivot;
    // LightBurn: Shift limita deslocamento em 0/45/90 graus.
    if(mods.testFlag(Qt::ShiftModifier)){
     const double angle=std::atan2(delta.y(),delta.x());
@@ -743,8 +994,8 @@ class QtEditorLab final:public QGraphicsView{
    transformMoveDelta_=delta;
    t.translate(delta.x(),delta.y());(void)origin;
   }else if(transformHandle_>=8){
-   const QPointF pivot=transformBounds_.center();
-   const auto handles=selectionHandles(transformBounds_);
+   const QPointF pivot=middle(transformQuad_[0],transformQuad_[2]);
+   const auto handles=handlesForQuad(transformQuad_);
    const QPointF initial=handles[size_t(transformHandle_)];
    const QPointF center=viewportTransform().map(pivot);
    const auto start=initial-center;
@@ -755,29 +1006,37 @@ class QtEditorLab final:public QGraphicsView{
     transformAngle_=std::round(transformAngle_/15.)*15.;
    t.translate(pivot.x(),pivot.y());t.rotate(transformAngle_);t.translate(-pivot.x(),-pivot.y());
   }else{
-   const double x0=transformBounds_.left(),x1=transformBounds_.right();
-   const double y0=transformBounds_.top(),y1=transformBounds_.bottom();
-   const double mx=(x0+x1)*.5,my=(y0+y1)*.5;
-   const bool center=mods.testFlag(Qt::ControlModifier);
-   const auto handles=selectionHandles(transformBounds_);
+   const auto& q=transformQuad_;
+   const auto handles=handlesForQuad(q);
    const QPointF oldPoint=mapToScene(handles[size_t(transformHandle_)].toPoint());
    const QPointF moving=mapToScene(pointer.toPoint());
+   const QPointF middleTop=middle(q[0],q[1]);
+   const QPointF middleRight=middle(q[1],q[2]);
+   const QPointF middleBottom=middle(q[2],q[3]);
+   const QPointF middleLeft=middle(q[3],q[0]);
+   const QPointF center=middle(q[0],q[2]);
    QPointF pivot;
    switch(transformHandle_){
-    case 0:pivot={x1,y1};break;case 1:pivot={mx,y1};break;
-    case 2:pivot={x0,y1};break;case 3:pivot={x0,my};break;
-    case 4:pivot={x0,y0};break;case 5:pivot={mx,y0};break;
-    case 6:pivot={x1,y0};break;default:pivot={x1,my};break;
+    case 0:pivot=q[2];break;case 1:pivot=middleBottom;break;
+    case 2:pivot=q[3];break;case 3:pivot=middleLeft;break;
+    case 4:pivot=q[0];break;case 5:pivot=middleTop;break;
+    case 6:pivot=q[1];break;default:pivot=middleRight;break;
    }
-   if(center)pivot=transformBounds_.center();
+   if(mods.testFlag(Qt::ControlModifier))pivot=center;
    transformAnchor_=pivot;
+   QPointF ux=q[1]-q[0],uy=q[3]-q[0];
+   const double lenX=std::hypot(ux.x(),ux.y()),lenY=std::hypot(uy.x(),uy.y());
+   if(lenX<1e-8||lenY<1e-8)return;
+   ux/=lenX;uy/=lenY;
+   auto dot=[](QPointF a,QPointF b){return a.x()*b.x()+a.y()*b.y();};
    const bool horizontal=transformHandle_!=1&&transformHandle_!=5;
    const bool vertical=transformHandle_!=3&&transformHandle_!=7;
    double sx=1.,sy=1.;
-   if(horizontal&&std::abs(oldPoint.x()-pivot.x())>1e-9)
-     sx=(moving.x()-pivot.x())/(oldPoint.x()-pivot.x());
-   if(vertical&&std::abs(oldPoint.y()-pivot.y())>1e-9)
-     sy=(moving.y()-pivot.y())/(oldPoint.y()-pivot.y());
+   const QPointF original=oldPoint-pivot,newPt=moving-pivot;
+   if(horizontal&&std::abs(dot(original,ux))>1e-8)
+    sx=dot(newPt,ux)/dot(original,ux);
+   if(vertical&&std::abs(dot(original,uy))>1e-8)
+    sy=dot(newPt,uy)/dot(original,uy);
    sx=std::clamp(sx,.02,100.);sy=std::clamp(sy,.02,100.);
    const bool corner=transformHandle_%2==0;
    if(corner&&!mods.testFlag(Qt::ShiftModifier)){
@@ -785,20 +1044,50 @@ class QtEditorLab final:public QGraphicsView{
     sx=uniform;sy=uniform;
    }
    transformSx_=sx;transformSy_=sy;
-   t.translate(pivot.x(),pivot.y());t.scale(sx,sy);t.translate(-pivot.x(),-pivot.y());
+   // Local axes are rotated, so scale along that basis rather than global X/Y.
+   const double a=sx*ux.x()*ux.x()+sy*uy.x()*uy.x();
+   const double b=sx*ux.x()*ux.y()+sy*uy.x()*uy.y();
+   const double c=sx*ux.y()*ux.x()+sy*uy.y()*uy.x();
+   const double d=sx*ux.y()*ux.y()+sy*uy.y()*uy.y();
+   transformAffineA_=a;transformAffineB_=b;
+   transformAffineC_=c;transformAffineD_=d;
+   t=QTransform(a,c,0.,b,d,0.,pivot.x()-a*pivot.x()-b*pivot.y(),
+                pivot.y()-c*pivot.x()-d*pivot.y(),1.);
   }
   selectionPreviewTransform_=t;
-  for(auto* item:transformItems_)item->setTransform(t);
+  if(transformPreviewGroup_){
+   transformPreviewGroup_->setTransform(t);
+   ++groupedTransformFrameUpdates_;
+  }else{
+   for(auto* item:transformItems_)item->setTransform(t);
+  }
+  sample(transformPreviewMs,transformProfiler.nsecsElapsed()/1e6);
   viewport()->update();
  }
  void finishSelectionTransform(){
   if(!transformDragging_)return;
   const int h=transformHandle_;
   const auto ids=transformIds_;
-  const QPointF pivot=h>=8?transformBounds_.center():transformAnchor_;
+  const QPointF pivot=h>=8?middle(transformQuad_[0],transformQuad_[2]):transformAnchor_;
   const double sx=transformSx_,sy=transformSy_,angle=transformAngle_;
+  const double a=transformAffineA_,b=transformAffineB_,
+               c=transformAffineC_,d=transformAffineD_;
   const QPointF move=transformMoveDelta_;
+  const bool native=nativeTransformDragging_;
+  const Key nativeKey=nativeTransformKey_;
+  const auto finishedQuad=selectionQuadScene();
   cancelSelectionTransform();
+  if(native){
+   if(!nativeSession_||!nativeSession_->selected()||*nativeSession_->selected()!=nativeKey)return;
+   const bool changed=nativeSession_->transformSelectedContour(fromQt(pivot),sx,sy,angle,fromQt(move));
+   if(changed){
+    lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
+    updateNativePaths(true);
+    if(diagnosticEvent)diagnosticEvent(h==12?"bezier_contour_moved":h>=8?"bezier_contour_rotated":"bezier_contour_scaled",1);
+    if(stateChanged)stateChanged();
+   }
+   return;
+  }
   if(h==12){
    if(QLineF(QPointF{},move).length()<1e-8)return;
    editor.moveObjects(ids,fromQt(move));
@@ -807,16 +1096,30 @@ class QtEditorLab final:public QGraphicsView{
    editor.rotateObjects(ids,fromQt(pivot),angle);
   }else{
    if(std::abs(sx-1.)<1e-5&&std::abs(sy-1.)<1e-5)return;
-   editor.scaleObjects(ids,fromQt(pivot),sx,sy);
+   editor.affineObjects(ids,fromQt(pivot),a,b,c,d);
+  }
+  if(finishedQuad){
+   orientedFrame_=*finishedQuad;
+   orientedFrameIds_=selected;
+   orientedFrameGeneration_=editor.geometryGeneration;
   }
   rebuild();
   if(diagnosticEvent)diagnosticEvent(h==12?"shapes_moved":h>=8?"selection_rotated":"selection_scaled",int(ids.size()));
   if(stateChanged)stateChanged();
  }
  void clearShapePreview(){
-  for(auto* item:shapePreviewItems_)item->setPos(0,0);
+  if(shapePreviewGroup_){
+   // Reset before ungrouping: QGraphicsScene::destroyItemGroup preserves scene
+   // coordinates. No preview translation may leak into canonical items.
+   shapePreviewGroup_->setPos(QPointF{});
+   scene_.destroyItemGroup(shapePreviewGroup_);
+   shapePreviewGroup_=nullptr;
+  }else{
+   for(auto* item:shapePreviewItems_)item->setPos(0,0);
+  }
   shapePreviewItems_.clear();shapeDragging_=false;
   shapePreviewDelta_={};shapePreviewBounds_.reset();
+  dragOverlayBaseQuad199_.reset();
   viewport()->update();
  }
  void beginShapePreview(QPointF origin){
@@ -836,7 +1139,32 @@ class QtEditorLab final:public QGraphicsView{
   shapePreviewBounds_=selectedBounds();
   if(!shapePreviewBounds_){clearShapePreview();return;}
   shapePreviewDelta_={};
-  shapeDragStart_=origin;shapeDragging_=true;
+  shapeDragStart_=origin;
+  if(cachedDragOverlay199_&&
+     (!denseGuardDragOverlay199_||
+      shapePreviewItems_.size()<=kLocalizedOverlayMaxItems199)){
+   // Capture once while shapeDragging_ is false. This preserves existing
+   // oriented frames and avoids repeated selectedBounds() on 13k+ nodes.
+   dragOverlayBaseQuad199_=selectionQuadScene();
+   if(!dragOverlayBaseQuad199_){clearShapePreview();return;}
+  }
+  // For large selections, one temporary parent transform replaces hundreds
+  // of per-item setPos() calls on EVERY mouse move. Small selections use the
+  // established path to avoid introducing overhead.
+  // Emergency opt-out for A/B tests and Qt-driver-specific regressions.
+  if(shapePreviewItems_.size()>=kGroupedDragThreshold &&
+     !qEnvironmentVariableIsSet("ALENCAR_DISABLE_GROUPED_DRAG")){
+   QList<QGraphicsItem*> members;
+   members.reserve(qsizetype(shapePreviewItems_.size()));
+   for(auto* item:shapePreviewItems_)members.append(item);
+   shapePreviewGroup_=scene_.createItemGroup(members);
+   // Preserve visual precedence of selected paths over unselected contours.
+   shapePreviewGroup_->setZValue(9);
+   shapePreviewGroup_->setAcceptedMouseButtons(Qt::NoButton);
+   shapePreviewGroup_->setFlag(QGraphicsItem::ItemIsSelectable,false);
+   ++groupedDragStarts_;
+  }
+  shapeDragging_=true;
  }
  void drawRasterOverlay(){
   rasterOverlay_=nullptr;rasterFrame_=nullptr;rasterHandle_=nullptr;
@@ -901,7 +1229,8 @@ class QtEditorLab final:public QGraphicsView{
   rasterDragging_=rasterResizing_=false;
   viewport()->setCursor(Qt::ArrowCursor);
   if(changed&&diagnosticEvent)diagnosticEvent(resize?"image_resized":"image_moved",1);
-  if(changed&&stateChanged)stateChanged();
+  // Even a click without movement changes which object is selected.
+  if(stateChanged)stateChanged();
  }
 public:
  // API de imagem da mesa: acessível ao diálogo LabWindow; armazenamento continua privado.
@@ -928,6 +1257,7 @@ public:
  const QImage& rasterImage()const{return rasterSource_;}
  QRectF rasterBounds()const{return rasterRect_;}
  bool hasRasterImage()const{return !rasterSource_.isNull();}
+ bool rasterSelectionActive()const{return rasterSelected_&&!rasterSource_.isNull();}
  void clearRasterImage(){
   rasterSelected_=rasterDragging_=rasterResizing_=false;
   rasterSource_=QImage();rasterRect_=QRectF();
@@ -948,7 +1278,10 @@ private:
   clearNativeItems();
   if(!nativeSession_)return;
   for(const auto& c:nativeSession_->committed().contours){
-   auto* item=scene_.addPath(nativeCurvePath(c));
+   // updateNativePaths(true) builds the canonical QPainterPath exactly once.
+   // Building it here and again below caused duplicate geometry allocation
+   // for every imported cubic contour on each complete scene creation.
+   auto* item=scene_.addPath(QPainterPath());
    item->setAcceptedMouseButtons(Qt::NoButton);
    nativeItems_[c.key]=item;
   }
@@ -959,13 +1292,14 @@ private:
   const QPointF pos=mapToScene(e->position().toPoint());Pt click=fromQt(pos);
   const double zoom=nativePxPerMm(),dpr=viewport()->devicePixelRatioF();
   const bool alt=e->modifiers().testFlag(Qt::AltModifier);
-  const bool insert=e->modifiers().testFlag(Qt::ShiftModifier);
+  const bool insert=e->modifiers().testFlag(Qt::ShiftModifier)||nativeInsertArmed_;
   // Ctrl+arraste: deslocar o contorno Bézier completo sem mexer em alças isoladas.
   if(e->modifiers().testFlag(Qt::ControlModifier)){
    const auto hits=nativeSession_->pickEdges(click,zoom,dpr,6);
    if(!hits.empty()&&nativeSession_->startContourMove(hits.front().key,click)){
     nativeSelectedPart_.reset();nativeContourPressing_=true;
-    updateNativePaths(true);if(stateChanged)stateChanged();
+    // Mouse press only changes selection; geometry is still untouched.
+    updateNativeSelection199();if(stateChanged)stateChanged();
    }
    e->accept();return;
   }
@@ -1000,13 +1334,18 @@ private:
     // Evita criar pontos quase coincidentes com as ancoras de extremidade.
     if(hit.t>=0.015&&hit.t<=0.985){
      const int64_t node=nativeSession_->insertAnchor(hit,hit.t);
+     nativeInsertArmed_=false;
+     lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
+     if(diagnosticEvent)diagnosticEvent("bezier_node_inserted",1);
      nativeSelectedPart_=CurveHit{hit.key,-1,node,CurvePart::Anchor,0,0,hit.point};
     }
    }
   }else{
    nativeSession_->select(hit.key);nativeSelectedPart_.reset();
   }
-  updateNativePaths(true);if(stateChanged)stateChanged();e->accept();
+  // At most the selected contour changed when inserting an anchor.
+  // Pure selection never rebuilds all native paths unless A/B rollback is enabled.
+  updateNativeSelection199();if(stateChanged)stateChanged();e->accept();
  }
 
 public:
@@ -1014,7 +1353,19 @@ public:
  Tool tool=Tool::Select;
  Editor editor;
  std::set<int> selected;
- std::vector<double> paintMs,inputToPaintMs,hitTestMs,styleApplyMs,wheelMs;
+ std::vector<double> paintMs,inputToPaintMs,hitTestMs,styleApplyMs,rebuildMs,transformPreviewMs,wheelMs;
+ std::vector<double> foregroundMs,backgroundMs,nativeFullRefreshMs,nativeSelectiveRefreshMs;
+ std::vector<double> viewportPaintBBoxFractions;
+ // Controlled benchmark only: the residual includes QGraphicsItems, Qt
+ // composition/clipping, and other paintEvent overhead (not items alone).
+ bool measurePairedPaintPhases199=false;
+ bool pairedPaintInProgress199=false;
+ double pairedBackgroundCurrentMs199=0,pairedForegroundCurrentMs199=0;
+ std::vector<double> pairedOtherInclusiveMs199,pairedTotalMs199;
+ quint64 pairedPhaseInvalid199=0;
+ std::vector<double> contourPaintFrameMs20_,noncontourInclusiveMs20_;
+ std::vector<double> contourPaintItemCalls20_;
+ quint64 contourProbeInvalid20_=0;
  static void sample(std::vector<double>& measurements,double duration){
   if(measurements.size()>=10000)measurements.erase(measurements.begin(),measurements.begin()+5000);
   measurements.push_back(duration);
@@ -1058,11 +1409,100 @@ public:
   return nativeSelectedPart_->nodeId;
  }
  size_t nativeItemCount()const{return nativeItems_.size();}
+ quint64 nativeFullPathBuilds()const{return nativeFullPathBuilds_;}
+ quint64 nativeSelectivePathBuilds()const{return nativeSelectivePathBuilds_;}
+ bool nativeLegacySelectionRebuild()const{return nativeLegacySelectionRebuild_;}
+ bool nativeLegacyFullViewportOnSelect()const{return nativeLegacyFullViewportOnSelect_;}
+ quint64 nativeSelectionLocalRepaints()const{return nativeSelectionLocalRepaints_;}
+ quint64 nativeSelectionFullRepaints()const{return nativeSelectionFullRepaints_;}
+ // Benchmark-only: temporarily hide scene graphics items without touching
+ // CurveDocument, layers, canvas transforms, history or original files.
+ void setNativeItemsVisibleForBenchmark199(bool visible){
+  for(auto& [key,item]:nativeItems_){(void)key;item->setVisible(visible);}
+  viewport()->update();
+ }
+ // Opt-in, read-only BENCHMARK only. Qt DeviceCoordinateCache recalculates
+ // at display resolution on zoom; it does NOT modify canonical Bezier paths.
+ // Budget is an estimate; Qt may allocate more. Keep item bounds conservative.
+ void setNativeDeviceCacheForBenchmark199(bool enabled){
+  nativeDeviceCacheItems199_=0;nativeDeviceCacheEstimateBytes199_=0;
+  for(auto& [key,item]:nativeItems_){(void)key;
+   if(item->cacheMode()!=QGraphicsItem::NoCache)
+    item->setCacheMode(QGraphicsItem::NoCache);
+  }
+  if(!enabled)return;
+  constexpr quint64 kCacheBudgetBytes=24ULL*1024*1024;
+  constexpr double kMaxItemSidePx=256.;
+  const auto tx=viewportTransform();
+  const double dpr=viewport()->devicePixelRatioF();
+  const QRectF viewportPx(viewport()->rect());
+  for(auto& [key,item]:nativeItems_){
+   if(nativeSession_&&nativeSession_->selected()==key)continue;
+   const QRectF bbox=tx.mapRect(item->sceneBoundingRect());
+   if(!bbox.intersects(viewportPx))continue;
+   const double w=std::ceil(std::abs(bbox.width())*dpr+6.0);
+   const double h=std::ceil(std::abs(bbox.height())*dpr+6.0);
+   if(!std::isfinite(w)||!std::isfinite(h)||w<1||h<1||
+      w>kMaxItemSidePx||h>kMaxItemSidePx)continue;
+   const quint64 estimated=quint64(w*h)*4;
+   if(estimated>kCacheBudgetBytes-nativeDeviceCacheEstimateBytes199_)continue;
+   item->setCacheMode(QGraphicsItem::DeviceCoordinateCache);
+   nativeDeviceCacheEstimateBytes199_+=estimated;
+   ++nativeDeviceCacheItems199_;
+  }
+  viewport()->update();
+ }
+ quint64 nativeDeviceCacheItemsForBenchmark199()const{return nativeDeviceCacheItems199_;}
+ quint64 nativeDeviceCacheBudgetEstimateForBenchmark199()const{
+  return nativeDeviceCacheEstimateBytes199_;
+ }
+ // Benchmark-only dense focus for pan/zoom. Median contour centers are more
+ // robust than using the fixed bed origin and avoid an empty zoom viewport.
+ QPointF nativeDenseFocusForBenchmark199()const{
+  std::vector<double> x,y;
+  x.reserve(nativeItems_.size());y.reserve(nativeItems_.size());
+  for(const auto& [key,item]:nativeItems_){(void)key;
+   const QRectF bounds=item->sceneBoundingRect();
+   if(bounds.isEmpty())continue;
+   const QPointF center=bounds.center();
+   if(!std::isfinite(center.x())||!std::isfinite(center.y()))continue;
+   x.push_back(center.x());y.push_back(center.y());
+  }
+  if(x.empty())throw std::runtime_error("native zoom audit: no contour centers");
+  auto median=[](std::vector<double>& values){
+   auto center=values.begin()+values.size()/2;
+   std::nth_element(values.begin(),center,values.end());
+   return *center;
+  };
+  return {median(x),median(y)};
+ }
+ int nativeViewportVisibleItemCountForBenchmark199()const{
+  const QTransform transform=viewportTransform();
+  const QRectF visibleViewport(viewport()->rect());
+  int count=0;
+  for(const auto& [key,item]:nativeItems_){(void)key;
+   if(item->isVisible()&&transform.mapRect(item->sceneBoundingRect())
+                            .intersects(visibleViewport))++count;
+  }
+  return count;
+ }
  // Interface somente-leitura para verificar desenho da moldura em teste.
  std::optional<QRectF> selectionPreviewRect()const{return selectionDisplayBounds();}
+ // Test-only and UI read access to the oriented frame, not serialized in .alaser.
+ std::optional<std::array<QPointF,4>> selectionFrameQuad()const{
+  return selectionQuadScene();
+ }
+ void rememberSelectionFrame(const std::array<QPointF,4>& corners){
+  if(selected.empty()||nativeMode_)return;
+  orientedFrame_=corners;
+  orientedFrameIds_=selected;
+  orientedFrameGeneration_=editor.geometryGeneration;
+  viewport()->update();
+ }
  QPainterPath nativeItemPath(Key key)const{return nativeItems_.at(key)->path();}
  // A sessao deve estar viva durante todo o periodo em que estiver anexada.
  void attachNative(CurveDragSession* session){
+  nativeInsertArmed_=false;
   if((nativePressing_||nativeContourPressing_)&&nativeSession_)nativeSession_->cancel();
   nativePressing_=false;nativeContourPressing_=false;nativeMode_=false;
   nativeEditHandles_=false;
@@ -1072,6 +1512,7 @@ public:
  }
  void enableNative(bool enabled){
   if(busy())return;
+  if(!enabled)nativeInsertArmed_=false;
   nativeMode_=enabled&&hasNativeDocument();
   nativeEditHandles_=nativeMode_;
   if(nativeMode_){tool=Tool::Select;viewport()->setCursor(Qt::ArrowCursor);}
@@ -1079,6 +1520,21 @@ public:
  }
  bool nativeSelectionMode()const{return nativeMode_&&!nativeEditHandles_;}
  bool nativeEditingMode()const{return nativeMode_&&nativeEditHandles_;}
+ bool armNativeInsertNode(){
+  if(busy()||!nativeSession_||!nativeSession_->selected())return false;
+  enableNative(true);
+  if(!nativeMode_)return false;
+  nativeInsertArmed_=true;
+  return true;
+ }
+ bool nativeInsertNodeArmed()const{return nativeInsertArmed_;}
+ void nativeLayerChanged(){
+  if(!nativeSession_)return;
+  lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
+  // Layer selection changes metadata, not the geometry of every path.
+  updateNativeSelection199();
+  if(stateChanged)stateChanged();
+ }
  bool nativeModeActive()const{return nativeMode_;}
  bool nativeHistoryAvailable(bool redo)const{
   return nativeSession_&&(redo?nativeSession_->redoCount():nativeSession_->undoCount())>0;
@@ -1100,23 +1556,32 @@ public:
   if(startMove){
    nativeContourPressing_=nativeSession_->startContourMove(matches.front().key,click);
   }
-  updateNativePaths(true);
+  updateNativeSelection199();
   if(stateChanged)stateChanged();
   return true;
  }
- bool cutNativeAt(Pt click){
+ // Optional object guard prevents the contextual "remove ONLY this side"
+ // command from cutting a coincident curve belonging to another object.
+ bool cutNativeAt(Pt click,std::optional<Key> onlySelected=std::nullopt){
   if(!nativeSession_||!hasNativeDocument())return false;
   const auto hits=nativeSession_->pickEdges(click,nativePxPerMm(),viewport()->devicePixelRatioF(),9);
-  if(hits.empty())return false;
+  const auto picked=std::find_if(hits.begin(),hits.end(),
+    [&](const CurveHit& hit){return !onlySelected||hit.key==*onlySelected;});
+  if(picked==hits.end())return false;
   int next=1;
   for(const auto& [id,_]:editor.state().objects)next=std::max(next,id+1);
   for(const auto& c:nativeSession_->committed().contours)next=std::max(next,c.key.object+1);
-  if(!nativeSession_->cutContourAtEdge(hits.front(),next))return false;
+  if(!nativeSession_->cutContourAtEdge(*picked,next))return false;
+  const Key cutKey=picked->key;
+  const int cutEdge=picked->edge;
+  clearScissorHover(); // Remove orange preview together with actual edge.
   // Remain in Scissors tool, do not silently switch into selection.
   nativeMode_=false;nativeEditHandles_=false;
-  createNativeItems();updateNativePaths(true);
-  lastNativeAction_=true;
+  // createNativeItems already builds and styles every remaining path once.
+  createNativeItems();
+  lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
   if(diagnosticEvent)diagnosticEvent("bezier_contour_scissor_cut",1);
+  if(scissorDetail)scissorDetail("cut_native",cutKey.object,cutEdge);
   if(stateChanged)stateChanged();
   return true;
  }
@@ -1129,6 +1594,10 @@ public:
    // Undo/Redo can CREATE or REMOVE entire native paths. Updating only
    // existing QGraphicsPathItem paths leaves orphaned ghost curves.
    createNativeItems();
+   if(diagnosticEvent)diagnosticEvent(redo?"bezier_redo":"bezier_undo",1);
+   if(toolWarning)toolWarning(QString("Bézier: ação %1. %2 curva(s) no desenho; cinza indica curva não selecionada.")
+     .arg(redo?"refeita":"desfeita")
+     .arg(nativeSession_->committed().contours.size()));
    if(stateChanged)stateChanged();
   }
  }
@@ -1155,9 +1624,26 @@ public:
   if(diagnosticEvent)diagnosticEvent("bezier_contour_deleted",1);
   if(stateChanged)stateChanged();return true;
  }
+ // Bulk removal is deliberately distinct from localized node/side editing.
+ // The real operator report contains one 575-object deletion.
+ std::function<bool(int)> approveBulkDeletion;
  bool deleteSelectedShapes(){
   if(nativeMode_||busy()||selected.empty())return false;
-  const int count=int(selected.size());
+  // deleteObjects expands grouped selections. Confirm the actual number of
+  // affected objects, even if the UI currently holds only one group member.
+  std::set<int> affected=selected,groups;
+  for(int id:selected){
+   const auto it=editor.state().objects.find(id);
+   if(it!=editor.state().objects.end()&&it->second.group>0)
+    groups.insert(it->second.group);
+  }
+  for(const auto& [id,meta]:editor.state().objects)
+   if(meta.group>0&&groups.count(meta.group))affected.insert(id);
+  const int count=int(affected.size());
+  if(count>=25&&(!approveBulkDeletion||!approveBulkDeletion(count))){
+   if(toolWarning)toolWarning("Exclusão de muitas formas cancelada; nenhum objeto removido.");
+   return false;
+  }
   editor.deleteObjects({selected.begin(),selected.end()});
   selected.clear();active_.reset();rebuild();
   if(diagnosticEvent)diagnosticEvent("shapes_deleted",count);
@@ -1169,6 +1655,10 @@ public:
  int chunkPathsUpdated()const{return chunkPathsUpdated_;}
  int fullDragPathUpdates()const{return fullDragPathUpdates_;}
  int previewChunkCount()const{return previewChunkCount_;}
+ int groupedDragStarts()const noexcept{return groupedDragStarts_;}
+ int groupedDragFrameUpdates()const noexcept{return groupedDragFrameUpdates_;}
+ int groupedTransformStarts()const noexcept{return groupedTransformStarts_;}
+ int groupedTransformFrameUpdates()const noexcept{return groupedTransformFrameUpdates_;}
  bool previewMatches(const Document& expected)const{
   if(!dragChunkKey_)return false;
   const auto* c=get(expected,*dragChunkKey_);if(!c)return false;
@@ -1206,6 +1696,8 @@ public:
  }
 protected:
  void drawBackground(QPainter* painter,const QRectF& exposed) override{
+  PaintPhaseProbe199 phase(backgroundMs,
+   pairedPaintInProgress199?&pairedBackgroundCurrentMs199:nullptr);
   QGraphicsView::drawBackground(painter,exposed);
   if(!workspaceGuides_)return;
   painter->save();
@@ -1241,8 +1733,13 @@ protected:
  }
 public:
  QtEditorLab(Document d):QGraphicsView(),editor(std::move(d)){
-  setScene(&scene_);setSceneRect(-2000,-2000,5000,5000);setRenderHints(QPainter::Antialiasing);
-  setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);setTransformationAnchor(QGraphicsView::NoAnchor);
+  setScene(&scene_);setSceneRect(-2000,-2000,5000,5000);
+  setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
+  // Preferir invalidacao localizada: selecionar centenas de contornos nao deve
+  // unir todo o canvas em uma unica regiao de repintura gigantesca.
+  setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
+  setOptimizationFlag(QGraphicsView::DontSavePainterState,false);
+  setTransformationAnchor(QGraphicsView::NoAnchor);
   // QAbstractScrollArea entrega os movimentos atraves do QWidget viewport.
   // Garantir rastreamento explicitamente no filho que recebe os eventos.
   setMouseTracking(true);viewport()->setMouseTracking(true);
@@ -1266,6 +1763,11 @@ public:
   std::vector<int> changed;
   std::set_symmetric_difference(styledObjects_.begin(),styledObjects_.end(),
     selected.begin(),selected.end(),std::back_inserter(changed));
+  // Batch selection style updates: suppress intermediate scene repaints.
+  // Each object keeps exactly the same pen and Z-level as before.
+  const bool batch=alaser::renderpolicy199::batchSelectionStyles(changed.size());
+  const auto previousMode=viewportUpdateMode();
+  if(batch)setViewportUpdateMode(QGraphicsView::NoViewportUpdate);
   for(int objectId:changed){
    auto it=itemsByObject_.find(objectId);
    if(it==itemsByObject_.end())continue;
@@ -1279,6 +1781,10 @@ public:
    }
   }
   styledObjects_=selected;
+  if(batch){
+   setViewportUpdateMode(previousMode);
+   viewport()->update();
+  }
   styleApplyMs.push_back(profiler.nsecsElapsed()/1e6);
  }
  qint64 styleSetterCalls()const{return styleSetterCalls_;}
@@ -1286,9 +1792,42 @@ public:
  size_t indexedQueries()const{return picker_.indexedQueries();}
  size_t directQueries()const{return picker_.directQueries();}
  void invalidateSelectionCache(){picker_.invalidate();}
+ bool fastDenseDisplay()const noexcept{return fastDenseDisplay_;}
+ bool vectorPaintProbeEnabled20()const noexcept{return contourPaintProbeOptIn20_;}
+ // Public, read-only view for the isolated Qt synthetic benchmark.
+ // Keep the probe private; no geometry, ids or coordinates are exposed.
+ const std::vector<ContourPaintStats20>& contourPaintStats20()const noexcept{
+  return contourProbe20_.itemStats;
+ }
+ void resetContourPaintStats20()noexcept{
+  for(auto& st:contourProbe20_.itemStats){
+   st.calls=0;st.elapsedMs=0.;st.maxMs=0.;
+  }
+ }
+ bool dragOverlayLocalExperiment199()const noexcept{return localDragOverlay199_;}
+ bool dragOverlayCachedExperiment199()const noexcept{return cachedDragOverlay199_;}
+ bool dragOverlayDenseGuard199()const noexcept{return denseGuardDragOverlay199_;}
+ quint64 dragOverlayDenseLegacyUpdates199()const noexcept{return dragOverlayDenseLegacyUpdates199_;}
+ quint64 dragOverlayLocalRequests199()const noexcept{return dragOverlayLocalRequests199_;}
+ quint64 dragOverlayFullFallbacks199()const noexcept{return dragOverlayFullFallbacks199_;}
  void rebuild(){
+  QElapsedTimer rebuildProfiler;rebuildProfiler.start();
+  // Adaptive drawing quality: no simplification of geometry or hit-testing.
+  // Recalculate only at rebuild (load/edit), not on each paint/mouse move.
+  std::size_t displayNodes=0;
+  for(const auto& contour:editor.state().doc.contours){
+   displayNodes+=contour.nodes.size();
+   if(displayNodes>alaser::renderpolicy199::kDenseNodeThreshold)break;
+  }
+  const bool fast=alaser::renderpolicy199::useFastDisplay(displayNodes);
+  if(fast!=fastDenseDisplay_){
+   fastDenseDisplay_=fast;
+   setRenderHint(QPainter::Antialiasing,!fast);
+   setRenderHint(QPainter::SmoothPixmapTransform,!fast);
+  }
   clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
   clearPolyline();clearBezierDraft();clearMarquee();scene_.clear();rasterOverlay_=nullptr;rasterFrame_=nullptr;rasterHandle_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
+  contourProbe20_.itemStats.clear();
   // Composite closed Fill paths per layer with the same parity rule used
   // by the scan planner. One separate backdrop per layer, without selection.
   if(fillPreview_){
@@ -1315,7 +1854,20 @@ public:
   for(auto& c:editor.state().doc.contours){
     const auto meta=editor.state().objects.at(c.key.object);
     const auto layer=editor.state().layers.at(meta.layer);
-    auto* item=scene_.addPath(pathOf(c),QPen(layerColor(meta.layer),0));
+    QPen vectorPen(layerColor(meta.layer),1.15,Qt::SolidLine,
+                   Qt::RoundCap,Qt::RoundJoin);
+    vectorPen.setCosmetic(true);
+    QGraphicsPathItem* item=nullptr;
+    if(contourPaintProbeOptIn20_){
+     QPainterPath path=pathOf(c);
+     const std::size_t index=contourProbe20_.itemStats.size();
+     ContourPaintStats20 stats;
+     stats.nodeCount=int(c.nodes.size());
+     stats.pathElements=path.elementCount();
+     contourProbe20_.itemStats.push_back(stats);
+     auto* tracked=new TimedContourPathItem20(path,vectorPen,&contourProbe20_,index);
+     scene_.addItem(tracked);item=tracked;
+    }else item=scene_.addPath(pathOf(c),vectorPen);
     item->setZValue(1);
     item->setVisible(layer.visible&&!hiddenTextEditingMembers_.count(c.key.object));
     objects_[c.key]=item;itemsByObject_[c.key.object].push_back(item);
@@ -1328,6 +1880,7 @@ public:
   // O índice só deve ser invalidado por uma alteração real na geometria.
   // Mudanças em camadas, agrupamentos ou destaque preservam o cache.
   fullRebuilds++;viewport()->update();
+  sample(rebuildMs,rebuildProfiler.nsecsElapsed()/1e6);
   if(stateChanged)stateChanged();
  }
  int activeObjectId()const{return active_?active_->object:0;}
@@ -1396,6 +1949,32 @@ public:
   ++scissorHoverEvents_;
   scissorLastHoverPosition_=where;
   if(tool!=Tool::Scissors||nativeMode_||busy()){clearScissorHover();return;}
+  // Preview the full mathematical Bezier edge that the click will REMOVE.
+  // Never imply that splitting a cubic is equivalent to deleting it.
+  if(nativeSession_&&hasNativeDocument()){
+   const auto hits=nativeSession_->pickEdges(fromQt(mapToScene(where)),
+       nativePxPerMm(),viewport()->devicePixelRatioF(),9);
+   if(!hits.empty()){
+    const auto& hit=hits.front();
+    const auto* curve=findNativeCurve(nativeSession_->committed(),hit.key);
+    if(curve&&hit.edge>=0&&std::size_t(hit.edge)<edgeCount(*curve)){
+     const Cubic edge=edgeAt(*curve,std::size_t(hit.edge));
+     QPainterPath preview;preview.moveTo(toQt(edge.p0));
+     if(curve->edgeKind[std::size_t(hit.edge)]==1)
+      preview.cubicTo(toQt(edge.p1),toQt(edge.p2),toQt(edge.p3));
+     else preview.lineTo(toQt(edge.p3));
+     clearScissorHover();
+     QPen pen(QColor(255,160,37),3);pen.setCosmetic(true);
+     pen.setCapStyle(Qt::RoundCap);pen.setJoinStyle(Qt::RoundJoin);
+     scissorPreview_=scene_.addPath(preview,pen);
+     scissorPreview_->setZValue(45);
+     scissorPreview_->setAcceptedMouseButtons(Qt::NoButton);
+     viewport()->setToolTip("Tesoura: aresta Bezier inteira em laranja sera removida. Ctrl+Z desfaz.");
+     viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+     return;
+    }
+   }
+  }
   if(scissorIndexVersion_!=editor.generation){
    clearScissorHover();
    const auto& state=editor.state();
@@ -1416,7 +1995,7 @@ public:
    if(next)break;
   }
   if(!next){
-   if(scissorHover_)clearScissorHover();
+   if(scissorHover_||scissorPreview_)clearScissorHover();
    viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
    viewport()->setToolTip("Tesoura ativa: sem intervalo seguro neste ponto; verifique cruzamentos.");
    return;
@@ -1441,9 +2020,12 @@ public:
   viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
  }
  void setTool(Tool t){
+  if(t!=tool&&nativeSession_&&(nativePressing_||nativeContourPressing_))
+   cancelCurrentGesture();
   if(polylineDrawing_&&t!=Tool::Line)finishPolyline(false);
   if(bezierDrawing_&&t!=Tool::DrawBezier)finishBezierDraft(false);
   if(!busy()){
+   nativeInsertArmed_=false;
    clearScissorHover();nativeMode_=false;tool=t;
    viewport()->setCursor(Qt::ArrowCursor);viewport()->update();
   }
@@ -1454,12 +2036,18 @@ public:
   const double size=std::min(std::abs(dx),std::abs(dy));
   return {first.x()+std::copysign(size,dx),first.y()+std::copysign(size,dy)};
  }
+ void prepareToolSwitch(){
+  if(polylineDrawing_)finishPolyline(false);
+  if(bezierDrawing_)finishBezierDraft(false);
+  if(busy())cancelCurrentGesture();
+ }
  void cancelCurrentGesture(){
+  nativeInsertArmed_=false;
   if(rasterDragging_||rasterResizing_){
    rasterRect_=rasterStartRect_;
    rasterDragging_=rasterResizing_=false;updateRasterVisual();
   }
-  if(nativeContourPressing_&&nativeSession_){nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(true);}
+  if(nativeContourPressing_&&nativeSession_){nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(false);}
   if(nativePressing_&&nativeSession_){nativeSession_->cancel();nativePressing_=false;updateNativePaths(false);}
   if(shapeDragging_)clearShapePreview();
   if(transformDragging_)cancelSelectionTransform();
@@ -1469,9 +2057,18 @@ public:
   if(bezierDrawing_)clearBezierDraft();
   if(marqueeActive_)clearMarquee();
  }
- void history(bool redo){if(busy())return;if(redo?editor.redo():editor.undo()){
-  active_.reset();selected.clear();rebuild();if(diagnosticEvent)diagnosticEvent(redo?"redo":"undo",1);
- }}
+ // One dispatch point for toolbar, shortcuts, viewport keys and context menu.
+ // A scissors cut can remove the LAST native contour and leave nativeMode_ off;
+ // its Undo/Redo must still target the native history, not polylines.
+ void history(bool redo){
+  if(busy())return;
+  if(shouldUseNativeHistory(redo)){nativeHistory(redo);return;}
+  if(redo?editor.redo():editor.undo()){
+   lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
+   active_.reset();selected.clear();rebuild();
+   if(diagnosticEvent)diagnosticEvent(redo?"redo":"undo",1);
+  }
+ }
  void clearSelection(){bool hadActive=active_.has_value();active_.reset();selected.clear();applySelectionStyles();if(hadActive)viewport()->update();}
  void selectAllVisible(){
   if(nativeMode_||busy())return;
@@ -1545,18 +2142,65 @@ protected:
   reportZoom();viewport()->update();sample(wheelMs,wheelTimer.nsecsElapsed()/1e6);e->accept();
  }
  void paintEvent(QPaintEvent* e)override{
-  QElapsedTimer timer;timer.start();QGraphicsView::paintEvent(e);sample(paintMs,timer.nsecsElapsed()/1e6);
+  const double viewportPixels=double(viewport()->width())*viewport()->height();
+  if(viewportPixels>0){
+   const QRect r=e->rect().intersected(viewport()->rect());
+   const double dirtyPixels=double(r.width())*r.height();
+   sample(viewportPaintBBoxFractions,dirtyPixels/viewportPixels);
+  }
+  // Paired, frame-by-frame attribution. Keep the default GUI path passive.
+  const bool paired=measurePairedPaintPhases199&&!pairedPaintInProgress199;
+  const bool vectorPaired=paired&&contourPaintProbeOptIn20_;
+  if(vectorPaired){
+   contourProbe20_.currentMs=0.;
+   contourProbe20_.currentCalls=0;
+   contourProbe20_.collect=true;
+  }
+  if(paired){
+   pairedBackgroundCurrentMs199=0;
+   pairedForegroundCurrentMs199=0;
+   pairedPaintInProgress199=true;
+  }
+  QElapsedTimer timer;timer.start();QGraphicsView::paintEvent(e);
+  const double totalMs=timer.nsecsElapsed()/1e6;
+  if(vectorPaired)contourProbe20_.collect=false;
+  if(paired){
+   pairedPaintInProgress199=false;
+   const double otherMs=totalMs-pairedBackgroundCurrentMs199-pairedForegroundCurrentMs199;
+   if(std::isfinite(otherMs)&&otherMs>=0){
+    sample(pairedOtherInclusiveMs199,otherMs);
+    sample(pairedTotalMs199,totalMs);
+    if(vectorPaired){
+     const double vectorMs=contourProbe20_.currentMs;
+     const double nonContourMs=otherMs-vectorMs;
+     if(std::isfinite(vectorMs)&&std::isfinite(nonContourMs)&&
+        vectorMs>=0&&nonContourMs>=-0.01){
+      sample(contourPaintFrameMs20_,vectorMs);
+      sample(contourPaintItemCalls20_,double(contourProbe20_.currentCalls));
+      sample(noncontourInclusiveMs20_,std::max(0.,nonContourMs));
+     }else ++contourProbeInvalid20_;
+    }
+   }else ++pairedPhaseInvalid199;
+  }
+  sample(paintMs,totalMs);
   if(pendingInput_>=0){sample(inputToPaintMs,(clock_.nsecsElapsed()-pendingInput_)/1e6);pendingInput_=-1;}
  }
  void drawForeground(QPainter* p,const QRectF& exposed)override{
+  PaintPhaseProbe199 phase(foregroundMs,
+   pairedPaintInProgress199?&pairedForegroundCurrentMs199:nullptr);
   // QGraphicsPathItem normalizes a move-only path to empty. Draw isolated
   // anchors separately while keeping canonical path equality exact.
   p->save();p->resetTransform();
+  const QTransform visibleTransform=viewportTransform();
+  const QRectF visiblePixels=QRectF(QPointF(0,0),QSizeF(viewport()->size())).adjusted(-4,-4,4,4);
   for(const auto& c:editor.state().doc.contours)if(c.nodes.size()==1){
-   const auto& layer=editor.state().layers.at(editor.state().objects.at(c.key.object).layer);
+   const QPointF pixel=visibleTransform.map(toQt(c.nodes.front().p));
+   if(!visiblePixels.contains(pixel))continue;
+   const auto& meta=editor.state().objects.at(c.key.object);
+   const auto& layer=editor.state().layers.at(meta.layer);
    if(!layer.visible)continue;
-   p->setPen(Qt::NoPen);p->setBrush(selected.count(c.key.object)?QColor(239,109,25):layerColor(editor.state().objects.at(c.key.object).layer));
-   p->drawEllipse(viewportTransform().map(toQt(c.nodes.front().p)),2,2);
+   p->setPen(Qt::NoPen);p->setBrush(selected.count(c.key.object)?QColor(239,109,25):layerColor(meta.layer));
+   p->drawEllipse(pixel,2,2);
   }
    p->restore();
    paintSelectionHandles(p);
@@ -1637,6 +2281,14 @@ std::optional<int> editableTextAt(Pt point)const{
  return best;
 }
 void mouseDoubleClickEvent(QMouseEvent* e)override{
+ // Selection tool doubles as native node editor on double click.
+ if(e->button()==Qt::LeftButton&&tool==Tool::Select){
+  const Pt at=fromQt(mapToScene(e->position().toPoint()));
+  if(selectNativeAt(at,false)){
+   enableNative(true);
+   e->accept();return;
+  }
+ }
  if(e->button()==Qt::LeftButton&&requestEditTextObject&&
     (tool==Tool::Select||tool==Tool::Text)){
   const auto target=editableTextAt(fromQt(mapToScene(e->position().toPoint())));
@@ -1645,6 +2297,16 @@ void mouseDoubleClickEvent(QMouseEvent* e)override{
    QTimer::singleShot(0,this,[this,id]{
     if(requestEditTextObject)requestEditTextObject(id);
    });
+   e->accept();return;
+  }
+ }
+ // Keep polyline node editing accessible without the old toolbar icon.
+ // Editable text takes precedence above so a letter still opens text editing.
+ if(e->button()==Qt::LeftButton&&tool==Tool::Select){
+  const auto hits=clickHits(e->position().toPoint());
+  if(!hits.empty()){
+   activate(hits.front().key);
+   setTool(Tool::Nodes);
    e->accept();return;
   }
  }
@@ -1669,13 +2331,25 @@ void mousePressEvent(QMouseEvent* e)override{
  if(e->button()!=Qt::LeftButton){QGraphicsView::mousePressEvent(e);return;}
   if(nativeMode_){
    if(tool==Tool::Select&&!nativeEditHandles_){
+    if(beginSelectionTransform(e->position())){e->accept();return;}
     // Normal Select must pick both native Bézier and regular polylines.
     if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),true)){
      e->accept();return;
     }
     nativeMode_=false;
     nativeSession_->clearSelection();
-    updateNativePaths(true);
+    updateNativeSelection199();
+   }else if(tool==Tool::Select&&nativeEditHandles_){
+    // A click away from native edges/handles returns to ordinary selection.
+    const Pt at=fromQt(mapToScene(e->position().toPoint()));
+    const auto part=nativeSession_->selected()?pickCurveNode(
+      nativeSession_->committed(),*nativeSession_->selected(),
+      at,nativePxPerMm(),viewport()->devicePixelRatioF(),7):std::nullopt;
+    const auto hits=nativeSession_->pickEdges(
+      at,nativePxPerMm(),viewport()->devicePixelRatioF(),6);
+    if(part||!hits.empty()){nativeMousePress(e);return;}
+    nativeMode_=false;nativeEditHandles_=false;
+    nativeSession_->clearSelection();updateNativeSelection199();
    }else{nativeMousePress(e);return;}
   }
    if(tool==Tool::Select){
@@ -1697,7 +2371,15 @@ void mousePressEvent(QMouseEvent* e)override{
    }
    else {Key chosen=hits.front().key;
     if(e->modifiers().testFlag(Qt::AltModifier)&&active_){auto it=std::find_if(hits.begin(),hits.end(),[&](const auto& h){return h.key==*active_;});if(it!=hits.end())chosen=hits[(size_t(it-hits.begin())+1)%hits.size()].key;}
-    if(e->modifiers().testFlag(Qt::ShiftModifier)){if(selected.count(chosen.object))selected.erase(chosen.object);else selected.insert(chosen.object);activate(chosen,false);}
+    if(e->modifiers().testFlag(Qt::ControlModifier)){
+     // Ctrl alterna: segundo clique remove; o alvo removido nao fica ativo.
+     if(selected.erase(chosen.object)){
+      active_.reset();applySelectionStyles();viewport()->update();
+     }else {selected.insert(chosen.object);activate(chosen,false);}
+    }else if(e->modifiers().testFlag(Qt::ShiftModifier)){
+     // Shift SEMPRE adiciona; nunca desmarca objeto ja selecionado.
+     selected.insert(chosen.object);activate(chosen,false);
+    }
     else {
      // Não colapsar seleção múltipla ao arrastar um dos objetos selecionados.
      if(!selected.count(chosen.object)||selected.size()<2)activate(chosen);
@@ -1873,6 +2555,33 @@ void mousePressEvent(QMouseEvent* e)override{
    if(r>0){p.moveTo(c+QPointF(r,0));for(int i=1;i<6;i++){double t=2*std::numbers::pi*i/6;p.lineTo(c+QPointF(r*std::cos(t),r*std::sin(t)));}p.closeSubpath();}
   }return p;
  }
+ // Selection outline/handles are painted in drawForeground, not QGraphicsItems.
+ // Invalidate only their OLD and NEW screen bounds; geometry stays untouched.
+ std::optional<QRect> shapeOverlayDirtyRect199(
+     const std::optional<std::array<QPointF,4>>& quad)const{
+  if(!quad)return std::nullopt;
+  const auto handles=handlesForQuad(*quad);
+  double minX=std::numeric_limits<double>::infinity();
+  double minY=std::numeric_limits<double>::infinity();
+  double maxX=-std::numeric_limits<double>::infinity();
+  double maxY=-std::numeric_limits<double>::infinity();
+  for(const auto& point:handles){
+   if(!std::isfinite(point.x())||!std::isfinite(point.y())||
+      std::abs(point.x())>1e7||std::abs(point.y())>1e7)
+    return std::nullopt;
+   minX=std::min(minX,double(point.x()));
+   minY=std::min(minY,double(point.y()));
+   maxX=std::max(maxX,double(point.x()));
+   maxY=std::max(maxY,double(point.y()));
+  }
+  // Margin covers the rotation arcs, cosmetic strokes and antialiasing.
+  constexpr double pad=12.;
+  const QRectF visible=QRectF(QPointF(minX-pad,minY-pad),
+                              QPointF(maxX+pad,maxY+pad))
+                        .intersected(QRectF(viewport()->rect()));
+  if(visible.isEmpty())return QRect{};
+  return visible.toAlignedRect().intersected(viewport()->rect());
+ }
 void mouseMoveEvent(QMouseEvent* e)override{
  if(rasterDragging_||rasterResizing_){
   updateRasterDrag(e->position());e->accept();return;
@@ -1907,10 +2616,32 @@ void mouseMoveEvent(QMouseEvent* e)override{
    if(transformDragging_){updateSelectionTransform(e->position(),e->modifiers());e->accept();return;}
    if(marqueeActive_){showMarquee(e->position());e->accept();return;}
   if(shapeDragging_){
+   const bool localForThisDrag=shouldUseLocalDragOverlay199();
+   const auto oldQuad=localForThisDrag?selectionQuadScene():
+                      std::optional<std::array<QPointF,4>>{};
    shapePreviewDelta_=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
-   for(auto* item:shapePreviewItems_)item->setPos(shapePreviewDelta_);
-   // drawForeground desenha moldura/alcas; invalida tambem essa camada.
-   viewport()->update();
+   if(shapePreviewGroup_){
+    shapePreviewGroup_->setPos(shapePreviewDelta_);
+    ++groupedDragFrameUpdates_;
+   }else{
+    for(auto* item:shapePreviewItems_)item->setPos(shapePreviewDelta_);
+   }
+   // Scene items invalidate their own geometry. In opt-in mode, update only
+   // OLD and NEW selection handles; default preserves previous full update.
+   if(localForThisDrag){
+    const auto oldRect=shapeOverlayDirtyRect199(oldQuad);
+    const auto newRect=shapeOverlayDirtyRect199(selectionQuadScene());
+    if(oldRect&&newRect){
+     const QRegion dirty=QRegion(*oldRect).united(QRegion(*newRect));
+     if(!dirty.isEmpty())viewport()->update(dirty);
+     ++dragOverlayLocalRequests199_;
+    }else{
+     viewport()->update();++dragOverlayFullFallbacks199_;
+    }
+   }else{
+    viewport()->update();
+    if(denseGuardDragOverlay199_)++dragOverlayDenseLegacyUpdates199_;
+   }
    ++frameUpdates;e->accept();return;
   }
   if(draggingNode_&&active_){
@@ -1977,11 +2708,15 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   e->accept();return;
  }
  if(e->button()!=Qt::LeftButton){QGraphicsView::mouseReleaseEvent(e);return;}
+  if(nativeTransformDragging_&&transformDragging_){
+   updateSelectionTransform(e->position(),e->modifiers());
+   finishSelectionTransform();e->accept();return;
+  }
   if(nativeMode_){
    if(nativeContourPressing_&&nativeSession_){
     // O ponto inicial está preservado no CurveDragSession.
     const bool moved=nativeSession_->commitContourMove(fromQt(mapToScene(e->position().toPoint())));
-    nativeContourPressing_=false;updateNativePaths(true);
+    nativeContourPressing_=false;updateNativePaths(false);
     if(moved){lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;}
     if(moved&&diagnosticEvent)diagnosticEvent("bezier_contour_moved",1);
     if(stateChanged)stateChanged();
@@ -2025,10 +2760,15 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   }
   if(shapeDragging_){
    const QPointF delta=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
+   const auto displacedFrame=selectionQuadScene();
    clearShapePreview();
    if(QLineF(QPointF{},delta).length()>1e-8){
     const int changed=int(selected.size());
     editor.moveObjects({selected.begin(),selected.end()},fromQt(delta));
+    if(displacedFrame){
+     orientedFrame_=*displacedFrame;orientedFrameIds_=selected;
+     orientedFrameGeneration_=editor.geometryGeneration;
+    }
     rebuild();
     if(diagnosticEvent)diagnosticEvent("shapes_moved",changed);
    }
@@ -2079,7 +2819,38 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   QGraphicsView::mouseReleaseEvent(e);
  }
  void contextMenuEvent(QContextMenuEvent* e)override{
-  if(tool==Tool::Line||nativeMode_||busy()){e->accept();return;}
+  if(tool==Tool::Line||busy()){e->accept();return;}
+  const Pt contextPoint=fromQt(mapToScene(e->pos()));
+  // Node/side editing is strictly scoped to the one already-selected native
+  // contour. Right-click never implicitly selects another overlapping shape.
+  if(nativeMode_){
+   if(nativeSession_&&nativeSession_->selected()){
+    const Key key=*nativeSession_->selected();
+    const auto node=pickCurveNode(nativeSession_->committed(),key,
+      contextPoint,nativePxPerMm(),viewport()->devicePixelRatioF(),8);
+    const auto hits=nativeSession_->pickEdges(contextPoint,
+      nativePxPerMm(),viewport()->devicePixelRatioF(),8);
+    const bool edgeHere=std::any_of(hits.begin(),hits.end(),
+       [&](const CurveHit& h){return h.key==key;});
+    QMenu local(this);
+    auto* removeNode=local.addAction("Remover somente este nó Bézier (ligar vizinhos)");
+    auto* removeSide=local.addAction("Remover somente este lado da Bézier");
+    auto* help=local.addAction("Outras formas selecionadas não serão alteradas");
+    help->setEnabled(false);
+    removeNode->setEnabled(node&&node->part==CurvePart::Anchor);
+    removeSide->setEnabled(edgeHere);
+    QAction* chosen=local.exec(e->globalPos());
+    if(chosen==removeNode&&node&&node->part==CurvePart::Anchor){
+     nativeSelectedPart_=node;
+     if(!nativeDeleteSelected()&&toolWarning)
+      toolWarning("Não foi possível excluir esse nó. Verifique a topologia mínima.");
+    }else if(chosen==removeSide&&edgeHere){
+     if(!cutNativeAt(contextPoint,key)&&toolWarning)
+      toolWarning("Não foi possível remover o lado da Bézier selecionada.");
+    }
+   }
+   e->accept();return;
+  }
   QMenu menu(this);
   QAction* all=menu.addAction("Selecionar tudo (Ctrl+A)");
   QAction* invert=menu.addAction("Inverter seleção (Ctrl+Shift+I)");
@@ -2090,6 +2861,34 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   QAction* ungroup=menu.addAction("Desagrupar seleção (Ctrl+U)");
   QAction* ungroupScissors=menu.addAction("Desagrupar e ativar Tesoura");
   QAction* remove=menu.addAction("Excluir selecionados (Delete)");
+  // Localized geometry commands, distinct from whole-object deletion.
+  // Require ONE selected object and the hit on its ACTIVE subpath.
+  std::optional<Key> editKey;
+  std::optional<int64_t> editNode;
+  std::optional<int> editSide;
+  if((tool==Tool::Select||tool==Tool::Nodes)&&selected.size()==1&&
+      active_&&selected.count(active_->object)&&editable(editor.state(),active_->object)){
+   editKey=*active_;
+   if(const auto* contour=get(editor.state().doc,*editKey)){
+    double bestPx=8.0;
+    for(const auto& n:contour->nodes){
+     const QPointF screen=viewportTransform().map(toQt(n.p));
+     const double pixel=QLineF(screen,e->pos()).length();
+     if(pixel<=bestPx){bestPx=pixel;editNode=n.id;}
+    }
+    const auto hits=clickHits(e->pos());
+    for(const auto& hit:hits)if(hit.key==*editKey&&hit.segment>=0){
+     editSide=hit.segment;break;
+    }
+   }
+  }
+  menu.addSeparator();
+  QAction* onlyNode=menu.addAction("Remover só este nó da forma selecionada");
+  QAction* onlySide=menu.addAction("Remover só este lado da forma selecionada");
+  onlyNode->setEnabled(editNode.has_value());
+  onlySide->setEnabled(editSide.has_value());
+  onlyNode->setToolTip("Exclui apenas o nó sob o mouse; os nós vizinhos continuam conectados. Ctrl+Z desfaz.");
+  onlySide->setToolTip("Remove apenas a aresta clicada e abre o contorno fechado, sem afetar outras formas. Ctrl+Z desfaz.");
   duplicate->setEnabled(selected.size()==1);
   group->setEnabled(selected.size()>=2);
   bool grouped=false;
@@ -2117,7 +2916,21 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   QAction* picked=menu.exec(e->globalPos());
   if(!picked){e->accept();return;}
   try{
-   if(picked==traceBitmap&&requestTraceImage)requestTraceImage();
+   if(picked==onlyNode&&editKey&&editNode){
+    const Key targeted=*editKey;
+    editor.erase(targeted,*editNode);selected.clear();active_.reset();rebuild();
+    if(get(editor.state().doc,targeted))activate(targeted);
+    if(diagnosticEvent)diagnosticEvent("polyline_node_deleted",1);
+    if(toolWarning)toolWarning("Somente o nó escolhido foi removido. Ctrl+Z restaura.");
+   }else if(picked==onlySide&&editKey&&editSide){
+    const Key targeted=*editKey;
+    const int result=editor.removePolylineEdge(targeted,*editSide);
+    selected.clear();active_.reset();rebuild();
+    if(get(editor.state().doc,targeted))activate(targeted);
+    else if(result>0)activate({result,0});
+    if(diagnosticEvent)diagnosticEvent("polyline_edge_deleted",1);
+    if(toolWarning)toolWarning("Somente o lado escolhido foi removido. Ctrl+Z restaura.");
+   }else if(picked==traceBitmap&&requestTraceImage)requestTraceImage();
    else if(picked==clearBitmap)clearRasterImage();
    else if(picked==all)selectAllVisible();
    else if(picked==invert)invertSelection();
@@ -2154,7 +2967,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
  void keyPressEvent(QKeyEvent* e)override{
   if(nativeMode_&&nativeSession_){
    if(e->key()==Qt::Key_Escape&&nativeContourPressing_){
-    nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(true);e->accept();return;
+    nativeSession_->cancel();nativeContourPressing_=false;updateNativePaths(false);e->accept();return;
    }
    if(e->key()==Qt::Key_Escape&&nativePressing_){
     nativeSession_->cancel();nativePressing_=false;updateNativePaths(false);e->accept();return;
@@ -2166,7 +2979,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    }
    if(e->modifiers().testFlag(Qt::ControlModifier)&&!nativePressing_&&
       (e->key()==Qt::Key_Z||e->key()==Qt::Key_Y)){
-    nativeHistory(e->key()==Qt::Key_Y||e->modifiers().testFlag(Qt::ShiftModifier));
+    history(e->key()==Qt::Key_Y||e->modifiers().testFlag(Qt::ShiftModifier));
     e->accept();return;
    }
   }
@@ -2187,6 +3000,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    pendingPreview_->setPath(temporaryShape());viewport()->update();
   }
    if(e->key()==Qt::Key_Escape){
+    if(nativeInsertArmed_){nativeInsertArmed_=false;viewport()->update();e->accept();return;}
     if(transformDragging_){cancelSelectionTransform();e->accept();return;}
     if(bezierDrawing_){clearBezierDraft();e->accept();return;}
     if(polylineDrawing_){clearPolyline();e->accept();return;}
@@ -2342,6 +3156,21 @@ public:
  QCheckBox* textItalicControl_=nullptr;
  QDoubleSpinBox* textSpacingControl_=nullptr;
  QComboBox* textAlignControl_=nullptr;
+ // LightBurn-inspired contextual selection: read-only measurements in phase 1.
+ QFrame* selectionContextBar_=nullptr;
+ QLabel* selectionContextSummary_=nullptr;
+ QWidget* selectionActionsContainer_=nullptr;
+ QWidget* selectionNumericContainer_=nullptr;
+ QPushButton* selectionContextGroup_=nullptr;
+ QPushButton* selectionContextUngroup_=nullptr;
+ QPushButton* selectionContextDuplicate_=nullptr;
+ QPushButton* selectionContextDelete_=nullptr;
+ QPushButton* selectionContextTextEdit_=nullptr;
+ std::array<QDoubleSpinBox*,4> selectionNumeric_{}; // X/Y/W/H
+ QCheckBox* selectionAspectLock_=nullptr;
+ std::array<QToolButton*,9> selectionAnchorButtons_{};
+ int selectionAnchor_=0;
+ bool selectionNumericUpdating_=false;
  double inlineTextLetterSpacing_=100.;
  QTabWidget* textInspectorTabs_=nullptr;
  QWidget* textOptionsTab_=nullptr;
@@ -2465,6 +3294,7 @@ public:
    .arg(collector_.elapsedMs()/1000));
  }
  QJsonObject captureDocument()const{
+  const auto historyFootprint=view.editor.historyNodeFootprint();
   QJsonObject counters;for(const auto& [name,n]:collector_.counters())counters[QString::fromStdString(name)]=n;
   QJsonArray events;for(const auto& e:collector_.records())events.append(QJsonObject{
    {"event",QString::fromStdString(e.type)},{"objects",e.objects},{"elapsed_ms",double(e.elapsedMs)}});
@@ -2479,8 +3309,53 @@ public:
     {"polyline_nodes",double(countNodes(view.editor.state().doc))},
     {"bezier_contours",int(curves?curves->committed().contours.size():0)},
     {"selected_polyline_objects",int(view.selected.size())},
-    {"undo_available",int(view.editor.undoCount())},{"redo_available",int(view.editor.redoCount())}}},
-   {"performance",QJsonObject{{"paint_samples",int(view.paintMs.size())},
+    {"undo_available",int(view.editor.undoCount())},{"redo_available",int(view.editor.redoCount())},
+    {"bezier_undo_available",int(curves?curves->undoCount():0)},
+    {"bezier_redo_available",int(curves?curves->redoCount():0)}}},
+   {"performance",QJsonObject{{"render_rebuild_count",double(view.fullRebuilds)},
+      {"native_full_path_builds",double(view.nativeFullPathBuilds())},
+      {"native_selective_path_builds",double(view.nativeSelectivePathBuilds())},
+      {"native_legacy_selection_rebuild",view.nativeLegacySelectionRebuild()},
+      {"native_legacy_full_viewport_on_select",view.nativeLegacyFullViewportOnSelect()},
+      {"native_selection_local_repaint_requests",double(view.nativeSelectionLocalRepaints())},
+      {"native_selection_full_repaint_requests",double(view.nativeSelectionFullRepaints())},
+      {"viewport_paint_bbox_fraction_p95",percentile(view.viewportPaintBBoxFractions,.95)},
+      {"viewport_paint_bbox_fraction_samples",int(view.viewportPaintBBoxFractions.size())},
+      {"native_full_refresh_samples",int(view.nativeFullRefreshMs.size())},
+      {"native_full_refresh_p95_ms",percentile(view.nativeFullRefreshMs,.95)},
+      {"native_selective_refresh_samples",int(view.nativeSelectiveRefreshMs.size())},
+      {"native_selective_refresh_p95_ms",percentile(view.nativeSelectiveRefreshMs,.95)},
+      {"background_p95_ms",percentile(view.backgroundMs,.95)},
+      {"foreground_p95_ms",percentile(view.foregroundMs,.95)},
+      {"foreground_samples",int(view.foregroundMs.size())},
+      {"grouped_drag_starts",view.groupedDragStarts()},
+      {"grouped_drag_frame_updates",view.groupedDragFrameUpdates()},
+      {"drag_overlay_local_experiment_19_9",view.dragOverlayLocalExperiment199()},
+      {"drag_overlay_cached_experiment_19_9",view.dragOverlayCachedExperiment199()},
+      {"drag_overlay_dense_guard_19_9",view.dragOverlayDenseGuard199()},
+      {"drag_overlay_dense_legacy_updates_19_9",double(view.dragOverlayDenseLegacyUpdates199())},
+      {"drag_overlay_local_requests_19_9",double(view.dragOverlayLocalRequests199())},
+      {"drag_overlay_full_fallbacks_19_9",double(view.dragOverlayFullFallbacks199())},
+      {"grouped_transform_starts",view.groupedTransformStarts()},
+      {"grouped_transform_frame_updates",view.groupedTransformFrameUpdates()},
+      {"transform_preview_samples",int(view.transformPreviewMs.size())},
+      {"transform_preview_p95_ms",percentile(view.transformPreviewMs,.95)},
+      {"transform_preview_max_ms",view.transformPreviewMs.empty()?0:*std::max_element(view.transformPreviewMs.begin(),view.transformPreviewMs.end())},
+      {"rebuild_samples",int(view.rebuildMs.size())},
+      {"rebuild_p95_ms",percentile(view.rebuildMs,.95)},
+      {"rebuild_max_ms",view.rebuildMs.empty()?0:*std::max_element(view.rebuildMs.begin(),view.rebuildMs.end())},
+      {"style_apply_p95_ms",percentile(view.styleApplyMs,.95)},
+      {"style_apply_max_ms",view.styleApplyMs.empty()?0:*std::max_element(view.styleApplyMs.begin(),view.styleApplyMs.end())},
+      {"history_undo_states",double(historyFootprint.undoStates)},
+      {"history_redo_states",double(historyFootprint.redoStates)},
+      {"history_undo_nodes",double(historyFootprint.undoNodes)},
+      {"history_redo_nodes",double(historyFootprint.redoNodes)},
+      {"history_retained_node_bytes_lower_bound",double(historyFootprint.undoNodeBytes+historyFootprint.redoNodeBytes)},
+      {"history_active_node_bytes_lower_bound",double(historyFootprint.currentNodeBytes)},
+      {"history_memory_metric","capacity_based_node_payload_only"},
+      {"fast_dense_display",view.fastDenseDisplay()},
+      {"viewport_update_strategy","bounding_rect"},
+      {"paint_samples",int(view.paintMs.size())},
       {"paint_p50_ms",percentile(view.paintMs,.5)},
       {"paint_p95_ms",percentile(view.paintMs,.95)},
       {"paint_p99_ms",percentile(view.paintMs,.99)},
@@ -2602,6 +3477,112 @@ public:
    machineProfileSelector_->setCurrentIndex(workspaceCfg_.profile=="Personalizado"?1:0);
   }
  }
+ void insertGeneratedGear(const alaser::gear::Parameters& spec,alaser::gear::Point center){
+  check(!view.busy(),"Termine a acao atual antes de criar uma engrenagem.");
+  check(std::isfinite(center.x)&&std::isfinite(center.y),"Centro invalido");
+  const auto result=alaser::gear::generate(spec);
+  const int layerId=layers->currentData().toInt();
+  const auto& layer=view.editor.state().layers.at(layerId);
+  check(layer.visible&&!layer.locked,"Camada deve estar visivel e desbloqueada");
+  auto convert=[&](const std::vector<alaser::gear::Point>& source){
+   std::vector<Pt> points;points.reserve(source.size());
+   for(const auto& p:source)points.push_back({center.x+p.x,center.y-p.y});
+   return points;
+  };
+  std::vector<std::vector<Pt>> contours;
+  contours.push_back(convert(result.outer));
+  if(!result.bore.empty())contours.push_back(convert(result.bore));
+  const auto inserted=view.editor.addContours(std::move(contours),true,layerId,true);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  view.activate({inserted.front(),0});recoveryPolicy_.edited();
+  captureEvent("gear_generator_created",int(inserted.size()));
+  refresh();
+  status->setText(QString("Engrenagem de %1 dentes criada (%2 contornos, um Undo). "
+    "Confira espessura do material, folga e kerf antes de cortar.")
+    .arg(spec.teeth).arg(inserted.size()));
+ }
+
+ // Creates nominal editable outlines only. No output/G-code/hardware.
+ void insertGeneratedPair(const alaser::gear::PairParameters& spec,alaser::gear::Point center){
+  check(!view.busy(),"Termine a acao atual antes de gerar um par.");
+  check(std::isfinite(center.x)&&std::isfinite(center.y),"Centro invalido");
+  const auto result=alaser::gear::generatePairNominal(spec);
+  const int layerId=layers->currentData().toInt();
+  const auto& layer=view.editor.state().layers.at(layerId);
+  check(layer.visible&&!layer.locked,"Camada deve estar visivel e desbloqueada");
+  auto convert=[&](const std::vector<alaser::gear::Point>& source,double offset){
+   std::vector<Pt> points;points.reserve(source.size());
+   for(const auto& p:source)points.push_back({center.x+offset+p.x,center.y-p.y});
+   return points;
+  };
+  std::vector<std::vector<Pt>> contours;
+  contours.push_back(convert(result.driver.outer,0.));
+  if(!result.driver.bore.empty())contours.push_back(convert(result.driver.bore,0.));
+  contours.push_back(convert(result.driven.outer,result.centerDistanceMm));
+  if(!result.driven.bore.empty())contours.push_back(convert(result.driven.bore,result.centerDistanceMm));
+  const auto inserted=view.editor.addContours(std::move(contours),true,layerId,true);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  view.activate({inserted.front(),0});recoveryPolicy_.edited();
+  captureEvent("gear_generator_created",int(inserted.size()));refresh();
+  status->setText(QString("Par nominal: %1 mm entre centros, relação %2:1. "
+    "Folga, fase e engrenamento NÃO validados.")
+   .arg(result.centerDistanceMm,0,'f',2).arg(result.ratio,0,'f',2));
+ }
+ void insertGeneratedRack(const alaser::gear::RackParameters& spec,alaser::gear::Point origin){
+  check(!view.busy(),"Termine a acao atual antes de gerar cremalheira.");
+  check(std::isfinite(origin.x)&&std::isfinite(origin.y),"Origem invalida");
+  const auto result=alaser::gear::generateRackNominal(spec);
+  const int layerId=layers->currentData().toInt();
+  const auto& layer=view.editor.state().layers.at(layerId);
+  check(layer.visible&&!layer.locked,"Camada deve estar visivel e desbloqueada");
+  std::vector<Pt> points;points.reserve(result.outline.size());
+  for(const auto& p:result.outline)points.push_back({origin.x+p.x,origin.y-p.y});
+  std::vector<std::vector<Pt>> contours;contours.push_back(std::move(points));
+  const auto inserted=view.editor.addContours(std::move(contours),true,layerId,true);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  view.activate({inserted.front(),0});recoveryPolicy_.edited();
+  captureEvent("gear_generator_created",int(inserted.size()));refresh();
+  status->setText(QString("Cremalheira nominal criada: %1 dentes, passo %2 mm. "
+    "Encaixe e kerf NÃO validados.")
+   .arg(spec.teeth).arg(result.circularPitchMm,0,'f',3));
+ }
+
+ // Biblioteca de exemplos: sempre usa geometria NOMINAL e uma unica operacao Undo.
+ // Nenhuma rotina aqui pode chegar ao laser, G-code ou firmware.
+ void insertMechanismStudy(const alaser::mechanisms::Settings& config){
+  check(!view.busy(),"Conclua o gesto atual antes de inserir mecanismo.");
+  const auto assembly=alaser::mechanisms::generate(config);
+  check(!assembly.parts.empty(),"Mecanismo vazio.");
+  const int layerId=layers->currentData().toInt();
+  const auto& layer=view.editor.state().layers.at(layerId);
+  check(layer.visible&&!layer.locked,"Camada deve estar visivel e desbloqueada.");
+  double minX=1e20,maxX=-1e20,minY=1e20,maxY=-1e20;
+  std::vector<std::vector<Pt>> contours;
+  for(const auto& part:assembly.parts){
+   for(const auto* polygon:{&part.outer,&part.bore}){
+    if(polygon->empty())continue;
+    std::vector<Pt> points;points.reserve(polygon->size());
+    for(const auto& raw:*polygon){
+     const auto p=alaser::mechanisms::transform(part,raw,0.);
+     minX=std::min(minX,p.x);maxX=std::max(maxX,p.x);
+     minY=std::min(minY,p.y);maxY=std::max(maxY,p.y);
+     points.push_back({p.x,-p.y});
+    }
+    contours.push_back(std::move(points));
+   }
+  }
+  check(!contours.empty(),"Gerador nao retornou contornos.");
+  const double tx=workspaceCfg_.drawingWidth/2.-(minX+maxX)/2.;
+  const double ty=workspaceCfg_.drawingHeight/2.+(minY+maxY)/2.;
+  for(auto& poly:contours)for(auto& p:poly){p.x+=tx;p.y+=ty;}
+  const size_t size=contours.size();
+  const auto inserted=view.editor.addContours(std::move(contours),true,layerId,true);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  view.activate({inserted.front(),0});recoveryPolicy_.edited();
+  captureEvent("mechanism_study_created",int(size));refresh();
+  status->setText(QString("%1 contornos didaticos gerados. Perfil nominal: folga e kerf nao aplicados.")
+     .arg(size));
+ }
  void configureWorkspace(){
   QDialog dialog(this);dialog.setWindowTitle("Área de desenho e mesa — Alencar Laser");
   dialog.setMinimumWidth(420);
@@ -2672,6 +3653,13 @@ public:
     QPushButton:hover { background:#3C4854; border-color:#EF8A2C; }
     QPushButton:disabled { background:#222930; border-color:#333B43; color:#77838E; }
     QPushButton[compact="true"] { padding:3px 2px; min-height:25px; font-size:10px; }
+
+    QWidget#selection_actions_19_8 QPushButton { min-height:27px; font-size:11px; padding:3px 5px; }
+    QLabel#selection_numeric_header_19_8 { font-size:11px; font-weight:bold; }
+    QLabel#selection_numeric_header_19_8 { color:#FFA247; }
+    QDoubleSpinBox { background:#252D35; color:#F0F5F9; border:1px solid #566574; border-radius:5px; padding:3px 2px; min-height:24px; font-size:12px; }
+    QDoubleSpinBox:focus { border:1px solid #F18A2C; }
+    QDoubleSpinBox:disabled { background:#222930; color:#8B99A5; border-color:#394650; }
     QTabWidget::pane { border:0; }
     QTabBar::tab { background:#262F38; padding:6px; color:#C4D0D9; }
     QTabBar::tab:selected { background:#3B4752; color:#FFA247; }
@@ -2711,6 +3699,13 @@ public:
     QPushButton:hover { background:#FFF0DF; border-color:#E7832C; }
     QPushButton:disabled { background:#EBEFF2; border-color:#D9DFE5; color:#8B99A5; }
     QPushButton[compact="true"] { padding:3px 2px; min-height:25px; font-size:10px; }
+
+    QWidget#selection_actions_19_8 QPushButton { min-height:27px; font-size:11px; padding:3px 5px; }
+    QLabel#selection_numeric_header_19_8 { font-size:11px; font-weight:bold; }
+    QLabel#selection_numeric_header_19_8 { color:#A95716; }
+    QDoubleSpinBox { background:#F5F8FA; color:#253442; border:1px solid #AABAC6; border-radius:5px; padding:3px 2px; min-height:24px; font-size:12px; }
+    QDoubleSpinBox:focus { border:1px solid #CB711D; }
+    QDoubleSpinBox:disabled { background:#E0E6EB; color:#728394; border-color:#C5D0DA; }
     QTabWidget::pane { border:0; }
     QTabBar::tab { background:#E0E6EA; padding:6px; color:#445666; }
     QTabBar::tab:selected { background:#DFE6EA; color:#BA611A; }
@@ -2806,25 +3801,19 @@ public:
   add(quickRow,"save","Salvar",[this]{save();});
   add(quickRow,"save_as","Salvar como...",[this]{saveAs();});
   quickRow->addSpacing(12);
-  add(quickRow,"undo","↶ Desfazer",[this]{
-   if(view.shouldUseNativeHistory(false)){if(curves&&curves->dragging())return;view.nativeHistory(false);status->setText("Bézier: desfeito");}
-   else view.history(false);
-  });
-  add(quickRow,"redo","↷ Refazer",[this]{
-   if(view.shouldUseNativeHistory(true)){if(curves&&curves->dragging())return;view.nativeHistory(true);status->setText("Bézier: refeito");}
-   else view.history(true);
-  });
+  add(quickRow,"undo","↶ Desfazer",[this]{view.history(false);});
+  add(quickRow,"redo","↷ Refazer",[this]{view.history(true);});
   add(quickRow,"preview_virtual","Prévia virtual",[this]{
    alaser::sim198::showPreviewDialog(this,view.editor.state(),
-       workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight,
-       view.rasterImage(),view.rasterBounds());
+       workspaceCfg_.machineWidth,workspaceCfg_.machineHeight,
+       view.rasterImage(),view.rasterBounds(),curves?&curves->committed():nullptr);
   })->setToolTip("Simular caminhos Line e tempo nominal. Nenhum envio físico.");
   // Substituir textos repetitivos por glifos com dica e nomes acessiveis.
   const std::vector<std::tuple<QString,QString,QString>> quickIcons={
    {"open","open","Abrir projeto"},
-   {"open_other","open","Abrir outro projeto"},
+   {"open_other","open_other","Abrir outro projeto"},
    {"save","save","Salvar"},
-   {"save_as","save","Salvar como"},
+   {"save_as","save_as","Salvar como"},
    {"undo","undo","Desfazer (Ctrl+Z)"},
    {"redo","redo","Refazer (Ctrl+Y)"},
    {"preview_virtual","preview","Prévia virtual — simulação offline"}
@@ -2832,19 +3821,20 @@ public:
   for(const auto& [id,glyph,tip]:quickIcons){
    auto* button=buttons.at(id);
    button->setText("");button->setIcon(alaser::toolGlyph(glyph));
-   button->setIconSize(QSize(20,20));button->setFixedSize(35,32);
+   button->setIconSize(QSize(23,23));button->setFixedSize(35,33);
    button->setToolTip(tip);button->setAccessibleName(tip);
   }
   auto* editIcons=new QFrame;
   editIcons->setObjectName("quickEditIcons_19_8");
   auto* iconRow=new QHBoxLayout(editIcons);
   iconRow->setContentsMargins(0,0,0,0);iconRow->setSpacing(2);
+  iconRow->setAlignment(Qt::AlignVCenter);
   const auto iconButton=[this,iconRow](const QString& object,
                                      const QString& glyph,const QString& help,
                                      std::function<void()> click){
     auto* item=new QToolButton(this);
     item->setObjectName(object);item->setIcon(alaser::toolGlyph(glyph));
-    item->setIconSize(QSize(20,20));item->setFixedSize(31,31);
+    item->setIconSize(QSize(23,23));item->setFixedSize(34,33);
     item->setToolTip(help);item->setAccessibleName(help);
     item->setFocusPolicy(Qt::NoFocus);
     connect(item,&QToolButton::clicked,this,[this,click]{run(click);});
@@ -2855,14 +3845,63 @@ public:
        {"Esquerda","align_left",0},{"Centro X","align_center_x",4},
        {"Direita","align_right",1},{"Topo","align_top",2},
        {"Centro Y","align_center_y",5},{"Base","align_bottom",3}}){
-   iconButton(QString("quick_align_%1").arg(mode),id,
-      "Alinhar "+name+" (2 ou mais formas); referência: objeto ativo",
+   const QString help=
+     mode==0?"Alinhar bordas esquerdas (2+ objetos) — referência: objeto ativo":
+     mode==1?"Alinhar bordas direitas (2+ objetos) — referência: objeto ativo":
+     mode==2?"Alinhar bordas superiores (2+ objetos) — referência: objeto ativo":
+     mode==3?"Alinhar bordas inferiores (2+ objetos) — referência: objeto ativo":
+     mode==4?"Alinhar centros horizontais / eixo X (2+ objetos) — referência: objeto ativo":
+             "Alinhar centros verticais / eixo Y (2+ objetos) — referência: objeto ativo";
+   iconButton(QString("quick_align_%1").arg(mode),id,help,
       [this,mode]{
        QAction* action=findChild<QAction*>(QString("align_action_%1_19_8").arg(mode));
        check(action!=nullptr,"Comando de alinhamento indisponível.");
        action->trigger();
       });
+   if(mode==1)iconRow->addSpacing(7); // bordas X | bordas Y
   }
+  // LightBurn-like distinction: six directional alignments, both centers,
+  // then positioning the WHOLE selection on the configured machine bed.
+  iconButton("quick_align_6","align_both",
+             "Alinhar centros X e Y das formas selecionadas; referência: objeto ativo (2+)",
+             [this]{
+              QAction* action=findChild<QAction*>("align_action_6_19_8");
+              check(action!=nullptr,"Alinhamento central indisponível.");
+              action->trigger();
+             });
+  iconRow->addSpacing(4);
+  iconButton("quick_center_bed_19_8","center_bed",
+             "Centralizar a seleção inteira na mesa física configurada (sem redimensionar); objetos não selecionados permanecem no lugar",
+             [this]{
+              check(!bezierToolActive_,
+                    "Centralizar na mesa: nesta beta selecione polilinhas, não curvas Bézier nativas.");
+              const auto requested=selection();
+              check(!requested.empty(),"Selecione uma ou mais formas para centralizar na mesa.");
+              // Move complete groups together, even when just one member
+              // of a group is explicitly selected.
+              std::set<int> expanded(requested.begin(),requested.end());
+              std::set<int> groups;
+              const auto& state=view.editor.state();
+              for(int id:requested){
+               const auto found=state.objects.find(id);
+               check(found!=state.objects.end(),"Objeto selecionado não encontrado.");
+               if(found->second.group>0)groups.insert(found->second.group);
+              }
+              for(const auto& [id,meta]:state.objects)
+               if(meta.group>0&&groups.count(meta.group))expanded.insert(id);
+              const std::vector<int> ids(expanded.begin(),expanded.end());
+              const auto [lo,hi]=boundsOf(state.doc,ids);
+              const Pt currentCenter{(lo.x+hi.x)/2.,(lo.y+hi.y)/2.};
+              const Pt shift{workspaceCfg_.machineWidth/2.-currentCenter.x,
+                             workspaceCfg_.machineHeight/2.-currentCenter.y};
+              if(std::hypot(shift.x,shift.y)<=1e-9)return;
+              view.editor.moveObjects(ids,shift);
+              view.rebuild();
+              recoveryPolicy_.edited();
+              captureEvent("selection_centered_on_bed");
+              status->setText("Seleção centralizada na mesa configurada. Outras formas preservadas.");
+             });
+  iconRow->addSpacing(4);
   iconButton("quick_flip_horizontal","flip_h","Espelhar horizontalmente — seleção",
              [this]{buttons.at("mirror_horiz")->click();});
   iconButton("quick_flip_vertical","flip_v","Espelhar verticalmente — seleção",
@@ -2894,6 +3933,12 @@ public:
   hideTools->setToolTip("Recolher ou mostrar barra de ferramentas");quickRow->addWidget(hideTools);
   auto* hidePanels=new QPushButton("Painéis ›");hidePanels->setFocusPolicy(Qt::NoFocus);
   hidePanels->setToolTip("Recolher ou mostrar os painéis à direita");quickRow->addWidget(hidePanels);
+  auto* showSelectionProperties=new QPushButton("Propriedades");
+  showSelectionProperties->setObjectName("open_selection_properties_19_8");
+  showSelectionProperties->setToolTip("Alternar entre Propriedades e Camadas");
+  showSelectionProperties->setCheckable(true);
+  showSelectionProperties->setFocusPolicy(Qt::NoFocus);
+  quickRow->addWidget(showSelectionProperties);
   auto* themeButton=new QPushButton("☼ Tema");themeButton->setObjectName("theme_toggle");
   themeButton->setToolTip("Alternar tema escuro ou claro");themeButton->setFocusPolicy(Qt::NoFocus);quickRow->addWidget(themeButton);
   connect(themeButton,&QPushButton::clicked,this,[this]{darkTheme_=!darkTheme_;
@@ -2901,12 +3946,130 @@ public:
    applyTheme();view.setFocus();});
   layout->addWidget(quick);
 
+  // Selected-object ribbon, deliberately separate from physical CAM controls.
+  // Hidden when there is no selection; visible fields are informational only.
+  selectionContextBar_=new QFrame(this);
+  selectionContextBar_->setObjectName("selection_context_19_8");
+  auto* contextColumn=new QVBoxLayout(selectionContextBar_);
+  contextColumn->setContentsMargins(8,3,8,3);contextColumn->setSpacing(3);
+  auto* contextRow=new QHBoxLayout;
+  contextRow->setSpacing(7);contextColumn->addLayout(contextRow);
+  selectionContextSummary_=new QLabel(selectionContextBar_);
+  selectionContextSummary_->setObjectName("selection_context_summary_19_8");
+  selectionContextSummary_->setAccessibleName("Medidas da seleção, somente leitura");
+  selectionContextSummary_->setToolTip("Coordenadas e medidas em mm; edição somente para vetores compatíveis.");
+  selectionContextSummary_->setWordWrap(true);
+  contextRow->addWidget(selectionContextSummary_,1);
+  selectionActionsContainer_=new QWidget(selectionContextBar_);
+  selectionActionsContainer_->setObjectName("selection_actions_19_8");
+  auto* actionGrid=new QGridLayout(selectionActionsContainer_);
+  actionGrid->setContentsMargins(0,0,0,0);actionGrid->setSpacing(4);
+  contextColumn->addWidget(selectionActionsContainer_);
+  auto contextButton=[this,actionGrid](const QString& id,const QString& title,
+                                        const QString& tip,const QString& target){
+   auto* button=new QPushButton(title,selectionContextBar_);
+   button->setObjectName(id);button->setToolTip(tip);
+   button->setAccessibleName(tip);button->setFocusPolicy(Qt::NoFocus);
+   button->setProperty("compact",true);
+   const int n=actionGrid->count();actionGrid->addWidget(button,n/2,n%2);
+   connect(button,&QPushButton::clicked,this,[this,target]{
+    if(buttons.count(target))buttons.at(target)->click();
+   });
+   return button;
+  };
+  selectionContextGroup_=contextButton("selection_context_group_19_8","Agrupar",
+    "Agrupar apenas objetos poligonais editáveis (Ctrl+G)","group");
+  selectionContextUngroup_=contextButton("selection_context_ungroup_19_8","Desagrupar",
+    "Desagrupar a seleção com grupo (Ctrl+U)","ungroup");
+  selectionContextDuplicate_=contextButton("selection_context_duplicate_19_8","Duplicar",
+    "Duplicar uma forma poligonal independente","duplicate_obj");
+  selectionContextDelete_=contextButton("selection_context_delete_19_8","Excluir",
+    "Excluir seleção. Para 25+ objetos, exige confirmação; Ctrl+Z restaura.","delete_shapes");
+  selectionContextTextEdit_=new QPushButton("Editar texto",selectionContextBar_);
+  selectionContextTextEdit_->setObjectName("selection_context_edit_text_19_8");
+  selectionContextTextEdit_->setToolTip("Editar fonte, conteúdo e estilo do texto vetorial original.");
+  selectionContextTextEdit_->setFocusPolicy(Qt::NoFocus);
+  selectionContextTextEdit_->setProperty("compact",true);
+  actionGrid->addWidget(selectionContextTextEdit_,2,0,1,2);
+  selectionContextTextEdit_->hide();
+  connect(selectionContextTextEdit_,&QPushButton::clicked,this,[this]{
+   if(view.busy()||view.nativeModeActive())return;
+   std::set<int> roots;
+   for(int id:view.selected)
+    if(auto t=view.editor.findEditableText(id))roots.insert(t->first);
+   if(roots.size()==1)editVectorTextObject(*roots.begin());
+  });
+  selectionNumericContainer_=new QWidget(selectionContextBar_);
+  selectionNumericContainer_->setObjectName("selection_numeric_container_19_8");
+  auto* numericColumn=new QVBoxLayout(selectionNumericContainer_);
+  numericColumn->setContentsMargins(0,0,0,0);numericColumn->setSpacing(5);
+  auto* numericTitle=new QLabel("POSIÇÃO E TAMANHO · mm",selectionNumericContainer_);
+  numericTitle->setObjectName("selection_numeric_header_19_8");
+  numericColumn->addWidget(numericTitle);
+  auto* numericRow=new QGridLayout;
+  numericRow->setHorizontalSpacing(3);numericRow->setVerticalSpacing(5);
+  numericColumn->addLayout(numericRow);
+  const std::array<QString,4> fieldNames={"X","Y","L","A"};
+  const std::array<QString,4> fieldIds={"selection_num_x_19_8","selection_num_y_19_8",
+                                         "selection_num_w_19_8","selection_num_h_19_8"};
+  for(int field=0;field<4;++field){
+   numericRow->addWidget(new QLabel(fieldNames[size_t(field)],selectionContextBar_),field/2,(field%2)*2);
+   auto* spin=new QDoubleSpinBox(selectionContextBar_);
+   spin->setObjectName(fieldIds[size_t(field)]);
+   spin->setDecimals(2);spin->setSingleStep(1);
+   spin->setRange(field>=2?0.01:-1000000.,1000000.);
+   spin->setSpecialValueText("—");
+   spin->setMinimumWidth(72);spin->setMaximumWidth(95);
+   spin->setSizePolicy(QSizePolicy::Expanding,QSizePolicy::Fixed);
+   spin->setKeyboardTracking(false);spin->setEnabled(false);
+   spin->setAccessibleName(QString("Seleção: %1 em milímetros").arg(fieldNames[size_t(field)]));
+   spin->setToolTip(field<2?"Coordenada do ponto de referência (Enter confirma).":
+      "Dimensão da caixa envolvente (Enter confirma, Ctrl+Z desfaz).");
+   selectionNumeric_[size_t(field)]=spin;
+   numericRow->addWidget(spin,field/2,(field%2)*2+1);
+   connect(spin,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+           this,[this,field](double value){applySelectionNumeric(field,value);});
+  }
+  selectionAspectLock_=new QCheckBox("🔒 Proporção",selectionContextBar_);
+  selectionAspectLock_->setObjectName("selection_num_aspect_lock_19_8");
+  selectionAspectLock_->setChecked(true);
+  selectionAspectLock_->setToolTip("Manter a proporção original da seleção ao alterar L ou A.");
+  numericRow->addWidget(selectionAspectLock_,2,0,1,2);
+  auto* gridBox=new QWidget(selectionContextBar_);
+  gridBox->setObjectName("selection_num_anchor_grid_19_8");
+  gridBox->setToolTip("Grade de referência 3×3: posição X/Y e ponto fixo da escala.");
+  auto* grid=new QGridLayout(gridBox);
+  grid->setContentsMargins(0,0,0,0);grid->setSpacing(1);
+  auto* exclusive=new QButtonGroup(gridBox);exclusive->setExclusive(true);
+  const std::array<QString,9> names={"superior esquerdo","superior central","superior direito",
+    "meio esquerdo","centro","meio direito","inferior esquerdo","inferior central","inferior direito"};
+  for(int index=0;index<9;++index){
+   auto* spot=new QToolButton(gridBox);
+   spot->setObjectName(QString("selection_anchor_%1_19_8").arg(index));
+   spot->setText("·");spot->setFixedSize(19,19);spot->setCheckable(true);
+   spot->setChecked(index==0);spot->setFocusPolicy(Qt::NoFocus);
+   spot->setAccessibleName("Referência "+names[size_t(index)]);
+   spot->setToolTip("Fixar "+names[size_t(index)]);
+   spot->setStyleSheet("QToolButton{border:1px solid #697784;border-radius:3px;padding:0px;}"
+     "QToolButton:checked{background:#F18A2C;color:#181818;border:1px solid #FFC16A;}");
+   exclusive->addButton(spot);grid->addWidget(spot,index/3,index%3);
+   selectionAnchorButtons_[size_t(index)]=spot;
+   connect(spot,&QToolButton::clicked,this,[this,index]{
+    selectionAnchor_=index;updateSelectionContext();
+   });
+  }
+  numericRow->addWidget(gridBox,2,2,1,2,Qt::AlignCenter);
+  contextColumn->addWidget(selectionNumericContainer_);
+  contextColumn->addStretch(1);
+  // Insert into inspectorTabs later; never change the central canvas height.
+
+
   auto* splitter=new QSplitter(Qt::Horizontal);splitter->setObjectName("workspaceSplitter");
   persistentSplitter_=splitter;
   splitter->setChildrenCollapsible(false);splitter->setHandleWidth(3);
   auto* left=new QFrame;left->setObjectName("leftPanel");
   // Largura minima inclui icone 38 px, margens e barra vertical fina.
-  left->setMinimumWidth(68);left->setMaximumWidth(76);
+  left->setMinimumWidth(64);left->setMaximumWidth(74);
   auto* leftOuter=new QVBoxLayout(left);leftOuter->setContentsMargins(4,5,4,5);
   auto* toolScroll=new QScrollArea;toolScroll->setObjectName("toolScroll");
   toolScroll->setWidgetResizable(true);
@@ -2914,7 +4077,7 @@ public:
   toolScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
   toolScroll->setStyleSheet("QScrollBar:vertical { width:6px; }");
   auto* leftContent=new QWidget;leftContent->setObjectName("toolsContent");
-  auto* tools=new QVBoxLayout(leftContent);tools->setContentsMargins(4,4,4,4);tools->setSpacing(5);
+  auto* tools=new QVBoxLayout(leftContent);tools->setContentsMargins(4,4,4,4);tools->setSpacing(4);
   auto* toolGroup=new QButtonGroup(this);toolGroup->setExclusive(true);
   auto compact=[&](QGridLayout* grid,int row,int col,const QString& id,const QString& title,
                    const QString& tooltip,std::function<void()> action){
@@ -2923,8 +4086,8 @@ public:
     b->setAccessibleName(title);
     b->setIcon(alaser::toolGlyph(id));
     b->setText(QString());
-    b->setIconSize(QSize(20,20));
-    b->setFixedSize(QSize(38,36));
+    b->setIconSize(QSize(24,24));
+    b->setFixedSize(QSize(40,37));
     b->setSizePolicy(QSizePolicy::Fixed,QSizePolicy::Fixed);
     b->setToolTip(title+" — "+tooltip);b->setFocusPolicy(Qt::NoFocus);
     buttons[id]=b;grid->addWidget(b,row,col);
@@ -2933,13 +4096,14 @@ public:
      // Mudanca de ferramenta nao pode deixar campo de texto vazio sobre a mesa.
      if(inlineTextEntry_)
       finishInlineText(!inlineTextEntry_->text().trimmed().isEmpty());
+     view.prepareToolSwitch();
      run(action);
     });return b;
   };
   auto newGrid=[&](){auto* g=new QGridLayout;g->setSpacing(3);g->setAlignment(Qt::AlignHCenter);tools->addLayout(g);return g;};
   tools->addSpacing(4); // Barra compacta: ferramentas de edicao
   auto* editorGrid=newGrid();
-  compact(editorGrid,0,0,"select","↖ Seleção","Selecionar (Alt alterna contornos sobrepostos)",
+  compact(editorGrid,0,0,"select","↖ Seleção","Selecionar e redimensionar: duplo clique edita nós; clique direito sobre nó ou lado da forma SELECIONADA permite remover apenas esse elemento; Ctrl+Z desfaz | Alt alterna contornos",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Select);});
   compact(editorGrid,1,0,"nodes","✎ Nós","Editar nós das polilinhas",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Nodes);});
@@ -2951,12 +4115,12 @@ public:
      bezierToolActive_=true;view.enableNative(true);
      captureEvent("tool_bezier_activated");
      status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
-  compact(editorGrid,3,0,"scissors","✂ Tesoura","Ao aproximar, marca em laranja o trecho entre cruzamentos; clique remove tudo (K). Bézier nativa indisponivel.",
+  compact(editorGrid,3,0,"scissors","✂ Tesoura","Trecho laranja = removido no clique (K). Em Bézier, remove a aresta entre âncoras; Ctrl+Z desfaz.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
      captureEvent("tool_scissors_activated");
      status->setText("Tesoura: passe o mouse sobre um trecho; destaque laranja = corte completo. Ctrl+Z desfaz.");});
-  compact(editorGrid,4,0,"new_bezier","⌁ Desenhar curva",
-    "Clique cria reta; clique e arraste cria alcas Bézier. Direito termina; origem fecha; Esc cancela.",
+  compact(editorGrid,4,0,"new_bezier","Desenhar caminhos e curvas",
+    "Clique cria segmento reto; clique e arraste cria curva Bézier. Duplo clique com Seleção edita nós. Direito conclui; Esc cancela.",
      [this]{
        if(!curves){
         curves=std::make_unique<CurveDragSession>(CurveDocument{});
@@ -2967,6 +4131,49 @@ public:
        status->setText("Desenhar Bézier: clique = canto/reta; clique+arraste = curva; direito conclui; Esc cancela.");
        captureEvent("tool_draw_bezier_activated");
      });
+  // Right-click on the unified Bezier tool opens real node operations.
+  // Left-click keeps the original fast one-tool drawing workflow intact.
+  auto* curveToolButton=buttons.at("new_bezier");
+  curveToolButton->setToolTip(curveToolButton->toolTip()+
+    "\nClique direito: editar / adicionar / excluir nós da Bézier selecionada.");
+  curveToolButton->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(curveToolButton,&QWidget::customContextMenuRequested,this,[this,curveToolButton](const QPoint& at){
+   QMenu menu(curveToolButton);
+   auto* edit=menu.addAction("Editar âncoras e alças da Bézier selecionada");
+   auto* insert=menu.addAction("Adicionar nó — clique na aresta desejada");
+   auto* remove=menu.addAction("Excluir nó selecionado (Delete)");
+   menu.addSeparator();
+   auto* instructions=menu.addAction("Dica: Shift+clique também insere; Esc cancela");
+   instructions->setEnabled(false);
+   connect(edit,&QAction::triggered,this,[this]{
+    view.prepareToolSwitch();
+    if(!view.nativeSelected()){status->setText("Bézier: selecione primeiro a curva.");return;}
+    view.enableNative(true);bezierToolActive_=true;
+    status->setText("Bézier: edite os pontos e alças na mesa; Esc cancela gestos.");
+   });
+   connect(insert,&QAction::triggered,this,[this]{
+    view.prepareToolSwitch();
+    if(!view.armNativeInsertNode()){
+     status->setText("Bézier: selecione a curva primeiro, depois use Adicionar nó.");
+     return;
+    }
+    bezierToolActive_=true;
+    status->setText("Adicionar nó: clique na aresta selecionada; Esc cancela. Ctrl+Z desfaz.");
+   });
+   connect(remove,&QAction::triggered,this,[this]{
+    view.prepareToolSwitch();
+    if(!view.nativeDeleteSelected()){
+     status->setText("Excluir nó: entre em Editar âncoras, clique no nó e tente novamente.");
+     return;
+    }
+    recoveryPolicy_.edited();
+    status->setText("Nó Bézier excluído. Ctrl+Z restaura.");
+   });
+   menu.exec(curveToolButton->mapToGlobal(at));
+  });
+  // Preserve old commands for rollback/tests, but hide redundant icons.
+  buttons.at("nodes")->hide();
+  buttons.at("bezier")->hide();
   tools->addSpacing(5); // Ferramentas de desenho
   auto* shapeGrid=newGrid();
   compact(shapeGrid,0,0,"line","╱ Desenhar linhas","Clique cria retas; atração magnética a pontas abertas (10 px); unir caminhos; Ctrl sem snap; direito termina; Esc cancela.",
@@ -2992,19 +4199,72 @@ public:
     b->setEnabled(false);b->setToolTip(tip+" — em desenvolvimento; função desativada");
     b->setFocusPolicy(Qt::NoFocus);return b;
   };
-  tools->addSpacing(6); // Ferramentas futuras desativadas
-  auto* vectorGrid=newGrid();
+  // Atalhos offline reais: não prometer offset/boolean/DXF/SVG sem motor correspondente.
+  auto offlineShortcut=[&](QGridLayout* grid,const QString& id,const QString& glyph,
+                           const QString& name,const QString& tooltip){
+   auto* b=new QPushButton(glyph);b->setObjectName(id);b->setProperty("compact",true);
+   b->setFixedSize(QSize(38,32));b->setFocusPolicy(Qt::NoFocus);
+   b->setAccessibleName(name);b->setToolTip(tooltip);
+   grid->addWidget(b,grid->count(),0);return b;
+  };
+  // Secondary and not-yet-ready actions are no longer visible on the drawing rail.
+  auto* secondaryTools=new QWidget(leftContent);
+  secondaryTools->setObjectName("secondary_tools_hidden_19_8");
+  auto* secondaryLayout=new QVBoxLayout(secondaryTools);
+  secondaryLayout->setContentsMargins(0,0,0,0);
+  auto* vectorGrid=new QGridLayout;
+  secondaryLayout->addLayout(vectorGrid);
   for(const auto& data:std::vector<std::tuple<QString,QString>>{
    {"◎ Offset","Contorno interno/externo"},
-   {"⊕ União","Soldar vetores"},{"⊖ Subtr.","Subtrair formas"},
-   {"⊞ Alinhar","Alinhamento e distribuição"},{"⌗ Medir","Ferramenta de medição"}}){
-    const int index=vectorGrid->count();vectorGrid->addWidget(future(std::get<0>(data),std::get<1>(data)),index,0);
+   {"⊕ União","Soldar vetores"},{"⊖ Subtr.","Subtrair formas"}}){
+   vectorGrid->addWidget(future(std::get<0>(data),std::get<1>(data)),vectorGrid->count(),0);
   }
-  tools->addSpacing(5); // Importadores futuros desativados
-  auto* fileGrid=newGrid();
-  for(const auto& data:std::vector<QString>{"SVG", "DXF", "LightBurn"}){
-   const int index=fileGrid->count();fileGrid->addWidget(future(data,"Importação de "+data),index,0);
+  auto* alignShortcut=offlineShortcut(vectorGrid,"align_shortcut_19_8","⊞",
+   "Alinhar formas selecionadas", "Alinhar por bordas/centros ou centralizar na mesa");
+  auto* distributeHorizontal=offlineShortcut(vectorGrid,"distribute_horizontal_19_8","↔",
+   "Distribuir horizontalmente", "Três ou mais objetos/grupos; espaçamento igual, extremos fixos; offline");
+  auto* distributeVertical=offlineShortcut(vectorGrid,"distribute_vertical_19_8","↕",
+   "Distribuir verticalmente", "Três ou mais objetos/grupos; espaçamento igual, extremos fixos; offline");
+  connect(distributeHorizontal,&QPushButton::clicked,this,[this]{
+   auto* command=findChild<QAction*>("distribute_horizontal_action_19_8");
+   check(command!=nullptr,"Comando distribuir horizontal indisponível.");command->trigger();
+  });
+  connect(distributeVertical,&QPushButton::clicked,this,[this]{
+   auto* command=findChild<QAction*>("distribute_vertical_action_19_8");
+   check(command!=nullptr,"Comando distribuir vertical indisponível.");command->trigger();
+  });
+  auto* measureShortcut=offlineShortcut(vectorGrid,"measure_selection_19_8","⌗",
+   "Medir seleção", "Largura, altura e posição da caixa envolvente em mm (somente leitura)");
+  connect(measureShortcut,&QPushButton::clicked,this,[this]{
+   // Medição somente leitura: run() repintava o status com contagens depois
+   // de medir, ocultando imediatamente o resultado.
+   if(view.busy()||(curves&&curves->dragging())){
+    status->setText("Conclua ou cancele o arraste para medir.");return;
+   }
+   const auto bounds=view.selectionPreviewRect();
+   if(!bounds){status->setText("Medir: selecione uma forma editável no modo Seleção.");return;}
+   const QRectF r=bounds->normalized();
+   status->setText(QString("Medida da seleção (caixa envolvente): %1 x %2 mm | X %3 / Y %4 mm — não altera a arte")
+      .arg(r.width(),0,'f',2).arg(r.height(),0,'f',2)
+      .arg(r.left(),0,'f',2).arg(r.top(),0,'f',2));
+  });
+  auto* fileGrid=new QGridLayout;
+  secondaryLayout->addLayout(fileGrid);
+  for(const auto& data:std::vector<QString>{"SVG", "DXF"}){
+   fileGrid->addWidget(future(data,"Importação de "+data),fileGrid->count(),0);
   }
+  auto* lightburnShortcut=offlineShortcut(fileGrid,"open_lbrn2_partial_19_8","L",
+   "Abrir LightBurn LBRN2 (parcial)",
+   "Importador geométrico experimental: recusa projetos incompatíveis sem modificar a arte; nunca importa parâmetros da máquina");
+  connect(lightburnShortcut,&QPushButton::clicked,this,[this]{
+   run([this]{
+    const QString file=QFileDialog::getOpenFileName(this,"Abrir LightBurn — importação parcial",{},
+      "Projeto LightBurn (*.lbrn2)");
+    if(!file.isEmpty())openFilePath(file);
+   });
+  });
+  tools->addWidget(secondaryTools);
+  secondaryTools->hide();
   // Texto longo alargava o grid e deslocava os icones para fora do painel.
   auto* importImageButton=new QPushButton;
   importImageButton->setObjectName("open_image_for_trace");
@@ -3012,8 +4272,8 @@ public:
   importImageButton->setAccessibleName("Imagem / Traçar");
   importImageButton->setToolTip("Importar imagem (PNG/JPEG/BMP/WebP) e traçar vetores");
   importImageButton->setIcon(alaser::toolGlyph("image"));
-  importImageButton->setIconSize(QSize(20,20));
-  importImageButton->setFixedSize(QSize(38,36));
+  importImageButton->setIconSize(QSize(24,24));
+  importImageButton->setFixedSize(QSize(40,37));
   importImageButton->setFocusPolicy(Qt::NoFocus);
   fileGrid->addWidget(importImageButton,fileGrid->count(),0);
   connect(importImageButton,&QPushButton::clicked,this,[this]{
@@ -3153,9 +4413,18 @@ public:
     refresh();layers->setCurrentIndex(layers->findData(id));
   });inspector->addLayout(layerActions);
   addVertical(inspector,"move_layer","→ Enviar seleção para camada ativa",[this]{
-   check(!bezierToolActive_,"Transferencia de camada: selecione polilinhas.");
+   const int destination=layers->currentData().toInt();
+   check(view.editor.state().layers.count(destination)>0,"Camada de destino ausente");
+   if(curves&&view.nativeSelected()){
+    check(curves->setLayer(*view.nativeSelected(),destination),
+          "Não foi possível transferir Bézier nativa");
+    view.nativeLayerChanged(); // retain selection + native Undo/Redo history
+    recoveryPolicy_.edited();captureEvent("objects_layer_changed");
+    status->setText("Bézier transferida para a camada ativa, com Undo e metadados.");
+    return;
+   }
    const auto ids=selection();check(!ids.empty(),"Selecione formas e depois a camada de destino.");
-   view.editor.moveSelectionToLayer(ids,layers->currentData().toInt());view.rebuild();
+   view.editor.moveSelectionToLayer(ids,destination);view.rebuild();
    captureEvent("objects_layer_changed",int(ids.size()));
   });
   inspector->addSpacing(12);inspector->addWidget(titleLabel("ORGANIZAÇÃO"));
@@ -3177,8 +4446,8 @@ public:
   addVertical(inspector,"delete_shapes","Excluir formas selecionadas",[this]{
    if(view.nativeModeActive()){
     check(view.nativeDeleteContour(),"Selecione uma curva Bézier para excluir.");
-   }else{
-    check(view.deleteSelectedShapes(),"Selecione uma ou mais formas editáveis.");
+   }else if(!view.deleteSelectedShapes()){
+    status->setText("Exclusão não realizada. Para remover só um nó/lado, clique com o botão direito nele.");
    }
   });
   addVertical(inspector,"delete_curve","Excluir curva Bézier selecionada",[this]{
@@ -3216,6 +4485,23 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   lockedNote->setObjectName("brandSub");lockedNote->setWordWrap(true);inspector->addWidget(lockedNote);
   auto* layersScroll=new QScrollArea;layersScroll->setWidgetResizable(true);
   layersScroll->setWidget(layersTab);inspectorTabs->addTab(layersScroll,"Camadas");
+  auto* selectionScroll=new QScrollArea;
+  selectionScroll->setObjectName("selection_inspector_scroll_19_8");
+  selectionScroll->setWidgetResizable(true);
+  selectionScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  selectionScroll->setWidget(selectionContextBar_);
+  inspectorTabs->addTab(selectionScroll,"Seleção");
+  inspectorTabs->setCurrentWidget(layersScroll);
+  connect(showSelectionProperties,&QPushButton::clicked,this,
+          [this,inspectorTabs,selectionScroll,layersScroll,right]{
+   if(!right->isVisible())right->setVisible(true);
+   inspectorTabs->setCurrentWidget(inspectorTabs->currentWidget()==selectionScroll
+      ?layersScroll:selectionScroll);
+  });
+  connect(inspectorTabs,&QTabWidget::currentChanged,this,
+          [showSelectionProperties,inspectorTabs,selectionScroll](int){
+   showSelectionProperties->setChecked(inspectorTabs->currentWidget()==selectionScroll);
+  });
 
   auto* propsTab=new QWidget;auto* properties=new QVBoxLayout(propsTab);
   properties->setContentsMargins(9,9,9,9);properties->setSpacing(8);
@@ -3621,8 +4907,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   camLayout->addWidget(titleLabel("CAM / OPERAÇÕES  ·  FUTURO"));
   for(const QString name:{"Corte de linha","Gravação de linha","Preenchimento raster", "Potência (%)",
          "Velocidade (mm/min)","Número de passes","Biblioteca de materiais","Pré-visualizar percurso","Enviar trabalho ao laser"}){
-   auto* b=new QPushButton(name);b->setEnabled(false);
-   b->setToolTip("Aguardando desenvolvimento e homologação; não executa operações");camLayout->addWidget(b);
+   auto* b=new QPushButton(name);camLayout->addWidget(b);
+   if(name=="Pré-visualizar percurso"){
+    b->setObjectName("cam_preview_virtual_19_8");
+    b->setToolTip("Abre APENAS a prévia virtual offline; não gera G-code, não envia comandos ou opera o laser.");
+    connect(b,&QPushButton::clicked,this,[this]{
+     auto* existing=findChild<QPushButton*>("preview_virtual");
+     check(existing!=nullptr,"Prévia virtual indisponível.");
+     existing->click();
+    });
+   }else{
+    b->setEnabled(false);
+    b->setToolTip("Aguardando desenvolvimento e homologação; não executa operações");
+   }
   }
   camLayout->addStretch();inspectorTabs->addTab(camTab,"CAM");
   refreshWorkspaceLabels();
@@ -3685,6 +4982,43 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   command(arrangeMenu,"Girar 90°","rotate_90");
   command(arrangeMenu,"Espelhar horizontalmente","mirror_horiz");
   command(arrangeMenu,"Espelhar verticalmente","mirror_vertical");
+  auto* measureAction=arrangeMenu->addAction("Medir seleção (somente leitura)");
+  connect(measureAction,&QAction::triggered,measureShortcut,&QPushButton::click);
+  // Posicionamento da ARTE na pagina. Não lê nem movimenta o laser.
+  auto* pageMenu=arrangeMenu->addMenu("Mover seleção para...");
+  const std::array<std::tuple<QString,int,int>,9> positions{{
+   {"Centro da página",1,1},{"Canto superior esquerdo",0,0},
+   {"Topo central",1,0},{"Canto superior direito",2,0},
+   {"Meio esquerdo",0,1},{"Meio direito",2,1},
+   {"Canto inferior esquerdo",0,2},{"Base central",1,2},
+   {"Canto inferior direito",2,2}
+  }};
+  for(const auto& [title,x,y]:positions){
+   auto* action=pageMenu->addAction(title);
+   action->setObjectName(QString("move_selection_page_%1_%2_19_9").arg(x).arg(y));
+   connect(action,&QAction::triggered,this,[this,x,y]{
+    run([this,x,y]{
+     const auto ids=numericSelectionIds();
+     const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
+     const double fx=double(x)/2.,fy=double(y)/2.;
+     const Pt origin{lo.x+(hi.x-lo.x)*fx,lo.y+(hi.y-lo.y)*fy};
+     const Pt target{workspaceCfg_.drawingWidth*fx,workspaceCfg_.drawingHeight*fy};
+     const Pt delta{target.x-origin.x,target.y-origin.y};
+     check(std::isfinite(delta.x)&&std::isfinite(delta.y),"Posição fora do limite");
+     if(std::hypot(delta.x,delta.y)<1e-9)return;
+     view.editor.moveObjects(ids,delta);
+     view.rebuild(); // um Undo, expandindo grupos
+    });
+   });
+  }
+  auto* physicalMenu=arrangeMenu->addMenu("Mover laser para seleção — BLOQUEADO");
+  physicalMenu->setToolTipsVisible(true);
+  for(const auto& [name,x,y]:positions){
+   auto* disabled=physicalMenu->addAction("Laser para "+name.toLower());
+   disabled->setObjectName(QString("physical_laser_move_disabled_%1_%2_19_9").arg(x).arg(y));
+   disabled->setEnabled(false);
+   disabled->setToolTip("Exige homologação física; nenhum movimento disponível.");
+  }
   auto* alignMenu=arrangeMenu->addMenu("Alinhar formas");
   for(const auto& [label,mode]:std::vector<std::pair<QString,int>>{
        {"Esquerda",0},{"Direita",1},{"Topo",2},{"Base",3},
@@ -3702,7 +5036,105 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     });
    });
   }
+  auto* distributeMenu=arrangeMenu->addMenu("Distribuir formas (espaçamento igual)");
+  for(bool horizontal:{true,false}){
+   QAction* action=distributeMenu->addAction(horizontal?
+        "Distribuir horizontalmente":"Distribuir verticalmente");
+   action->setObjectName(horizontal?"distribute_horizontal_action_19_8":
+                                     "distribute_vertical_action_19_8");
+   connect(action,&QAction::triggered,this,[this,horizontal]{
+    run([this,horizontal]{
+     view.editor.distributeObjects(selection(),horizontal);
+     view.rebuild();
+    });
+   });
+  }
+  auto* centerBedAction=alignMenu->addAction("Centralizar seleção na mesa física (não altera outros objetos)");
+  centerBedAction->setObjectName("align_center_bed_19_8");
+  connect(centerBedAction,&QAction::triggered,this,[this]{
+   auto* control=findChild<QToolButton*>("quick_center_bed_19_8");
+   check(control!=nullptr,"Comando centralizar na mesa indisponível.");
+   control->click();
+  });
+  // O atalho lateral reutiliza as MESMAS ações testadas de Organizar.
+  // Assim não cria uma implementação paralela com regras divergentes.
+  auto* sideAlignMenu=new QMenu(alignShortcut);
+  for(int mode=0;mode<=6;++mode){
+   QAction* source=findChild<QAction*>(QString("align_action_%1_19_8").arg(mode));
+   check(source!=nullptr,"Alinhamento interno ausente.");
+   QAction* shortcut=sideAlignMenu->addAction(source->text());
+   connect(shortcut,&QAction::triggered,source,&QAction::trigger);
+  }
+  sideAlignMenu->addSeparator();
+  auto* centerShortcut=sideAlignMenu->addAction(centerBedAction->text());
+  connect(centerShortcut,&QAction::triggered,centerBedAction,&QAction::trigger);
+  alignShortcut->setMenu(sideAlignMenu);
+  auto* generateMenu=mainMenu->addMenu("Gerar");
+  auto* gearsMenu=generateMenu->addMenu("Engrenagens");
+   auto* gearAction=gearsMenu->addAction("Engrenagem simples (mm)...");
+  gearAction->setObjectName("generate_gear_offline_19_9");
+  gearAction->setIcon(alaser::toolGlyph("gear_simple"));
+  connect(gearAction,&QAction::triggered,this,[this]{
+   if(view.busy()){status->setText("Conclua o gesto atual antes de gerar uma engrenagem.");return;}
+   alaser::gear::GearDialog dialog(workspaceCfg_.drawingWidth,
+                                    workspaceCfg_.drawingHeight,this);
+   if(dialog.exec()!=QDialog::Accepted){view.setFocus();return;}
+   const auto settings=dialog.parameters();
+   const auto center=dialog.centerMm();
+   run([this,settings,center]{insertGeneratedGear(settings,center);});
+   view.setFocus();
+  });
+
+  auto* pairAction=gearsMenu->addAction("Par de engrenagens (nominal / offline)...");
+  pairAction->setObjectName("generate_gear_pair_offline_19_9");
+  pairAction->setIcon(alaser::toolGlyph("gear_pair"));
+  connect(pairAction,&QAction::triggered,this,[this]{
+   if(view.busy()){status->setText("Conclua o gesto antes de gerar o par.");return;}
+   alaser::gear::CompoundGearDialog dialog(alaser::gear::CompoundKind::Pair,
+       workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight,this);
+   if(dialog.exec()!=QDialog::Accepted){view.setFocus();return;}
+   const auto p=dialog.pairParameters();
+   const auto origin=dialog.origin();
+   run([this,p,origin]{insertGeneratedPair(p,origin);});view.setFocus();
+  });
+  auto* rackAction=gearsMenu->addAction("Cremalheira (nominal / offline)...");
+  rackAction->setObjectName("generate_gear_rack_offline_19_9");
+  rackAction->setIcon(alaser::toolGlyph("rack"));
+  connect(rackAction,&QAction::triggered,this,[this]{
+   if(view.busy()){status->setText("Conclua o gesto antes de gerar a cremalheira.");return;}
+   alaser::gear::CompoundGearDialog dialog(alaser::gear::CompoundKind::Rack,
+       workspaceCfg_.drawingWidth,workspaceCfg_.drawingHeight,this);
+   if(dialog.exec()!=QDialog::Accepted){view.setFocus();return;}
+   const auto p=dialog.rackParameters();
+   const auto origin=dialog.origin();
+   run([this,p,origin]{insertGeneratedRack(p,origin);});view.setFocus();
+  });
+
+  gearsMenu->addSeparator();
+  auto* studio=gearsMenu->addAction("Oficina de Mecanismos — simulação e biblioteca (OFFLINE)...");
+  studio->setObjectName("open_mechanism_studio_19_9");
+  studio->setIcon(alaser::toolGlyph("mechanism"));
+  studio->setToolTip("Simulação cinematica idealizada, materiais e modelos educativos sem operação física.");
+  connect(studio,&QAction::triggered,this,[this]{
+   if(view.busy()){status->setText("Conclua o gesto antes de abrir a Oficina de Mecanismos.");return;}
+   alaser::mechanisms::MechanismStudioDialog dialog(this);
+   if(dialog.exec()==QDialog::Accepted){
+    const auto config=dialog.settings();
+    run([this,config]{insertMechanismStudy(config);});
+   }
+   view.setFocus();
+  });
   auto* laserMenu=mainMenu->addMenu("Laser");
+  auto* rotaryEntry=laserMenu->addAction("Configurar rotativo (Rolo / Mandril) — OFFLINE...");
+  rotaryEntry->setObjectName("open_rotary_setup_offline_19_9");
+  connect(rotaryEntry,&QAction::triggered,this,[this]{
+   std::optional<double> extent;
+   if(const auto bounds=view.selectionPreviewRect())extent=bounds->height();
+   QSettings rotarySettings("AlencarLaser","DesktopBeta");
+   alaser::rotary::RotarySetupDialog dialog(rotarySettings,extent,this);
+   dialog.exec();
+   view.setFocus();
+  });
   auto* wifiEntry=laserMenu->addAction("USB / Wi-Fi — Diagnóstico apenas");
   connect(wifiEntry,&QAction::triggered,this,[wifiLauncher]{wifiLauncher->click();});
   auto* transmit=laserMenu->addAction("Iniciar trabalho / emissão — BLOQUEADO");transmit->setEnabled(false);
@@ -3775,22 +5207,27 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
 
   auto* statusFrame=new QFrame;statusFrame->setObjectName("bottomStatus");
-  auto* statusRow=new QHBoxLayout(statusFrame);statusRow->setContentsMargins(12,4,12,4);
-  status=new QLabel;status->setObjectName("status");status->setMinimumHeight(24);
+  auto* statusRow=new QHBoxLayout(statusFrame);statusRow->setContentsMargins(8,1,8,1);
+  statusFrame->setFixedHeight(25);
+  status=new QLabel;status->setObjectName("status");status->setMinimumHeight(18);
   statusRow->addWidget(status,1);layout->addWidget(statusFrame);
   // Faixa operacional reservada e INTENCIONALMENTE INATIVA nesta candidata.
   // O unico controle Pausar/Continuar ativo agora e o da PREVIA OFFLINE.
   auto* operationStrip=new QFrame(this);operationStrip->setObjectName("operation_strip_19_8");
   auto* operationRow=new QHBoxLayout(operationStrip);
-  operationRow->setContentsMargins(9,1,9,1);operationRow->setSpacing(4);
-  auto* operationTitle=new QLabel("OPERAÇÃO • BLOQUEADA");
+  operationStrip->setObjectName("operation_strip_19_8");
+  operationStrip->setFixedHeight(35);
+  operationRow->setContentsMargins(6,1,6,1);operationRow->setSpacing(3);
+  auto* operationTitle=new QLabel("LASER OFF");
+  operationTitle->setMinimumWidth(70);
+  operationTitle->setMaximumWidth(90);
   operationTitle->setObjectName("operation_title_19_8");
   operationTitle->setToolTip("Os comandos físicos terão homologação separada da edição offline.");
   operationRow->addWidget(operationTitle);
   auto addOperation=[&](const QString& key,const QString& glyph,const QString& name){
    auto* b=new QToolButton(operationStrip);
-   b->setObjectName(key);b->setIcon(alaser::toolGlyph(glyph));b->setIconSize(QSize(19,19));
-   b->setFixedSize(30,28);b->setFocusPolicy(Qt::NoFocus);
+   b->setObjectName(key);b->setIcon(alaser::toolGlyph(glyph));b->setIconSize(QSize(23,23));
+   b->setFixedSize(28,28);b->setFocusPolicy(Qt::NoFocus);
    b->setAccessibleName(name);b->setToolTip(name+" — INDISPONÍVEL: controle físico não homologado");
    b->setEnabled(false);operationRow->addWidget(b);return b;
   };
@@ -3798,16 +5235,60 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   addOperation("operation_pause_continue_disabled","pause","Pausar / Continuar trabalho");
   addOperation("operation_stop_disabled","stop","Parar trabalho");
   addOperation("operation_frame_disabled","fit","Enquadrar material (máquina)");
-  operationRow->addSpacing(8);
+  operationRow->addSpacing(5);
   auto* estimated=new QLabel("Estimado: —");
   estimated->setObjectName("operation_estimated_19_8");
   estimated->setToolTip("Tempo físico ainda não calculado; consulte a prévia offline para estimativa virtual.");
   operationRow->addWidget(estimated);
-  operationRow->addSpacing(5);
+  operationRow->addSpacing(3);
   auto* elapsed=new QLabel("Decorrido: —");
   elapsed->setObjectName("operation_elapsed_19_8");
   elapsed->setToolTip("Relógio físico indisponível sem operação homologada.");
   operationRow->addWidget(elapsed);
+  auto* visualDivider=new QFrame(operationStrip);
+  visualDivider->setFrameShape(QFrame::VLine);
+  operationRow->addWidget(visualDivider);
+  auto* mmLabel=new QLabel("mm",operationStrip);
+  mmLabel->setToolTip("Campos de posição e tamanho em milímetros.");
+  operationRow->addWidget(mmLabel);
+  const QStringList footerFieldLabels={"X","Y","L","A"};
+  for(int k=0;k<4;++k){
+   auto* field=selectionNumeric_[size_t(k)];
+   check(field!=nullptr,"Campos de selecao nao inicializados");
+   field->setParent(operationStrip);
+   field->setSuffix("");
+   field->setMinimumWidth(76);field->setMaximumWidth(105);
+   field->setFixedHeight(26);
+   auto* label=new QLabel(footerFieldLabels.at(k),operationStrip);
+   operationRow->addWidget(label);
+   operationRow->addWidget(field);
+  }
+  selectionAspectLock_->setParent(operationStrip);
+  selectionAspectLock_->setText("Proporção");
+  selectionAspectLock_->setMinimumWidth(91);
+  selectionAspectLock_->setToolTip("Travar proporções ao redimensionar");
+  operationRow->addWidget(selectionAspectLock_);
+  auto* anchorChoice=new QComboBox(operationStrip);
+  anchorChoice->setObjectName("bottom_selection_anchor_19_9");
+  anchorChoice->setFixedWidth(55);
+  anchorChoice->setToolTip("Referência de nove pontos para X/Y e redimensionamento");
+  anchorChoice->addItems({"↖","↑","↗","←","●","→","↙","↓","↘"});
+  anchorChoice->setCurrentIndex(selectionAnchor_);
+  connect(anchorChoice,QOverload<int>::of(&QComboBox::currentIndexChanged),this,
+          [this](int index){
+   if(index>=0&&index<9&&selectionAnchorButtons_[size_t(index)])
+    selectionAnchorButtons_[size_t(index)]->click();
+  });
+  operationRow->addWidget(anchorChoice);
+  auto* pagePosition=new QToolButton(operationStrip);
+  pagePosition->setObjectName("bottom_position_on_page_19_9");
+  pagePosition->setText("Posicionar");
+  pagePosition->setMinimumWidth(84);pagePosition->setFixedHeight(28);
+  pagePosition->setToolTip("Mover a seleção na página, nunca a máquina");
+  pagePosition->setPopupMode(QToolButton::InstantPopup);
+  pagePosition->setMenu(pageMenu);
+  operationRow->addWidget(pagePosition);
+  if(selectionNumericContainer_)selectionNumericContainer_->hide();
   operationRow->addStretch();
   layout->insertWidget(layout->count()-1,operationStrip);
   connect(layers,&QComboBox::currentIndexChanged,this,[this]{if(!refreshing)refreshFlags();});
@@ -3824,6 +5305,13 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    });
   view.stateChanged=[this]{if(uiPersistenceEnabled_)recoveryPolicy_.edited();refresh();};
   view.diagnosticEvent=[this](const QString& code,int count){captureEvent(code,count);};
+  view.approveBulkDeletion=[this](int count){
+   return QMessageBox::question(this,"Confirmar exclusão de várias formas",
+     QString("%1 objetos estão selecionados. Excluir TODOS eles?\n\n"
+             "Isso é diferente de remover apenas um nó ou lado da forma selecionada.\n"
+             "Se confirmar, Ctrl+Z desfaz a operação.")
+       .arg(count),QMessageBox::Yes|QMessageBox::No,QMessageBox::No)==QMessageBox::Yes;
+  };
   view.scissorDetail=[this](const QString& reason,int id,int segment){
    recordScissorAttempt(reason,id,segment);
   };
@@ -3849,9 +5337,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    };
   shortcut("Alt+J",[joinEndsAction]{joinEndsAction->trigger();});
   shortcut("Ctrl+Shift+C",[convertTextPaths]{convertTextPaths->click();});
-  shortcut("Ctrl+Z",[this]{if(view.shouldUseNativeHistory(false)){if(curves&&!curves->dragging())view.nativeHistory(false);}else view.history(false);});
-  shortcut("Ctrl+Y",[this]{if(view.shouldUseNativeHistory(true)){if(curves&&!curves->dragging())view.nativeHistory(true);}else view.history(true);});
-  shortcut("Ctrl+Shift+Z",[this]{if(view.shouldUseNativeHistory(true)){if(curves&&!curves->dragging())view.nativeHistory(true);}else view.history(true);});
+  shortcut("Ctrl+Z",[this]{view.history(false);});
+  shortcut("Ctrl+Y",[this]{view.history(true);});
+  shortcut("Ctrl+Shift+Z",[this]{view.history(true);});
   shortcut("Ctrl+S",[this]{save();});shortcut("Ctrl+O",[this]{open();});
   shortcut("Ctrl+Shift+S",[this]{saveAs();});shortcut("Ctrl+Shift+O",[this]{openOther();});
   shortcut("Delete",[this]{
@@ -3978,6 +5466,172 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
   status->setText("Camada atualizada para a simulacao; M3/M4 e potencia NAO enviados ao laser.");
  }
+ std::vector<int> numericSelectionIds()const{
+  check(view.tool==QtEditorLab::Tool::Select&&!view.nativeModeActive()&&
+        !view.selected.empty(),"Selecione formas vetoriais editaveis.");
+  const auto& st=view.editor.state();
+  std::set<int> ids(view.selected.begin(),view.selected.end()),groups;
+  for(int id:ids){
+   auto it=st.objects.find(id);
+   check(it!=st.objects.end(),"Objeto da selecao nao encontrado.");
+   if(it->second.group>0)groups.insert(it->second.group);
+  }
+  for(const auto& [id,meta]:st.objects)
+   if(meta.group>0&&groups.count(meta.group))ids.insert(id);
+  for(int id:ids)check(editable(st,id),"Selecao bloqueada ou oculta.");
+  for(const auto& [root,text]:st.editableTexts)
+   for(int id:text.members)check(!ids.count(id),
+     "Texto editavel exige transformacao de metadados: use o painel Texto.");
+  return {ids.begin(),ids.end()};
+ }
+ void applySelectionNumeric(int field,double target){
+  if(selectionNumericUpdating_||field<0||field>=4||
+    !selectionNumeric_[size_t(field)]||
+    !selectionNumeric_[size_t(field)]->isEnabled())return;
+  run([this,field,target]{
+   check(std::isfinite(target),"Valor numerico invalido.");
+   const auto ids=numericSelectionIds();
+   const auto quad=view.selectionFrameQuad();
+   check(quad.has_value(),"Moldura de selecao ausente.");
+   auto q=*quad;
+   const QPointF x=q[1]-q[0],y=q[3]-q[0];
+   const double width=std::hypot(x.x(),x.y()),height=std::hypot(y.x(),y.y());
+   check(std::isfinite(width)&&std::isfinite(height)&&width>1e-8&&height>1e-8,
+      "Selecao sem largura/altura editavel.");
+   const double ax=double(selectionAnchor_%3)*0.5;
+   const double ay=double(selectionAnchor_/3)*0.5;
+   const QPointF reference=q[0]+x*ax+y*ay;
+   if(field<2){
+    const QPointF delta=field==0?QPointF(target-reference.x(),0.):
+      QPointF(0.,target-reference.y());
+    check(std::isfinite(delta.x())&&std::isfinite(delta.y()),"Deslocamento invalido.");
+    if(std::hypot(delta.x(),delta.y())<1e-8)return;
+    view.editor.moveObjects(ids,fromQt(delta));
+    for(auto& p:q)p+=delta;
+   }else{
+    check(target>=0.01&&target<=1000000.,"Dimensao fora do limite.");
+    const double factor=target/(field==2?width:height);
+    check(std::isfinite(factor)&&factor>0.,"Escala invalida.");
+    const bool lock=selectionAspectLock_&&selectionAspectLock_->isChecked();
+    const double sx=field==2||lock?factor:1.;
+    const double sy=field==3||lock?factor:1.;
+    if(std::abs(sx-1.)<1e-9&&std::abs(sy-1.)<1e-9)return;
+    check(std::isfinite(width*sx)&&std::isfinite(height*sy)&&
+      width*sx<=1000000.&&height*sy<=1000000.,"Tamanho final excedeu limite.");
+    const QPointF ux=x/width,uy=y/height;
+    const double aa=sx*ux.x()*ux.x()+sy*uy.x()*uy.x();
+    const double bb=sx*ux.x()*ux.y()+sy*uy.x()*uy.y();
+    const double cc=sx*ux.y()*ux.x()+sy*uy.y()*uy.x();
+    const double dd=sx*ux.y()*ux.y()+sy*uy.y()*uy.y();
+    view.editor.affineObjects(ids,fromQt(reference),aa,bb,cc,dd);
+    for(auto& p:q){
+     const QPointF delta=p-reference;
+     p=reference+QPointF(aa*delta.x()+bb*delta.y(),
+                         cc*delta.x()+dd*delta.y());
+    }
+   }
+   view.rememberSelectionFrame(q);
+   view.rebuild(); // exactly one editor transaction; no physical commands
+  });
+  updateSelectionContext();
+ }
+ void updateSelectionContext(){
+  if(!selectionContextBar_)return;
+  const bool nativeSelected=view.nativeSelected().has_value()&&view.nativeModeActive();
+  const bool rasterSelected=view.rasterSelectionActive();
+  const bool polyline=view.tool==QtEditorLab::Tool::Select&&!view.nativeModeActive()&&
+       !rasterSelected&&!view.selected.empty();
+  const bool show=nativeSelected||polyline||rasterSelected;
+  // Selection updates data; never switches tabs or changes canvas dimensions.
+  if(!show){
+   selectionContextSummary_->setText("Nenhuma forma selecionada. Clique em uma forma na mesa.");
+   selectionContextSummary_->setToolTip("Selecione uma forma para mostrar as medidas.");
+   if(selectionActionsContainer_)selectionActionsContainer_->hide();
+   if(selectionNumericContainer_)selectionNumericContainer_->hide();
+   if(selectionContextTextEdit_)selectionContextTextEdit_->hide();
+   for(auto* b:{selectionContextGroup_,selectionContextUngroup_,
+                selectionContextDuplicate_,selectionContextDelete_})
+    if(b)b->setEnabled(false);
+   for(auto* spin:selectionNumeric_)if(spin){
+    const QSignalBlocker blocker(spin);
+    spin->setEnabled(false);
+    spin->setValue(spin->minimum());
+   }
+   if(selectionAspectLock_)selectionAspectLock_->setEnabled(false);
+   return;
+  }
+  if(selectionActionsContainer_)selectionActionsContainer_->show();
+  // Campos numéricos passam a viver exclusivamente na faixa inferior.
+  if(selectionNumericContainer_)selectionNumericContainer_->hide();
+  const auto bounds=rasterSelected?std::optional<QRectF>(view.rasterBounds()):
+                                    view.selectionPreviewRect();
+  std::set<int> groupIds,textRoots;
+  bool allText=polyline;
+  bool editableSelection=polyline;
+  bool groupedObject=false;
+  if(polyline)for(int id:view.selected){
+   auto it=view.editor.state().objects.find(id);
+   if(it==view.editor.state().objects.end()||!editable(view.editor.state(),id)){
+    editableSelection=false;continue;
+   }
+   groupIds.insert(it->second.group>0?-it->second.group:id);
+   groupedObject|=it->second.group>0;
+   const auto text=view.editor.findEditableText(id);
+   if(text)textRoots.insert(text->first);else allText=false;
+  }
+  const bool textOnly=allText&&textRoots.size()==1;
+  const QString prefix=rasterSelected?QString("Imagem raster selecionada"):
+     nativeSelected?QString("Curva Bézier selecionada"):
+     textOnly?QString("Texto editável selecionado"):
+     QString("%1 forma(s)%2").arg(view.selected.size()).arg(
+       groupedObject?" · grupo":"");
+  if(bounds){
+   const QRectF rect=bounds->normalized();
+   selectionContextSummary_->setText(prefix);
+   selectionContextSummary_->setToolTip(QString("Caixa envolvente: X %1 · Y %2 · L %3 · A %4 mm")
+    .arg(rect.left(),0,'f',2).arg(rect.top(),0,'f',2)
+    .arg(rect.width(),0,'f',2).arg(rect.height(),0,'f',2));
+  }else selectionContextSummary_->setText(prefix+" · medidas indisponíveis");
+  selectionContextGroup_->setEnabled(editableSelection&&groupIds.size()>=2);
+  selectionContextUngroup_->setEnabled(editableSelection&&groupedObject);
+  selectionContextDuplicate_->setEnabled(editableSelection&&!textOnly&&
+          view.selected.size()==1&&!groupedObject);
+  selectionContextDelete_->setEnabled(nativeSelected||editableSelection);
+  if(selectionContextTextEdit_){
+   selectionContextTextEdit_->setVisible(textOnly);
+   selectionContextTextEdit_->setEnabled(textOnly&&editableSelection);
+  }
+  bool numericEnabled=editableSelection&&!view.busy()&&
+       !(curves&&curves->dragging())&&bounds.has_value();
+  std::vector<int> ids;
+  if(numericEnabled)try{ids=numericSelectionIds();}
+  catch(const std::exception&){numericEnabled=false;}
+  const double ax=double(selectionAnchor_%3)*0.5,ay=double(selectionAnchor_/3)*0.5;
+  std::array<double,4> values{};
+  if(auto quad=view.selectionFrameQuad()){
+   const QPointF x=(*quad)[1]-(*quad)[0],y=(*quad)[3]-(*quad)[0];
+   const QPointF ref=(*quad)[0]+x*ax+y*ay;
+   values={ref.x(),ref.y(),std::hypot(x.x(),x.y()),std::hypot(y.x(),y.y())};
+  }else if(bounds){
+   const QRectF r=bounds->normalized();
+   values={r.left()+ax*r.width(),r.top()+ay*r.height(),r.width(),r.height()};
+  }
+  const double width=values[2],height=values[3];
+  selectionNumericUpdating_=true;
+  for(int k=0;k<4;++k){
+   auto* spin=selectionNumeric_[size_t(k)];
+   if(!spin)continue;
+   const QSignalBlocker guard(spin);
+   spin->setEnabled(numericEnabled&&(k<2||(width>1e-8&&height>1e-8)));
+   spin->setValue(std::clamp(values[size_t(k)],spin->minimum(),spin->maximum()));
+  }
+  selectionNumericUpdating_=false;
+  if(selectionAspectLock_)selectionAspectLock_->setEnabled(numericEnabled&&
+     width>1e-8&&height>1e-8);
+  selectionContextSummary_->setToolTip(numericEnabled?
+    "Grade laranja define referencia para X/Y e dimensoes. Enter confirma, Ctrl+Z desfaz.":
+    "Somente leitura para texto editavel, Bezier nativa, imagens, camadas bloqueadas.");
+ }
  void refresh(){
   int current=layers->currentData().toInt();refreshing=true;layers->clear();for(const auto& [id,l]:view.editor.state().layers)layers->addItem(QString::fromStdString(l.name),id);
   int ix=layers->findData(current);layers->setCurrentIndex(ix<0?0:ix);refreshing=false;refreshFlags();
@@ -4055,13 +5709,14 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }
   const int curveCount=curves?int(curves->committed().contours.size()):0;
   const bool nativeSelected=view.nativeModeActive()&&view.nativeSelected().has_value();
+  updateSelectionContext();
   status->setText(QString("%1 contornos | %2 nós | %3 selecionados | curvas v5: %4 | %5 | %6")
     .arg(view.editor.state().doc.contours.size()).arg(countNodes(view.editor.state().doc))
     .arg(view.selected.size()+(nativeSelected?1u:0u))
     .arg(curveCount)
     .arg(view.nativeEditingMode()?"editar nos Bézier":(nativeSelected?"curva Bézier selecionada":(bezierToolActive_?"desenhar Bézier":"modo polilinha")))
     .arg(view.nativeEditingMode()?"Arraste ancoras/alcas | Delete no | Ctrl+Delete curva":
-      (nativeSelected?"Arraste para mover | Delete curva | K tesoura | Ctrl+Z desfaz":
+      (nativeSelected?"Alças redimensionam/giram | Arraste move | Duplo clique edita nós | Esc cancela gesto":
       "Arraste move formas | Esc selecionar | K tesoura | Ctrl+L camada"))
     +QString(" | Desenho %1×%2 mm / mesa %3×%4 mm")
       .arg(workspaceCfg_.drawingWidth,0,'f',0).arg(workspaceCfg_.drawingHeight,0,'f',0)
@@ -4272,7 +5927,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const Pt in{b.x-span/3.,b.y-span*.5};
   view.attachNative(nullptr);
   if(!curves)curves=std::make_unique<CurveDragSession>(CurveDocument{});
-  const Key key=curves->addEditableCubic(a,out,in,b,nextObject);
+  const Key key=curves->addEditableCubic(a,out,in,b,nextObject,layers->currentData().toInt());
   view.attachNative(curves.get());
   bezierToolActive_=true;view.enableNative(true);
   recoveryPolicy_.edited();captureEvent("bezier_curve_created");
@@ -4304,6 +5959,11 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* minPixels=new QSpinBox;minPixels->setRange(1,500);minPixels->setValue(5);
   auto* optimize=new QDoubleSpinBox;optimize->setRange(0,2);optimize->setDecimals(2);optimize->setSingleStep(.1);optimize->setValue(.45);
   auto* smooth=new QCheckBox("Arredondamento leve (pode deformar cantos)");
+   auto* antiStaircase=new QCheckBox("Reduzir serrilhado de pixels (preserva cantos)");
+   antiStaircase->setObjectName("trace_anti_staircase_19_8");
+   antiStaircase->setChecked(true);
+   antiStaircase->setToolTip("Suavização conservadora de microdegraus no raster, sem achatar as curvas Bézier. "
+      "Revise vazados e texto pequeno; pode ser desativada.");
   auto* width=new QDoubleSpinBox;width->setRange(1,400);width->setSuffix(" mm");width->setValue(view.rasterBounds().width());
   auto* traceProfile=new QComboBox;
   traceProfile->addItem("Automático (Otsu)");
@@ -4312,7 +5972,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   traceProfile->setToolTip("Pré-ajustes; nenhum reconhece magicamente o conteúdo. Confira o resultado.");
   form->addRow("Perfil de limpeza",traceProfile);
   form->addRow("Limiar P&B",threshold);form->addRow("Ignorar ilhas menores",minPixels);
-  form->addRow("Otimizar (px)",optimize);form->addRow("Suavizar",smooth);
+  form->addRow("Otimizar (px)",optimize);
+   form->addRow("Anti-serrilhado",antiStaircase);
+   form->addRow("Arredondar cantos (opcional)",smooth);
   form->addRow("Largura física",width);
   auto* preview=new TracePreviewCanvas198(&dlg);
   preview->setMinimumHeight(280);
@@ -4360,15 +6022,19 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   connect(optimize,QOverload<double>::of(&QDoubleSpinBox::valueChanged),&dlg,[&](double){stale();});
   connect(width,QOverload<double>::of(&QDoubleSpinBox::valueChanged),&dlg,[&](double){stale();});
   connect(smooth,&QCheckBox::toggled,&dlg,[&](bool){stale();});
+   connect(antiStaircase,&QCheckBox::toggled,&dlg,[&](bool){stale();});
   connect(traceProfile,QOverload<int>::of(&QComboBox::currentIndexChanged),&dlg,[&](int profile){
    if(profile==0){
     threshold->setValue(std::clamp(trace198::otsuThreshold(trace198::grayscale(
       view.rasterImage().scaled(960,960,Qt::KeepAspectRatio,Qt::SmoothTransformation))),1,254));
-    minPixels->setValue(5);optimize->setValue(.45);smooth->setChecked(false);
+    minPixels->setValue(5);optimize->setValue(.45);
+    smooth->setChecked(false);antiStaircase->setChecked(true);
    }else if(profile==1){
-    minPixels->setValue(12);optimize->setValue(.65);smooth->setChecked(false);
+    minPixels->setValue(12);optimize->setValue(.65);
+    smooth->setChecked(false);antiStaircase->setChecked(true);
    }else{
-    minPixels->setValue(2);optimize->setValue(.15);smooth->setChecked(false);
+    minPixels->setValue(2);optimize->setValue(.15);
+    smooth->setChecked(false);antiStaircase->setChecked(false);
    }
    stale();
   });
@@ -4377,7 +6043,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    try{
     trace198::Options opts;opts.threshold=threshold->value();
     opts.minPixels=minPixels->value();opts.optimizePx=optimize->value();
-    opts.smooth=smooth->isChecked();opts.widthMm=width->value();
+    opts.smooth=smooth->isChecked();opts.antiStaircase=antiStaircase->isChecked();
+    opts.widthMm=width->value();
     prepared=trace198::trace(view.rasterImage(),opts);
     // Nao perder o zoom escolhido quando o usuario muda limiar/otimizacao.
     preview->showResult(view.rasterImage(),prepared->binary,opts.widthMm,prepared->contours);
@@ -4422,6 +6089,60 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   save();
   if(recoveryPolicy_.dirty())throw std::runtime_error("Salvamento cancelado: projeto atual preservado");
  }
+ // EXPERIMENTAL: enabled for humans ONLY via
+ // ALENCAR_NATIVE_LBRN2_PREVIEW_19_9=1; no G-code / laser configuration.
+ // The importer validates the entire file and builds a native session BEFORE
+ // prompting to replace the current document. The old file is never written.
+ void importNativeLightBurn199(const QString& path,bool askBeforeReplace=true){
+  const auto imported=lightburn::readNativeGeometry199(path);
+  check(imported.sourceShapes>0&&!imported.curves.contours.empty(),
+        "LBRN2 nativo sem formas validas");
+  const int shapes=int(imported.sourceShapes);
+  const int contours=int(imported.curves.contours.size());
+  const int anchors=int(imported.nativeAnchors);
+  const int cubics=int(imported.cubicEdges);
+  const bool approximate=imported.ellipseApproximated;
+  auto nextSession=std::make_unique<CurveDragSession>(imported.curves);
+  // CutIndex identities are editor metadata, never inferred machining settings.
+  // The new editor is constructed before the old drawing is replaced.
+  auto emptyEditor=Editor(newEditorStateForNativeLightBurn(imported.curves));
+  if(askBeforeReplace){
+   const auto choice=QMessageBox::question(this,"Importar LightBurn — modo Bézier experimental",
+     QString("Leitura concluida sem modificar o trabalho atual.\n\n"
+       "%1 formas da origem, %2 contornos nativos, %3 ancoras e %4 curvas cubicas.\n\n"
+       "Deseja substituir o desenho atual por uma COPIA editavel experimental?\n"
+       "O original .lbrn2 nao sera alterado. O desenho anterior so pode ser "
+       "restaurado pelo arquivo salvo; importar nao cria um Undo global.\n"
+       "%5\n\n"
+       "Nenhuma configuracao ou emissao de laser sera importada.")
+      .arg(shapes).arg(contours).arg(anchors).arg(cubics)
+      .arg(approximate?"Observacao: a elipse e aproximada por 16 curvas cubicas.":""),
+     QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
+   if(choice!=QMessageBox::Yes)return;
+   ensureSafeToReplace();
+  }
+  // Commit: no parsing or curve-package validation happens after this point.
+  // Clear previous native items before releasing their backing session.
+  view.attachNative(nullptr);
+  curves.reset();
+  view.editor=std::move(emptyEditor);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  curves=std::move(nextSession);
+  view.attachNative(curves.get());
+  view.enableNative(true);
+  view.clearRasterImage();
+  bezierToolActive_=false;
+  loadedProject_.reset();
+  projectPath.clear(); // NEVER write on top of original LBRN2
+  buttons.at("select")->setChecked(true);
+  recoveryPolicy_.edited();
+  captureEvent("lightburn_native_imported",shapes);
+  refresh();
+  view.setFocus();
+  status->setText(QString("LBRN2 nativo experimental: %1 contornos / %2 ancoras. "
+      "Salve como .alaser v5; laser bloqueado.").arg(contours).arg(anchors));
+ }
+
  void openFilePath(const QString& path){
   const QString suffix=QFileInfo(path).suffix().toLower();
   if(suffix=="alaser"){
@@ -4431,6 +6152,36 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    return;
   }
   if(suffix!="lbrn2")throw std::runtime_error("Use .alaser ou .lbrn2");
+  // Not enabled by default: operator must explicitly opt in to the
+  // experimental native cubic preview via process environment variable.
+  if(qEnvironmentVariable("ALENCAR_NATIVE_LBRN2_PREVIEW_19_9")=="1"){
+   try{importNativeLightBurn199(path,true);}
+   catch(const std::exception& e){
+    QMessageBox::warning(this,"LightBurn nativo — arquivo preservado",
+     QString("Leitura nativa recusada: %1\n\n"
+             "O arquivo .lbrn2 original nao foi alterado. "
+             "Nao utilize este arquivo para corte.").arg(QString::fromUtf8(e.what())));
+    status->setText("LBRN2 nativo experimental recusado");
+   }
+   return;
+  }
+  // Read-only preflight. Many LightBurn Scan projects store thousands of
+  // disconnected strokes inside ONE Path. Converting them as a single line
+  // would invent cutting links or drop zero-length marks. Refuse atomically.
+  const auto inspection=reference::readLightBurn(path);
+  if(inspection.valid&&inspection.zeroLengthPrimitives>0){
+   QMessageBox::warning(this,"LightBurn: geometria ainda nao suportada",
+     QString("O projeto possui %1 transições entre traços desconectados e "
+             "%2 segmentos de comprimento zero.\n\n"
+             "Segmentos de comprimento zero exigem interpretacao especifica. "
+             "O documento nao foi alterado. "
+             "Caminhos desconectados agora sao avaliados como contornos "
+             "independentes, sem linhas de ligacao artificiais.")
+       .arg(inspection.disconnectedTransitions)
+       .arg(inspection.zeroLengthPrimitives));
+   status->setText("Importação LBRN2 bloqueada: múltiplos traços independentes.");
+   return;
+  }
   // Mensagem visivel quando um arquivo LBRN2 real contem formas ausentes
   // do importador. Nunca trocar o desenho atual numa importacao incompleta.
   lightburn::ImportResult imported=lightburn::ImportResult(fromDocument(Document{}),0);
@@ -4804,7 +6555,7 @@ static QJsonObject shapeOperationsTest(const QString& directory){
  v.rebuild();v.centerOn(QPointF(110,107));QApplication::processEvents();
  // Diagnóstico fica desligado até o usuário ativá-lo.
  check(w.captureDocument()["events_retained"].toInt()==0,"collector started automatically");
- check(w.captureDocument()["version"].toString()=="TESTE_19.7","diagnostic schema version");
+ check(w.captureDocument()["version"].toString()=="TESTE_19.8","diagnostic schema version");
  check(w.findChild<QLineEdit*>("wifi_ip_196")!=nullptr,"manual wifi IP missing");
  check(w.findChild<QSpinBox*>("wifi_port_196")!=nullptr,"manual TCP port missing");
  check(w.findChild<QMenuBar*>("webInspiredMenu")!=nullptr,"Web-style native menu missing");
@@ -5486,14 +7237,15 @@ static QJsonObject layerRoute198Test(){
  edited.name="Linha laranja";
  edited.speedMmMin=5400.;edited.powerPercent=41.5;
  edited.passes=3;edited.powerMode="M3";edited.optimizeTravel=false;
+ edited.lineIntervalMm=0.075;
  model.configureLayer(0,edited);
  check(model.undoCount()==beforeUndo+1,
        "Configuracoes da camada nao geraram unica transacao undo");
  const auto& saved=model.state().layers.at(0);
  check(saved.name=="Linha laranja"&&saved.powerMode=="M3"&&
        saved.speedMmMin==5400.&&saved.passes==3&&saved.powerPercent==41.5&&
-       !saved.optimizeTravel,
-       "Parametros de simulacao nao aplicados");
+       !saved.optimizeTravel&&std::abs(saved.lineIntervalMm-0.075)<1e-9,
+       "Parametros de simulacao e intervalo da camada nao aplicados");
  const auto preserveRoute=sim198::route::nearestNeighborLines(model.state());
  check(std::abs(preserveRoute.travelMm-basic.travelMm)<1e-7,
        "Camada com otimizacao OFF mudou ordem da rota");
@@ -5513,30 +7265,38 @@ static QJsonObject layerRoute198Test(){
  const auto revived=fromMetadata(model.state().doc,json);
  check(revived.layers.at(0).powerMode=="M3"&&
        revived.layers.at(0).powerPercent==41.5&&revived.layers.at(0).passes==3&&
-       !revived.layers.at(0).optimizeTravel,
-       "Parametros M3, passes ou potencia perdidos no metadata roundtrip");
+       !revived.layers.at(0).optimizeTravel&&
+       std::abs(revived.layers.at(0).lineIntervalMm-0.075)<1e-9,
+       "Parametros M3, passes, potencia ou intervalo perdidos no metadata roundtrip");
  auto legacy=json;
  for(auto& item:legacy["layers"].as_array()){
   auto& l=item.as_object();
   l.erase("speedMmMin");l.erase("powerPercent");l.erase("passes");l.erase("powerMode");
   l.erase("optimizeTravel");
+  l.erase("lineIntervalMm");
  }
  const auto readLegacy=fromMetadata(model.state().doc,legacy);
  check(readLegacy.layers.at(0).powerMode=="M4"&&
        readLegacy.layers.at(0).speedMmMin==3000.&&
        readLegacy.layers.at(0).powerPercent==20.&&readLegacy.layers.at(0).passes==1&&
-       readLegacy.layers.at(0).optimizeTravel,
-       "Projetos antigos nao receberam defaults M4 compativeis");
+       readLegacy.layers.at(0).optimizeTravel&&
+       std::abs(readLegacy.layers.at(0).lineIntervalMm-0.20)<1e-9,
+       "Projetos antigos nao receberam defaults M4 e intervalo 0,20 compativeis");
  const auto undone=model.undo();
  check(undone&&model.state().layers.at(0).powerMode=="M4"&&
        model.state().layers.at(0).passes==1,
        "Undo nao restaurou configuracao antiga");
- check(model.redo()&&model.state().layers.at(0).powerMode=="M3",
-       "Redo nao reaplicou M3");
+ check(model.redo()&&model.state().layers.at(0).powerMode=="M3"&&
+       std::abs(model.state().layers.at(0).lineIntervalMm-0.075)<1e-9,
+       "Redo nao reaplicou M3 e intervalo Fill");
  bool denied=false;
  try{auto impossible=edited;impossible.powerPercent=101;model.configureLayer(0,impossible);}
  catch(const std::exception&){denied=true;}
  check(denied,"Potencia fora de 0-100 foi aceita");
+ denied=false;
+ try{auto impossible=edited;impossible.lineIntervalMm=0.01;model.configureLayer(0,impossible);}
+ catch(const std::exception&){denied=true;}
+ check(denied,"Intervalo Fill fora de 0,05-5mm foi aceito");
  model.addLayer(1001,"T1");
  denied=false;
  try{model.configureLayer(1001,edited);}catch(const std::exception&){denied=true;}
@@ -5546,7 +7306,8 @@ static QJsonObject layerRoute198Test(){
  check(toolSafe.cutMm<route.cutMm,"T1 nao foi excluida da rota");
  return {{"status","PASS"},{"nearest_neighbor_reduces_travel",true},
   {"route_is_non_destructive",true},{"layer_settings_one_undo",true},
-  {"m3_m4_metadata_roundtrip",true},{"legacy_m4_default",true},
+  {"m3_m4_metadata_roundtrip",true},{"fill_line_interval_roundtrip",true},
+  {"legacy_fill_interval_default",true},{"legacy_m4_default",true},
   {"per_layer_route_toggle",true},
   {"tool_layers_no_output",true},{"invalid_power_rejected",true},
   {"hardware_commands_sent",false}};
@@ -5751,8 +7512,29 @@ static QJsonObject inlineTransforms198Test(const QString& directory){
  drag(rotateStart.toPoint(),rotateEnd.toPoint());
  check(v.editor.undoCount()==before+2,"Rotacao nao criou passo de undo");
  check(stateText(v.editor.state())!=stateScaled,"Rotacao nao alterou vertices");
+ // A moldura deve manter a largura e altura LOCAIS ao girar, sem crescer.
+ const auto oriented=v.selectionFrameQuad();
+ check(oriented.has_value(),"Moldura orientada ausente apos girar");
+ const auto len=[](QPointF a,QPointF b){return QLineF(a,b).length();};
+ check(std::abs(len((*oriented)[0],(*oriented)[1])-40.)<1.5&&
+       std::abs(len((*oriented)[1],(*oriented)[2])-20.)<1.5,
+       "Moldura cresceu com a rotacao: comprimentos locais devem permanecer");
+ check(std::abs((*oriented)[0].y()-(*oriented)[1].y())>2.,
+       "Moldura continuou horizontal quando o objeto foi girado");
  pressKey(transformWindow,Qt::Key_Z,Qt::ControlModifier);
  check(stateText(v.editor.state())==stateScaled,"Undo da rotacao nao restaurou desenho");
+ // A implementacao real de history() limpa a selecao em Undo e Redo.
+ // Portanto nenhuma moldura deve sobreviver enquanto nada esta selecionado.
+ check(v.selected.empty()&&!v.selectionFrameQuad().has_value(),
+       "Undo conservou selecao ou moldura orientada antiga");
+ // Ao selecionar novamente, a geometria restaurada deve reger a nova moldura:
+ // nao reaproveitar orientacao transitória de um gesto desfeito.
+ v.activate({id,0});
+ const auto restored=v.selectionFrameQuad();
+ check(restored&&std::abs(len((*restored)[0],(*restored)[1])-40.)<1.5&&
+       std::abs(len((*restored)[1],(*restored)[2])-20.)<1.5&&
+       std::abs((*restored)[0].y()-(*restored)[1].y())<1e-6,
+       "Moldura antiga reapareceu apos nova selecao pos-Undo");
  // Shift permite escala nao proporcional; Ctrl fixa o centro.
  const int freeId=v.editor.rectangle({110,45},20,10);
  v.clearSelection();v.rebuild();clickScene(transformWindow,{115,45});
@@ -6098,6 +7880,27 @@ static QJsonObject refineCurvesTrace198Test(const QString& folder){
  auto traced=trace198::trace(bitmap,opts);
  check(traced.contours.size()>=2,"Tracer nao preservou contorno exterior e vazado");
  check(traced.discardedComponents>=1,"Ruido isolado nao foi removido");
+ // Conservative staircase filtering must preserve topology and holes.
+ trace198::Options filtered=opts;filtered.antiStaircase=true;
+ auto cleaner=trace198::trace(bitmap,filtered);
+ check(cleaner.contours.size()==traced.contours.size()&&
+       cleaner.blackPixels==traced.blackPixels,
+       "Anti-serrilhado alterou vazados ou pixels da mascara P&B");
+ const std::vector<Pt> staircase={{0,0},{1,0},{1,1},{2,1},{2,2},
+   {3,2},{3,3},{4,3},{4,5},{0,5}};
+ const auto smoothed=trace198::reducePixelStaircases(staircase);
+ check(smoothed.size()==staircase.size(),
+       "Anti-serrilhado alterou quantidade/topologia dos nos");
+ bool reduced=false;
+ for(size_t i=0;i<staircase.size();++i){
+  const double dx=dist(smoothed[i],staircase[i]);
+  check(dx<.75,"Anti-serrilhado deslocou borda demais");
+  reduced|=dx>1e-5;
+ }
+ check(reduced,"Anti-serrilhado nao corrigiu degraus curtos em diagonal");
+ const std::vector<Pt> corners={{0,0},{10,0},{10,5},{0,5}};
+ check(trace198::reducePixelStaircases(corners).size()==4,
+       "Anti-serrilhado corrompeu os quatro cantos de um retangulo");
  check(traced.blackPixels==50*50-18*18,"Binario P&B nao preservou pixels esperados");
  size_t nodes=0;
  for(const auto& ring:traced.contours)nodes+=ring.size();
@@ -6454,6 +8257,81 @@ static QJsonObject textFillAlign198Test(){
 }
 
 static QJsonObject drawAndJoin198Test(){
+ // Exercise the actual context menu via Qt events on coincident contours.
+ // Activation is explicit here; selection gestures are tested below.
+ QtEditorLab localEdit(Document{});
+ const int localTarget=localEdit.editor.rectangle({0,0},20,10);
+ localEdit.editor.rectangle({0,0},20,10);
+ localEdit.rebuild();localEdit.resize(600,400);localEdit.show();
+ localEdit.setTool(QtEditorLab::Tool::Select);localEdit.activate({localTarget,0});
+ localEdit.setTransform(QTransform::fromScale(10,10));localEdit.centerOn(10,5);
+ QApplication::processEvents();
+ const auto localBefore=localEdit.editor.state().doc;
+ auto invokeLocalMenu=[&](Pt at,const QString& actionText){
+  bool clicked=false;
+  QTimer::singleShot(0,[&](){
+   auto* popup=qobject_cast<QMenu*>(QApplication::activePopupWidget());
+   if(!popup)return;
+   for(auto* action:popup->actions())if(action->text()==actionText&&action->isEnabled()){
+    clicked=true;QTest::mouseClick(popup,Qt::LeftButton,Qt::NoModifier,
+                                 popup->actionGeometry(action).center());return;
+   }
+   popup->close();
+  });
+  const QPoint pos=localEdit.mapFromScene(toQt(at));
+  QContextMenuEvent event(QContextMenuEvent::Mouse,pos,localEdit.viewport()->mapToGlobal(pos));
+  QApplication::sendEvent(localEdit.viewport(),&event);
+  check(clicked,"Local context menu command was not available");
+ };
+ invokeLocalMenu({20,0},"Remover só este nó da forma selecionada");
+ auto expectedLocal=localBefore;
+ eraseNode(expectedLocal,{localTarget,0},get(localBefore,{localTarget,0})->nodes.at(1).id);
+ check(sameDoc(localEdit.editor.state().doc,expectedLocal),"Context menu deleted wrong node/object");
+ check(localEdit.editor.undo()&&sameDoc(localEdit.editor.state().doc,localBefore),"Context node Undo failed");
+ localEdit.rebuild();localEdit.activate({localTarget,0});
+ invokeLocalMenu({10,0},"Remover só este lado da forma selecionada");
+ Editor oracle(Document{});oracle.rectangle({0,0},20,10);oracle.rectangle({0,0},20,10);
+ oracle.removePolylineEdge({localTarget,0},0);
+ check(sameDoc(localEdit.editor.state().doc,oracle.state().doc),"Context menu deleted wrong edge/object");
+ check(localEdit.editor.undo()&&sameDoc(localEdit.editor.state().doc,localBefore),"Context edge Undo failed");
+ localEdit.close();
+ // 575-object deletion was observed in a user diagnostics report. Protect
+ // large selections while keeping single-side editing confirmation-free.
+ QtEditorLab bulkGuard(Document{});
+ for(int n=0;n<25;++n){
+  const int id=bulkGuard.editor.rectangle({double(n*3),0},2,2);
+  bulkGuard.selected.insert(id);
+ }
+ bulkGuard.rebuild();
+ int asked=0;
+ bulkGuard.approveBulkDeletion=[&](int count){++asked;return count!=25;};
+ check(!bulkGuard.deleteSelectedShapes()&&asked==1&&
+       bulkGuard.editor.state().doc.contours.size()==25,
+       "Cancelled mass deletion unexpectedly removed geometry");
+ bulkGuard.approveBulkDeletion=[&](int count){++asked;return count==25;};
+ check(bulkGuard.deleteSelectedShapes()&&asked==2&&
+       bulkGuard.editor.state().doc.contours.empty(),
+       "Confirmed mass deletion did not remove selected objects");
+ check(bulkGuard.editor.undo()&&bulkGuard.editor.state().doc.contours.size()==25,
+       "Undo did not recover confirmed mass deletion");
+ // A partial group selection still deletes every member in the engine.
+ // The approval count must agree with that expansion, not the UI count.
+ std::vector<int> members;
+ for(const auto& [id,meta]:bulkGuard.editor.state().objects)members.push_back(id);
+ bulkGuard.editor.group(members);
+ bulkGuard.selected={members.front()};
+ const auto groupedBefore=bulkGuard.editor.state().doc;
+ const auto groupedUndo=bulkGuard.editor.undoCount();
+ bulkGuard.approveBulkDeletion=[&](int count){++asked;check(count==25,"Wrong expanded group count");return false;};
+ check(!bulkGuard.deleteSelectedShapes()&&asked==3&&
+       sameDoc(groupedBefore,bulkGuard.editor.state().doc)&&
+       bulkGuard.editor.undoCount()==groupedUndo,
+       "Group cancellation changed geometry or history");
+ bulkGuard.approveBulkDeletion=[](int count){return count==25;};
+ check(bulkGuard.deleteSelectedShapes()&&bulkGuard.editor.state().doc.contours.empty(),
+       "Confirmed grouped deletion failed");
+ check(bulkGuard.editor.undo()&&sameDoc(groupedBefore,bulkGuard.editor.state().doc),
+       "Grouped deletion Undo changed identities");
  // Model invariant: complete a rectangle by magnetically joining its
  // two open endpoints, maintaining the SAME contour/object and undo unit.
  Editor editor(Document{});
@@ -6520,29 +8398,96 @@ static QJsonObject drawAndJoin198Test(){
  QApplication::processEvents();
  check(ui.view.nativeItemCount()==1&&ui.view.hasNativeDocument(),
        "Refazer criacao nao restaurou QGraphicsPathItem Bézier");
- // Native curve is reselectable and its handles are editable after redo.
+ // Native curve is reselectable, and SELECT shows shared scale handles.
  clickButton(ui,"select");
  QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,hitPoint);
- clickButton(ui,"bezier");
+ QApplication::processEvents();
+ const QRectF nativeBefore=ui.view.nativeItemPath(nativeKey).boundingRect();
+ const QPoint corner=ui.view.mapFromScene(nativeBefore.bottomRight());
+ QTest::mousePress(viewport,Qt::LeftButton,Qt::NoModifier,corner);
+ QTest::mouseMove(viewport,corner+QPoint(28,22));
+ QTest::mouseRelease(viewport,Qt::LeftButton,Qt::NoModifier,corner+QPoint(28,22));
+ QApplication::processEvents();
+ check(ui.view.nativeItemPath(nativeKey).boundingRect().width()>nativeBefore.width()+3.,
+       "Bézier selecionada não respondeu ao redimensionamento pelas alças");
+ check(!ui.view.busy(),"Redimensionamento Bézier deixou editor bloqueado por gesto pendente");
+ clickButton(ui,"undo"); // Undo restores EXACT cubic for following tests.
+ check(ui.view.nativeItemPath(nativeKey)==initialCurve,
+       "Undo da escala Bézier não restaurou a geometria original");
+ clickButton(ui,"select");
+ QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,hitPoint);
+ QTest::mouseDClick(viewport,Qt::LeftButton,Qt::NoModifier,hitPoint);
  check(ui.view.nativeEditingMode()&&ui.view.nativeSelected(),
-       "Ferramenta editar Bézier nao ativou alcas da curva criada");
- // Scissors splits the native path exactly (not flattened to polyline).
+       "Duplo clique na curva nao ativou edicao de ancoras");
+ check(!ui.findChild<QPushButton*>("nodes")->isVisible()&&
+       !ui.findChild<QPushButton*>("bezier")->isVisible(),
+       "Ferramentas legadas ainda aparecem na barra");
+ // Scissors removes the clicked mathematical edge (no flattening).
+ // Real user workflow: opt-in diagnostic collector ON, tool click, then
+ // keyboard Ctrl+Z/Y while the last native contour is GONE and nativeMode OFF.
+ auto* diagnosticCapture=ui.findChild<QCheckBox*>("diagnostics_enable");
+ check(diagnosticCapture!=nullptr,"Ativar coleta de diagnostico nao localizado");
+ diagnosticCapture->setChecked(true);
  clickButton(ui,"scissors");
  const QPoint scissorPt=ui.view.mapFromScene(
      ui.view.nativeItemPath(nativeKey).pointAtPercent(.35));
  QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,scissorPt);
  QApplication::processEvents();
- check(ui.view.nativeItemCount()==2,
-       "Tesoura nao separou Bézier nativa em dois caminhos editaveis");
+ check(ui.view.nativeItemCount()==0&&!ui.view.hasNativeDocument(),
+       "Tesoura deve remover realmente a unica aresta Bezier da forma");
+ const auto cutDiagnostic=ui.captureDocument();
+ const auto attempts=cutDiagnostic.value("scissor_attempts").toArray();
+ check(attempts.size()>0&&
+       attempts.last().toObject().value("result").toString()=="cut_native"&&
+       attempts.last().toObject().value("object_id").toInt()==nativeKey.object,
+       "Coleta nao registrou Tesoura Bezier nativa sem coordenadas");
+ check(ui.view.shouldUseNativeHistory(false),
+       "Ultimo corte Bezier perdeu historico nativo ao remover a forma inteira");
+ pressKey(ui,Qt::Key_Z,Qt::ControlModifier);
+ check(ui.view.nativeItemCount()==1&&
+       ui.view.nativeItemPath(nativeKey)==initialCurve,
+       "Ctrl+Z apos Tesoura nao restaurou curva Bezier");
+ pressKey(ui,Qt::Key_Y,Qt::ControlModifier);
+ check(ui.view.nativeItemCount()==0&&!ui.view.hasNativeDocument(),
+       "Ctrl+Y nao refez o corte Bezier real");
  clickButton(ui,"undo");
- check(ui.view.nativeItemCount()==1,
-       "Desfazer Tesoura nao restaurou um unico contorno Bézier");
+ check(ui.view.nativeItemCount()==1&&
+       ui.view.nativeItemPath(nativeKey)==initialCurve,
+       "Botao Desfazer nao restaurou geometria Bezier apos corte");
+ clickButton(ui,"redo");
+ check(ui.view.nativeItemCount()==0&&!ui.view.hasNativeDocument(),
+       "Botao Refazer nao reaplicou o corte Bezier");
+ clickButton(ui,"undo");
+ check(ui.view.nativeItemCount()==1&&
+       ui.view.nativeItemPath(nativeKey)==initialCurve,
+       "Desfazer final nao recuperou Bezier original");
+ const auto events=ui.captureDocument().value("counts").toObject();
+ check(events.value("bezier_contour_scissor_cut").toInt()>=1&&
+       events.value("bezier_undo").toInt()>=2&&
+       events.value("bezier_redo").toInt()>=2,
+       "Coletor nao contou Tesoura e historico nativos");
+ diagnosticCapture->setChecked(false);
  clickButton(ui,"select");
  const QPoint hitAgain=ui.view.mapFromScene(
      ui.view.nativeItemPath(nativeKey).pointAtPercent(.25));
  QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,hitAgain);
  check(ui.view.nativeSelectionMode()&&ui.view.nativeSelected(),
        "Selecao apos Tesoura/Undo nao reencontrou a curva");
+ check(ui.findChild<QPushButton*>("new_bezier")->contextMenuPolicy()==Qt::CustomContextMenu,
+       "Menu de clique direito para adicionar/excluir nos Bezier indisponivel");
+ const auto anchorsBefore=ui.committedCurves()->contours.front().nodes.size();
+ check(ui.view.armNativeInsertNode()&&ui.view.nativeInsertNodeArmed(),
+       "Menu Adicionar no nao armou clique nativo");
+ const QPoint insertHere=ui.view.mapFromScene(
+     ui.view.nativeItemPath(nativeKey).pointAtPercent(.63));
+ QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,insertHere);
+ QApplication::processEvents();
+ check(ui.committedCurves()->contours.front().nodes.size()==anchorsBefore+1&&
+       !ui.view.nativeInsertNodeArmed(),
+       "Adicionar no nao inseriu ancora na aresta ou permaneceu armado");
+ clickButton(ui,"undo");
+ check(ui.committedCurves()->contours.front().nodes.size()==anchorsBefore,
+       "Desfazer insercao nao restaurou quantidade original de nos");
  clickButton(ui,"delete_shapes");
  check(ui.view.nativeItemCount()==0,
        "Botao Excluir formas nao removeu curva Bézier selecionada");
@@ -6570,20 +8515,271 @@ static QJsonObject drawAndJoin198Test(){
        lineUi.view.editor.state().doc.contours.front().key.object==pathId,
        "Clique em duas pontas nao fechou retangulo no mesmo objeto");
  lineUi.close();
+ // Reproduce user report: abandoning an unfinished Bezier draw must not lock
+ // the editor in busy() and must allow another tool to be selected.
+ LabWindow recoveryUi(Document{});
+ recoveryUi.show();QApplication::processEvents();
+ clickButton(recoveryUi,"new_bezier");
+ auto* recoveryViewport=recoveryUi.view.viewport();
+ const QPoint at=recoveryViewport->rect().center();
+ QTest::mouseClick(recoveryViewport,Qt::LeftButton,Qt::NoModifier,at);
+ check(recoveryUi.view.busy(),"Fixture did not enter unfinished Bezier draft");
+ clickButton(recoveryUi,"select");
+ check(!recoveryUi.view.busy()&&recoveryUi.view.tool==QtEditorLab::Tool::Select,
+       "Unfinished Bezier drawing kept editor locked after tool switch");
+ // Even if mouse-release was missed during a native drag, switching tools
+ // must cancel it instead of leaving the entire editor disabled.
+ clickButton(recoveryUi,"new_bezier");
+ QTest::mouseClick(recoveryViewport,Qt::LeftButton,Qt::NoModifier,at+QPoint(-30,0));
+ QTest::mouseClick(recoveryViewport,Qt::LeftButton,Qt::NoModifier,at+QPoint(40,0));
+ clickButton(recoveryUi,"select");
+ check(recoveryUi.view.nativeItemCount()==1&&!recoveryUi.view.busy(),
+       "Tool switch lost valid Bezier draft or locked editor");
+ const auto curvePath=recoveryUi.view.nativeItemPath({1,0});
+ const QPoint pressAt=recoveryUi.view.mapFromScene(curvePath.pointAtPercent(0.5));
+ QTest::mousePress(recoveryViewport,Qt::LeftButton,Qt::NoModifier,pressAt);
+ check(recoveryUi.view.busy(),"Native contour press fixture did not start drag");
+ clickButton(recoveryUi,"new_bezier"); // intentionally no mouseRelease
+ check(!recoveryUi.view.busy()&&recoveryUi.view.tool==QtEditorLab::Tool::DrawBezier,
+       "Interrupted native contour drag blocked changing tools");
+ QTest::mouseRelease(recoveryViewport,Qt::LeftButton,Qt::NoModifier,pressAt);
+ recoveryUi.close();
+ // Synthetic LBRN2 only: NEVER check in user projects, support data or logs.
+ QTemporaryDir fixtureDir;
+ check(fixtureDir.isValid(),"LightBurn inspector test temporary directory failed");
+ const QString fixtureName=fixtureDir.filePath("nested_strokes_test.lbrn2");
+ QFile fixtureFile(fixtureName);
+ check(fixtureFile.open(QIODevice::WriteOnly),"LightBurn test file not writable");
+ const QByteArray nestedXml=R"LB(<?xml version="1.0" encoding="UTF-8"?>
+<LightBurnProject AppVersion="2.1.00" DeviceName="GRBL" FormatVersion="1">
+ <Shape Type="Group"><XForm>1 0 0 1 10 20</XForm><Children>
+  <Shape Type="Group"><XForm>1 0 0 1 2 3</XForm><Children>
+   <Shape Type="Path" CutIndex="0"><XForm>1 0 0 1 0 0</XForm>
+    <VertList>V0 0V10 0V10 10</VertList><PrimList>L0 1L1 2L2 0</PrimList></Shape>
+  </Children></Shape>
+  <Shape Type="Path" CutIndex="0"><XForm>1 0 0 1 0 0</XForm>
+   <VertList>V0 0V1 1V2 2</VertList><PrimList>L0 0L1 2L2 2</PrimList></Shape>
+ </Children></Shape>
+</LightBurnProject>)LB";
+ fixtureFile.write(nestedXml);fixtureFile.close();
+ const auto inspected=reference::readLightBurn(fixtureName);
+ check(inspected.valid&&inspected.count==4&&inspected.groups==2&&
+       inspected.maxShapeDepth==3&&inspected.types.value("Path")==2&&
+       inspected.disconnectedTransitions==1&&inspected.zeroLengthPrimitives==2,
+       "Nested LightBurn scan-stroke inventory lost groups, breaks or degenerate lines");
+ bool rejectedUnsafeImport=false;
+ try{const auto attempted=lightburn::readGeometry(fixtureName);(void)attempted;}
+ catch(const std::exception&){rejectedUnsafeImport=true;}
+ check(rejectedUnsafeImport,
+       "Importer must reject disconnected scan strokes until a lossless model exists");
  return {{"status","PASS"},{"rectangle_join_atomic",true},
+  {"nested_lightburn_inspection",true},
+  {"disconnected_lbrn2_import_safely_rejected",true},
   {"snap_endpoint",true},{"bezier_native_handles",true},
   {"bezier_viewport_drag",true},{"bezier_select_after_finish",true},
   {"bezier_undo_redo_no_ghosts",true},{"bezier_scissor_split",true},
   {"bezier_edit_handles_accessible",true},{"bezier_delete_and_restore",true},
+  {"bezier_resize_handles",true},{"bezier_stuck_gesture_recovery",true},
   {"line_viewport_auto_join",true},
   {"undo_redo",true},{"hardware_commands_sent",false}};
 }
 
 static QJsonObject layoutIcons198Test(){
  LabWindow w(Document{});w.resize(1280,760);w.show();QApplication::processEvents();
+
+ // Validate the actual Qt rotary configuration without changing a machine.
+ QTemporaryDir rotaryDir;
+ check(rotaryDir.isValid(),"Rotary test temp directory unavailable");
+ QSettings rotarySettings(rotaryDir.filePath("rotary.ini"),QSettings::IniFormat);
+ {
+  alaser::rotary::RotarySetupDialog dlg(rotarySettings,50.);
+  auto* roll=dlg.findChild<QRadioButton*>("rotary_roller_19_9");
+  auto* chuck=dlg.findChild<QRadioButton*>("rotary_chuck_19_9");
+  auto* enabled=dlg.findChild<QCheckBox*>("rotary_enabled_offline_19_9");
+  auto* testMotor=dlg.findChild<QPushButton*>("rotary_test_motor_disabled_19_9");
+  auto* mm=dlg.findChild<QDoubleSpinBox*>("rotary_mm_per_turn_19_9");
+  auto* rollerDia=dlg.findChild<QDoubleSpinBox*>("rotary_roller_diameter_19_9");
+  auto* obj=dlg.findChild<QDoubleSpinBox*>("rotary_object_diameter_19_9");
+  auto* circle=dlg.findChild<QDoubleSpinBox*>("rotary_circumference_19_9");
+  check(roll&&chuck&&enabled&&testMotor&&mm&&rollerDia&&obj&&circle&&
+        roll->isChecked()&&!enabled->isChecked()&&!testMotor->isEnabled()&&
+        mm->value()==0.,"Rotary initial state is unsafe or invents calibration");
+  obj->setValue(80.);
+  check(std::abs(circle->value()-80.*std::numbers::pi)<0.02,
+        "Object diameter did not update circumference");
+  circle->setValue(100.*std::numbers::pi);
+  check(std::abs(obj->value()-100.)<0.02,
+        "Circumference did not update object diameter");
+  mm->setValue(40.);rollerDia->setValue(20.);enabled->setChecked(true);
+  dlg.accept();
+  check(dlg.result()==QDialog::Accepted,"Offline rotary setup was not saved");
+ }
+ {
+  alaser::rotary::RotarySetupDialog dlg(rotarySettings);
+  auto* roller=dlg.findChild<QRadioButton*>("rotary_roller_19_9");
+  auto* enabled=dlg.findChild<QCheckBox*>("rotary_enabled_offline_19_9");
+  auto* rollerDia=dlg.findChild<QDoubleSpinBox*>("rotary_roller_diameter_19_9");
+  check(roller&&enabled&&rollerDia&&roller->isChecked()&&enabled->isChecked()&&
+       std::abs(rollerDia->value()-20.)<.01,
+       "Offline rotary profile did not survive reopen");
+  dlg.show();QApplication::processEvents();
+  dlg.findChild<QRadioButton*>("rotary_chuck_19_9")->click();
+  check(rollerDia->isHidden(),"Chuck does not hide roller-diameter control");
+  dlg.reject();
+ }
+ check(w.findChild<QAction*>("open_rotary_setup_offline_19_9")!=nullptr,
+       "Offline rotary menu missing");
+ // Page placement: editing only, with an atomic single Undo.
+ LabWindow placeWindow(Document{});placeWindow.resize(1000,700);
+ const int movedId=placeWindow.view.editor.rectangle({30,45},20,10);
+ const int untouchedId=placeWindow.view.editor.rectangle({310,310},10,10);
+ placeWindow.view.rebuild();placeWindow.view.activate({movedId,0});
+ auto* movePage=placeWindow.findChild<QAction*>("move_selection_page_2_0_19_9");
+ check(movePage!=nullptr,"Move selection to top-right missing");
+ const auto beforePlacement=placeWindow.view.editor.state().doc;
+ movePage->trigger();
+ const auto changed=boundsOf(placeWindow.view.editor.state().doc,{movedId});
+ const auto untouched=boundsOf(placeWindow.view.editor.state().doc,{untouchedId});
+ check(std::abs(changed.second.x-400.)<1e-7&&
+       std::abs(changed.first.y)<1e-7&&
+       std::abs(untouched.first.x-310.)<1e-7,
+       "Page placement did not preserve nonselected shapes");
+ check(placeWindow.view.editor.undo()&&
+       sameDoc(beforePlacement,placeWindow.view.editor.state().doc),
+       "Page placement undo must restore original geometry");
+
+ auto* selectionRibbon=w.findChild<QFrame*>("selection_context_19_8");
+ auto* selectionLabel=w.findChild<QLabel*>("selection_context_summary_19_8");
+ auto* contextGroup=w.findChild<QPushButton*>("selection_context_group_19_8");
+ auto* contextUngroup=w.findChild<QPushButton*>("selection_context_ungroup_19_8");
+ check(selectionRibbon&&selectionLabel&&contextGroup&&contextUngroup,
+       "Barra contextual de selecao ausente");
+ auto* tabs=w.findChild<QTabWidget*>("inspectorTabs");
+ auto* openProperties=w.findChild<QPushButton*>("open_selection_properties_19_8");
+ auto* hiddenTools=w.findChild<QWidget*>("secondary_tools_hidden_19_8");
+ check(tabs&&openProperties&&hiddenTools&&!hiddenTools->isVisible(),
+       "Atalhos repetidos continuam na barra de desenho");
+ check(tabs->tabText(tabs->currentIndex())=="Camadas"&&!selectionRibbon->isVisible(),
+       "Painel de seleção aberto sem pedido");
+ const int canvasHeight=w.view.height();
+ const int contextA=w.view.editor.rectangle({10,10},10,10);
+ const int contextB=w.view.editor.rectangle({35,10},10,10);
+ w.view.rebuild();w.view.activate({contextA,0});w.refresh();
+ check(!selectionRibbon->isVisible()&&w.view.height()==canvasHeight,
+       "Selecionar forma alterou a altura do canvas ou abriu propriedades");
+ openProperties->click();QApplication::processEvents();
+ check(selectionRibbon->isVisible()&&selectionLabel->text().contains("1 forma")&&
+       !contextGroup->isEnabled()&&!contextUngroup->isEnabled(),
+       "Painel solicitado nao apresenta estado de uma forma");
+ w.view.selected.insert(contextB);w.view.applySelectionStyles();w.refresh();
+ check(contextGroup->isEnabled()&&selectionLabel->text().contains("2 forma"),
+       "Agrupar nao habilitou com duas formas");
+ w.view.clearSelection();w.refresh();
+ check(selectionRibbon->isVisible()&&
+       selectionLabel->text().startsWith("Nenhuma forma selecionada")&&
+       !contextGroup->isEnabled()&&!contextUngroup->isEnabled(),
+       "Painel vazio deve manter estado sem selecao e botoes desativados");
+ tabs->setCurrentIndex(0);QApplication::processEvents();
+ check(!selectionRibbon->isVisible()&&!openProperties->isChecked(),
+       "Painel de seleção nao fechou ao trocar aba");
+ openProperties->click();QApplication::processEvents();
+ check(selectionRibbon->isVisible()&&openProperties->isChecked(),
+       "Propriedades nao alternou para Seleção");
+ openProperties->click();QApplication::processEvents();
+ check(!selectionRibbon->isVisible()&&!openProperties->isChecked(),
+       "Propriedades nao retornou para Camadas");
+ check(w.view.height()==canvasHeight,"Alternar Propriedades mudou altura do desenho");
+ // Numeric editing from the same visible contextual ribbon, independent of hardware.
+ LabWindow sizes(Document{});sizes.resize(1240,760);sizes.show();
+ QApplication::processEvents();
+ const int targetId=sizes.view.editor.rectangle({10,20},20,10);
+ sizes.view.rebuild();sizes.view.activate({targetId,0});sizes.refresh();
+ auto* sw=sizes.findChild<QDoubleSpinBox*>("selection_num_w_19_8");
+ auto* sh=sizes.findChild<QDoubleSpinBox*>("selection_num_h_19_8");
+ auto* sx=sizes.findChild<QDoubleSpinBox*>("selection_num_x_19_8");
+ auto* sy=sizes.findChild<QDoubleSpinBox*>("selection_num_y_19_8");
+ auto* lock=sizes.findChild<QCheckBox*>("selection_num_aspect_lock_19_8");
+ auto* corner=sizes.findChild<QToolButton*>("selection_anchor_8_19_8");
+ check(sw&&sh&&sx&&sy&&lock&&corner&&sw->isEnabled()&&lock->isChecked(),
+       "Campos numericos, proporcao ou grade 3x3 ausentes");
+ const auto original=sizes.view.editor.state().doc;
+ const size_t prev=sizes.view.editor.undoCount();
+ sw->setValue(40.);
+ auto b=boundsOf(sizes.view.editor.state().doc,{targetId});
+ check(std::abs(b.first.x-10.)<1e-7&&std::abs(b.first.y-20.)<1e-7&&
+       std::abs(b.second.x-50.)<1e-7&&std::abs(b.second.y-40.)<1e-7&&
+       sizes.view.editor.undoCount()==prev+1,"Proporcao da selecao e Undo nao foram atomicos");
+ check(sizes.view.editor.undo()&&sameDoc(sizes.view.editor.state().doc,original)&&
+       sizes.view.editor.redo(),"Undo/Redo da proporcao falhou");
+ corner->click();
+ check(std::abs(sx->value()-50.)<1e-7&&std::abs(sy->value()-40.)<1e-7,
+       "Ponto de referencia inferior direito nao foi aplicado");
+ sx->setValue(100.);sy->setValue(90.);
+ b=boundsOf(sizes.view.editor.state().doc,{targetId});
+ check(std::abs(b.first.x-60.)<1e-7&&std::abs(b.first.y-70.)<1e-7&&
+       std::abs(b.second.x-100.)<1e-7&&std::abs(b.second.y-90.)<1e-7,
+       "Posicao numerica X/Y pelo ponto inferior direito falhou");
+ lock->setChecked(false);sw->setValue(60.);
+ b=boundsOf(sizes.view.editor.state().doc,{targetId});
+ check(std::abs(b.first.x-40.)<1e-7&&std::abs(b.first.y-70.)<1e-7&&
+       std::abs(b.second.x-100.)<1e-7&&std::abs(b.second.y-90.)<1e-7,
+       "Escala sem trava alterou a altura ou deslocou a ancora");
+ const size_t noop=sizes.view.editor.undoCount();
+ sw->setValue(60.);
+ check(sizes.view.editor.undoCount()==noop,"Valor repetido criou Undo desnecessario");
+ sizes.view.clearSelection();sizes.refresh();
+ auto* numericContainer=sizes.findChild<QWidget*>("selection_numeric_container_19_8");
+ auto* actionContainer=sizes.findChild<QWidget*>("selection_actions_19_8");
+ check(!sw->isEnabled()&&sw->text()=="—"&&numericContainer&&actionContainer&&
+       numericContainer->isHidden()&&actionContainer->isHidden(),
+       "Selecao vazia mostrou medidas anteriores ou botoes de acao");
+ EditableText textMeta;textMeta.text="ALENCAR";textMeta.fontFamily="Arial";
+ textMeta.heightMm=12;textMeta.spacingPercent=100;
+ textMeta.anchor={10,10};textMeta.sourceBoundsMin={10,10};
+ const int textId=sizes.view.editor.addEditableText(
+   {{{10,10},{20,10},{20,20},{10,20}}},textMeta,0);
+ sizes.view.rebuild();sizes.view.activate({textId,0});sizes.refresh();
+ check(numericContainer->isHidden()&&!actionContainer->isHidden()&&sw->isVisible()&&
+       sizes.findChild<QComboBox*>("bottom_selection_anchor_19_9")!=nullptr&&
+       sizes.findChild<QToolButton*>("bottom_position_on_page_19_9")!=nullptr,
+       "Selecao nao mostrou os campos inferiores ou duplicou medidas");
+ auto* editText=sizes.findChild<QPushButton*>("selection_context_edit_text_19_8");
+ auto* summary=sizes.findChild<QLabel*>("selection_context_summary_19_8");
+ sizes.findChild<QPushButton*>("open_selection_properties_19_8")->click();
+ QApplication::processEvents();
+ check(editText&&editText->isVisible()&&editText->isEnabled()&&
+    summary->text().contains("Texto editável")&&!sw->isEnabled(),
+    "Texto editable exposto como poligono numerico ou sem edicao contextual");
+ sizes.view.clearSelection();sizes.view.setTool(QtEditorLab::Tool::Select);
+ QImage bitmap(12,6,QImage::Format_ARGB32);bitmap.fill(Qt::white);
+ sizes.view.setRasterImage(bitmap);sizes.refresh();
+ check(summary->text().contains("Imagem raster")&&!sw->isEnabled()&&
+    !sizes.findChild<QPushButton*>("selection_context_group_19_8")->isEnabled(),
+    "Imagem raster nao tem propriedades restritas");
+ sizes.close();
+ // Real viewport mouse modifiers must match the reference editing model.
+ w.view.setTransform(QTransform::fromScale(6,6));w.view.centerOn(28,15);
+ QApplication::processEvents();
+ const QPoint hitA=w.view.mapFromScene(QPointF(10,15));
+ const QPoint hitB=w.view.mapFromScene(QPointF(35,15));
+ QTest::mouseClick(w.view.viewport(),Qt::LeftButton,Qt::NoModifier,hitA);
+ QTest::mouseClick(w.view.viewport(),Qt::LeftButton,Qt::ShiftModifier,hitB);
+ check(w.view.selected.count(contextA)==1&&w.view.selected.count(contextB)==1,
+       "Shift nao adicionou forma");
+ QTest::mouseClick(w.view.viewport(),Qt::LeftButton,Qt::ShiftModifier,hitB);
+ check(w.view.selected.count(contextB)==1,
+       "Shift repetido desmarcou indevidamente a forma");
+ QTest::mouseClick(w.view.viewport(),Qt::LeftButton,Qt::ControlModifier,hitB);
+ check(w.view.selected.count(contextA)==1&&w.view.selected.count(contextB)==0,
+       "Ctrl nao removeu forma da selecao");
+ QTest::mouseClick(w.view.viewport(),Qt::LeftButton,Qt::ControlModifier,hitB);
+ check(w.view.selected.count(contextB)==1,"Ctrl nao readicionou a forma");
+ w.view.clearSelection();w.refresh();
  auto* header=w.findChild<QFrame*>("topHeader");
  check(header&&header->maximumHeight()<=48,"Cabecalho ultrapassou altura compacta");
  for(const QString& name:{"quick_align_0","quick_align_4","quick_align_1",
+                          "quick_align_2","quick_align_5","quick_align_3",
+                          "quick_align_6","quick_center_bed_19_8",
                           "quick_flip_horizontal","quick_flip_vertical","quick_rotate_90"}){
   auto* b=w.findChild<QToolButton*>(name);
   check(b&&b->isEnabled()&&!b->icon().isNull()&&!b->toolTip().isEmpty(),
@@ -6594,25 +8790,403 @@ static QJsonObject layoutIcons198Test(){
   auto* b=w.findChild<QToolButton*>(name);
   check(b&&!b->isEnabled(),"Comando fisico foi habilitado indevidamente");
  }
+ for(const QString& id:{"align_shortcut_19_8","measure_selection_19_8",
+                         "distribute_horizontal_19_8","distribute_vertical_19_8",
+                         "open_lbrn2_partial_19_8","cam_preview_virtual_19_8"}){
+  auto* b=w.findChild<QPushButton*>(id);
+  check(b&&b->isEnabled()&&!b->toolTip().isEmpty(),
+        "Atalho offline existente ausente/inacessivel");
+ }
+ auto* alignmentShortcut=w.findChild<QPushButton*>("align_shortcut_19_8");
+ check(alignmentShortcut->menu()&&alignmentShortcut->menu()->actions().size()>=9,
+       "Atalho de alinhamento nao reutiliza os sete comandos e mesa");
+ auto* measurement=w.findChild<QPushButton*>("measure_selection_19_8");
+ const auto beforeEmpty=fingerprint(w.view.editor.state());
+ measurement->click();
+ check(w.status->text().contains("selecione")&&
+       fingerprint(w.view.editor.state())==beforeEmpty,
+       "Medir sem selecao alterou documento ou nao instruiu usuario");
  const int one=w.view.editor.addContour({{10,10},{20,10},{18,25}},true);
  const int two=w.view.editor.addContour({{80,30},{110,30},{95,40}},true);
  w.view.rebuild();w.view.activate({one,0});w.view.selected.insert(two);
+ const auto beforeMeasure=fingerprint(w.view.editor.state());
+ const auto selectedBox=w.view.selectionPreviewRect();
+ check(selectedBox.has_value(),"Selecao nao gera limites para medir");
+ measurement->click();
+ check(w.status->text().contains(QString::number(selectedBox->width(),'f',2))&&
+       w.status->text().contains(QString::number(selectedBox->height(),'f',2))&&
+       fingerprint(w.view.editor.state())==beforeMeasure,
+       "Medida da selecao nao informa largura/altura ou alterou arte");
  w.findChild<QToolButton*>("quick_align_0")->click();
  const auto boundsOne=boundsOf(w.view.editor.state().doc,{one});
  const auto boundsTwo=boundsOf(w.view.editor.state().doc,{two});
  check(std::abs(boundsOne.first.x-boundsTwo.first.x)<1e-7,
        "Alinhar pelo icone nao moveu as formas");
+ // Align both centers is NOT the same as centering on the machine bed.
+ w.findChild<QToolButton*>("quick_align_6")->click();
+ const auto equalA=boundsOf(w.view.editor.state().doc,{one});
+ const auto equalB=boundsOf(w.view.editor.state().doc,{two});
+ check(std::abs(equalA.first.x+equalA.second.x-equalB.first.x-equalB.second.x)<1e-7&&
+       std::abs(equalA.first.y+equalA.second.y-equalB.first.y-equalB.second.y)<1e-7,
+       "Alinhar centros X/Y nao centralizou as duas formas entre si");
+ // The external spare contour must never be moved by center-on-bed.
+ const int spare=w.view.editor.addContour({{510,10},{530,10},{520,25}},true);
+ const auto spareBefore=boundsOf(w.view.editor.state().doc,{spare});
+ w.view.rebuild();
+ w.view.activate({one,0});w.view.selected.insert(two);
+ w.findChild<QToolButton*>("quick_center_bed_19_8")->click();
+ const auto [unionLo,unionHi]=boundsOf(w.view.editor.state().doc,{one,two});
+ check(std::abs((unionLo.x+unionHi.x)/2.-w.workspaceCfg_.machineWidth/2.)<1e-7&&
+       std::abs((unionLo.y+unionHi.y)/2.-w.workspaceCfg_.machineHeight/2.)<1e-7,
+       "Centralizar selecao na mesa fisica nao respeitou dimensoes configuradas");
+ const auto spareAfter=boundsOf(w.view.editor.state().doc,{spare});
+ check(std::abs(spareBefore.first.x-spareAfter.first.x)<1e-7&&
+       std::abs(spareBefore.second.y-spareAfter.second.y)<1e-7,
+       "Centralizar selecao moveu objeto de reserva que nao foi selecionado");
  w.view.activate({one,0});
+ check(w.view.selected.size()==1&&w.view.selected.count(one)==1,
+       "Espelhamento isolado exige apenas o objeto ativo selecionado");
+ const auto [mirrorLo,mirrorHi]=boundsOf(w.view.editor.state().doc,{one});
+ const double mirrorAxisSum=mirrorLo.y+mirrorHi.y;
  const auto* before=get(w.view.editor.state().doc,{one,0});
- const double startY=before->nodes.front().p.y;
+ check(before!=nullptr&&!before->nodes.empty(),"Objeto nao encontrado para espelhar");
+ std::vector<Pt> originalNodes;
+ for(const auto& n:before->nodes)originalNodes.push_back(n.p);
+ const auto historyBeforeMirror=w.view.editor.undoCount();
  w.findChild<QToolButton*>("quick_flip_vertical")->click();
  const auto* after=get(w.view.editor.state().doc,{one,0});
- check(std::abs(after->nodes.front().p.y-(35.-startY))<1e-7,
-       "Espelhamento vertical nao refletiu os nos do objeto");
+ check(after!=nullptr&&after->nodes.size()==originalNodes.size(),
+       "Espelhamento vertical mudou a topologia do objeto");
+ for(std::size_t i=0;i<originalNodes.size();++i){
+  check(std::abs(after->nodes[i].p.y-(mirrorAxisSum-originalNodes[i].y))<1e-7&&
+        std::abs(after->nodes[i].p.x-originalNodes[i].x)<1e-7,
+        "Espelhamento vertical nao refletiu todos os nos no eixo atual");
+ }
+ check(w.view.editor.undoCount()==historyBeforeMirror+1,
+       "Espelhamento vertical nao criou uma unica transacao de Undo");
+ check(w.view.editor.undo(),"Undo do espelhamento vertical falhou");
+ const auto* undone=get(w.view.editor.state().doc,{one,0});
+ check(undone&&undone->nodes.size()==originalNodes.size(),
+       "Undo do espelhamento perdeu nos");
+ for(std::size_t i=0;i<originalNodes.size();++i)
+  check(dist(undone->nodes[i].p,originalNodes[i])<1e-7,
+        "Undo do espelhamento nao restaurou a geometria");
+ // Click through the ACTUAL side button with three selected polygons.
+ LabWindow distributed(Document{});distributed.resize(980,620);
+ distributed.show();QApplication::processEvents();
+ const int da=distributed.view.editor.rectangle({0,0},10,10);
+ const int db=distributed.view.editor.rectangle({30,0},20,10);
+ const int dc=distributed.view.editor.rectangle({100,0},10,10);
+ distributed.view.rebuild();distributed.view.activate({da,0});
+ distributed.view.selected.insert(db);distributed.view.selected.insert(dc);
+ const auto distribBefore=distributed.view.editor.state().doc;
+ distributed.findChild<QPushButton*>("distribute_horizontal_19_8")->click();
+ const auto distributedBox=boundsOf(distributed.view.editor.state().doc,{db});
+ check(std::abs(distributedBox.first.x-45.0)<1e-7,
+       "Botao distribuir horizontal nao aplicou espacamento igual");
+ check(distributed.view.editor.undo()&&sameDoc(distribBefore,distributed.view.editor.state().doc),
+       "Distribuicao horizontal nao foi reversivel em um Undo");
+ distributed.close();
  w.close();
- return {{"status","PASS"},{"icon_actions_working",true},
+ return {{"status","PASS"},{"icon_actions_working",true},{"distribution_button_offline",true},
+         {"align_both_centers",true},{"center_selection_on_bed",true},
+         {"spare_art_untouched",true},
          {"vertical_mirror",true},{"header_compact",true},
          {"physical_operation_disabled",true}};
+}
+
+static QJsonObject sketchIcons199Audit(const QString& folder){
+ // Prancha de auditoria deriva dos QPixmaps REAIS, sem imagem conceitual.
+ // Verifica segurança visual de cada glifo em botões de 20/24/32 px.
+ const auto& ids=alaser::alencarSketchIconIds();
+ check(ids.size()>=55,"Catalogo de icones original incompleto");
+ const int cols=8,cw=152,ch=105;
+ const int rows=(ids.size()+cols-1)/cols;
+ QImage gallery(cw*cols,ch*rows,QImage::Format_ARGB32_Premultiplied);
+ gallery.fill(QColor("#14202B"));
+ QPainter painter(&gallery);painter.setRenderHint(QPainter::Antialiasing,true);
+ QFont font=painter.font();font.setPixelSize(13);painter.setFont(font);
+ QSet<QString> seen;
+ QStringList problems;
+ int n=0;
+ for(const auto& id:ids){
+  if(seen.contains(id))continue;seen.insert(id);
+  const auto native=alaser::renderAlencarGlyph(id);
+  const auto disabled=alaser::renderAlencarGlyph(id,true);
+  const auto active=alaser::renderAlencarGlyph(id,false,true);
+  check(!native.isNull()&&!disabled.isNull()&&!active.isNull(),
+        "Glifo ausente no catalogo de rabiscos");
+  const QImage img=native.toImage().convertToFormat(QImage::Format_ARGB32);
+  int ink=0,border=0;
+  for(int y=0;y<img.height();++y)for(int x=0;x<img.width();++x){
+   const int alpha=img.pixelColor(x,y).alpha();
+   if(alpha>35){++ink;if(x<2||y<2||x>=img.width()-2||y>=img.height()-2)++border;}
+  }
+  if(ink<80 || border>3)
+   problems<<QString("%1: ink=%2, border=%3").arg(id).arg(ink).arg(border);
+  const int ox=(n%cols)*cw,oy=(n/cols)*ch;
+  painter.setPen(QPen(QColor("#405166"),1));painter.drawRect(ox+2,oy+2,cw-4,ch-4);
+  painter.drawPixmap(ox+12,oy+11,native);
+  painter.drawPixmap(ox+64,oy+15,disabled.scaled(40,40,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+  painter.drawPixmap(ox+108,oy+17,active.scaled(35,35,Qt::KeepAspectRatio,Qt::SmoothTransformation));
+  painter.setPen(QColor("#E9F0F6"));
+  painter.drawText(QRect(ox+7,oy+71,cw-14,24),Qt::AlignHCenter|Qt::AlignVCenter,
+                   painter.fontMetrics().elidedText(id,Qt::ElideRight,cw-18));
+  ++n;
+ }
+ painter.end();
+ if(!folder.isEmpty()){
+  check(QDir().mkpath(folder),"Nao criou pasta da prancha de iconografia");
+  check(gallery.save(folder+"/PRANCHA_ICONES_REAIS_19_9.png"),
+        "Nao conseguiu gravar prancha Qt dos icones");
+ }
+ if(!problems.isEmpty())
+  throw std::runtime_error(("Margem ou tinta ruim: "+problems.join("; ")).toStdString());
+ auto fingerprint=[](const QString& id)->QByteArray{
+  const QImage img=alaser::renderAlencarGlyph(id).toImage().convertToFormat(QImage::Format_ARGB32);
+  return QCryptographicHash::hash(
+    QByteArray(reinterpret_cast<const char*>(img.constBits()),img.sizeInBytes()),
+    QCryptographicHash::Sha256);
+ };
+ const std::array<std::pair<QString,QString>,18> criticalPairs={{{"flip_h","flip_v"},
+   {"distribute_horizontal","distribute_vertical"},
+   {"same_width","same_height"},{"align_center_x","align_center_y"},
+   {"undo","redo"},{"play","pause"},{"pause","stop"},
+   {"add_node","remove_node"},{"new","import"},
+   {"line_to_curve","curve_to_line"},{"settings","mechanism"},
+   {"gear_simple","mechanism"},{"settings","gear_simple"},
+   {"gear_pair","mechanism"},{"gear_pair","gear_simple"},{"rack","gear_pair"},
+   {"smooth_node","corner_node"},{"edit_nodes","select"}}};
+ // Mais importante que alterar um hash: diferenca perceptivel apos reducao a 20 px.
+ auto difference20=[](const QString& left,const QString& right)->int{
+  const auto normalized=[](const QString& id){
+   return alaser::renderAlencarGlyph(id).toImage()
+    .scaled(20,20,Qt::IgnoreAspectRatio,Qt::SmoothTransformation)
+    .convertToFormat(QImage::Format_ARGB32);
+  };
+  const auto a=normalized(left),b=normalized(right);
+  int distinct=0;
+  for(int y=0;y<20;++y)for(int x=0;x<20;++x){
+   const QColor ca=a.pixelColor(x,y),cb=b.pixelColor(x,y);
+   if(std::abs(ca.alpha()-cb.alpha())>40 ||
+      (std::max(ca.alpha(),cb.alpha())>70 &&
+       std::abs(ca.red()-cb.red())+std::abs(ca.green()-cb.green())+
+       std::abs(ca.blue()-cb.blue())>85))
+    ++distinct;
+  }
+  return distinct;
+ };
+ for(const auto& pair:criticalPairs){
+  check(fingerprint(pair.first)!=fingerprint(pair.second),
+        "Icones semanticos compartilham pixmaps identicos");
+  const int diff=difference20(pair.first,pair.second);
+  if(diff<18)
+   problems<<QString("%1/%2: diferenca 20px insuficiente (%3 pixels)")
+             .arg(pair.first).arg(pair.second).arg(diff);
+ }
+ // Uma prancha de comparacao pequena/real para aprovacao visual incremental.
+ const QStringList focus={"settings","mechanism","gear_simple","gear_pair","rack","line_to_curve",
+   "curve_to_line","smooth_node","corner_node","add_node","remove_node",
+   "edit_nodes","select","flip_h","flip_v","play","pause","stop"};
+ QImage details(840,((focus.size()+3)/4)*144,QImage::Format_ARGB32_Premultiplied);
+ details.fill(QColor("#17232D"));
+ QPainter audit(&details);audit.setRenderHint(QPainter::Antialiasing,true);
+ QFont auditFont=audit.font();auditFont.setPixelSize(13);audit.setFont(auditFont);
+ for(int i=0;i<focus.size();++i){
+  const int ox=(i%4)*210,oy=(i/4)*144;
+  audit.setPen(QPen(QColor("#3C5060"),1));
+  audit.drawRect(ox+4,oy+4,202,136);
+  const QPixmap pix=alaser::renderAlencarGlyph(focus[i]);
+  audit.drawPixmap(QRect(ox+20,oy+21,20,20),pix);
+  audit.drawPixmap(QRect(ox+63,oy+17,24,24),pix);
+  audit.drawPixmap(QRect(ox+111,oy+9,58,58),pix);
+  audit.setPen(QColor("#F2F4F7"));
+  audit.drawText(QRect(ox+9,oy+76,192,22),
+                 Qt::AlignHCenter|Qt::AlignVCenter,focus[i]);
+  audit.setPen(QColor("#A9B9C6"));
+  audit.drawText(QRect(ox+20,oy+102,180,19),
+                 Qt::AlignHCenter,"20px   24px   58px");
+ }
+ audit.end();
+ if(!folder.isEmpty())
+  check(details.save(folder+"/PRANCHA_CRITICOS_19_9.png"),
+        "Falhou exportacao de detalhes dos glifos reais");
+ if(!problems.isEmpty())
+  throw std::runtime_error(("Distincao visual insuficiente: "+problems.join("; ")).toStdString());
+ return {{"status","PASS"},{"icons_verified",n},{"gallery_file","PRANCHA_ICONES_REAIS_19_9.png"},
+         {"critical_gallery","PRANCHA_CRITICOS_19_9.png"},
+         {"perceptual_pairs_checked",int(criticalPairs.size())},
+         {"minimum_20px_distinct_pixels",18},
+         {"dpi_2x",true},{"normal_active_disabled_states",true},
+         {"hardware_commands_sent",false}};
+}
+static QJsonObject gearGenerator199Test(){
+ // No device, connection, G-code or physical action is involved.
+ alaser::gear::GearDialog dialog(400.,400.);
+ auto* teeth=dialog.findChild<QSpinBox*>("gear_teeth_19_9");
+ auto* module=dialog.findChild<QDoubleSpinBox*>("gear_module_19_9");
+ auto* pressure=dialog.findChild<QDoubleSpinBox*>("gear_pressure_19_9");
+ auto* bore=dialog.findChild<QDoubleSpinBox*>("gear_bore_19_9");
+ auto* pitch=dialog.findChild<QDoubleSpinBox*>("gear_circular_pitch_19_9");
+ auto* previewEnabled=dialog.findChild<QCheckBox*>("gear_preview_enabled_19_9");
+ auto* preview=dialog.findChild<QWidget*>("gear_preview_19_9");
+ check(teeth&&module&&pressure&&bore&&pitch&&previewEnabled&&preview,
+       "Controles do gerador ausentes");
+ check(teeth->value()==24&&std::abs(module->value()-3.)<1e-8&&
+       std::abs(pressure->value()-20.)<1e-8,"Defaults do gerador mudaram");
+ teeth->setValue(32);module->setValue(2.);bore->setValue(8.);
+ check(std::abs(pitch->value()-2.*std::numbers::pi)<2e-6,
+       "Passo circular nao acompanhou modulo");
+ auto info=dialog.findChild<QLabel*>("gear_summary_19_9");
+ check(info&&info->text().contains("68.00")&&info->text().contains("64.00"),
+       "Previa nao atualizou diametro primitivo/externo");
+ teeth->setValue(19);pressure->setValue(30.);bore->setValue(10.);
+ pitch->setValue(10.);
+ check(std::abs(module->value()-10./std::numbers::pi)<2e-6,
+       "Passo circular nao atualizou modulo");
+ check(info->text().contains("60.48")&&info->text().contains("66.85"),
+       "Previa nao corresponde a referencia Inkscape");
+ previewEnabled->setChecked(false);
+ check(preview->isHidden(),"Desativar previa nao ocultou componente");
+ previewEnabled->setChecked(true);
+ check(!preview->isHidden(),"Reativar previa nao restaurou componente");
+ const auto shape=alaser::gear::generate(dialog.parameters());
+ check(!shape.outer.empty()&&shape.bore.size()==96,"Geometria de engrenagem incorreta");
+ LabWindow w(Document{});w.resize(1100,750);w.show();QApplication::processEvents();
+ check(w.findChild<QAction*>("generate_gear_offline_19_9")!=nullptr,
+       "Menu Gerar > Engrenagem ausente");
+ auto* operation=w.findChild<QFrame*>("operation_strip_19_8");
+ auto* title=w.findChild<QLabel*>("operation_title_19_8");
+ auto* selectedButton=w.findChild<QPushButton*>("select");
+ auto* lineButton=w.findChild<QPushButton*>("line");
+ auto* stopButton=w.findChild<QToolButton*>("operation_stop_disabled");
+ auto* startButton=w.findChild<QToolButton*>("operation_start_disabled");
+ auto* pauseButton=w.findChild<QToolButton*>("operation_pause_continue_disabled");
+ check(operation&&operation->height()<=35&&title&&title->text()=="LASER OFF",
+       "Rodape nao esta compacto ou perdeu estado de seguranca");
+ check(selectedButton&&lineButton&&selectedButton->iconSize().width()>=22&&
+       lineButton->iconSize().width()>=22&&
+       !selectedButton->icon().isNull()&&!lineButton->icon().isNull(),
+       "Icones de desenho nao estao completos e legiveis");
+ check(stopButton&&startButton&&pauseButton&&
+       !startButton->isEnabled()&&!pauseButton->isEnabled()&&!stopButton->isEnabled()&&
+       !stopButton->icon().pixmap(QSize(23,23),QIcon::Disabled).isNull(),
+       "Icones e bloqueio fisico de operacao comprometidos");
+ const int prior=w.view.editor.rectangle({10,10},12,10);
+ const auto before=w.view.editor.state().doc;
+ const auto undo=w.view.editor.undoCount();
+ w.insertGeneratedGear(dialog.parameters(),{200.,200.});
+ check(w.view.editor.undoCount()==undo+1,"Geracao nao foi atomica");
+ check(w.view.editor.state().doc.contours.size()==before.contours.size()+2,
+       "Engrenagem e furo nao formaram dois contornos");
+ check(w.view.editor.state().objects.size()==3,
+       "Geracao removeu outros objetos");
+ for(const auto& c:w.view.editor.state().doc.contours)
+  if(c.key.object!=prior)
+   check(c.closed&&c.nodes.size()>=90,"Contorno de engrenagem/furo aberto");
+ check(w.view.editor.undo()&&sameDoc(before,w.view.editor.state().doc),
+       "Undo nao restaurou projeto apos engrenagem");
+ alaser::gear::CompoundGearDialog pairDialog(alaser::gear::CompoundKind::Pair,400.,400.);
+ auto* pairDriver=pairDialog.findChild<QSpinBox*>("gear_compound_teeth_19_9");
+ auto* pairDriven=pairDialog.findChild<QSpinBox*>("gear_pair_driven_teeth_19_9");
+ auto* pairSummary=pairDialog.findChild<QLabel*>("gear_compound_summary_19_9");
+ auto* pairPreview=pairDialog.findChild<QWidget*>("gear_compound_preview_19_9");
+ check(pairDriver&&pairDriven&&pairSummary&&pairPreview,"Controles do par nominal ausentes");
+ check(pairDriver->value()==19&&pairDriven->value()==38,
+       "Defaults do par nominal incorretos");
+ auto* pairModule=pairDialog.findChild<QDoubleSpinBox*>("gear_compound_module_19_9");
+ check(pairModule!=nullptr,"Modulo do par ausente");
+ pairModule->setValue(3.);
+ check(pairSummary->text().contains("85.500"),
+       "Distancia entre centros do par nao foi recalculada");
+ check(w.findChild<QAction*>("generate_gear_pair_offline_19_9")!=nullptr,
+       "Menu de par nominal ausente");
+ const auto pairUndo=w.view.editor.undoCount();
+ w.insertGeneratedPair(pairDialog.pairParameters(),{160.,160.});
+ check(w.view.editor.undoCount()==pairUndo+1,"Par nao gerou Undo unico");
+ check(w.view.editor.state().doc.contours.size()==before.contours.size()+4,
+       "Par nao criou engrenagens e furos");
+ check(w.view.editor.undo()&&sameDoc(before,w.view.editor.state().doc),
+       "Undo do par nao restaurou geometria");
+
+ alaser::gear::CompoundGearDialog rackDialog(alaser::gear::CompoundKind::Rack,400.,400.);
+ auto* rackTeeth=rackDialog.findChild<QSpinBox*>("gear_compound_teeth_19_9");
+ auto* rackSummary=rackDialog.findChild<QLabel*>("gear_compound_summary_19_9");
+ check(rackTeeth&&rackSummary&&rackTeeth->value()==10,
+       "Controles da cremalheira ausentes");
+ check(rackSummary->text().contains("94.25"),
+       "Passo/comprimento de cremalheira incorretos");
+ check(w.findChild<QAction*>("generate_gear_rack_offline_19_9")!=nullptr,
+       "Menu de cremalheira ausente");
+ const auto rackUndo=w.view.editor.undoCount();
+ w.insertGeneratedRack(rackDialog.rackParameters(),{120.,200.});
+ check(w.view.editor.undoCount()==rackUndo+1,"Cremalheira nao gerou Undo unico");
+ check(w.view.editor.state().doc.contours.size()==before.contours.size()+1,
+       "Cremalheira nao criou contorno unico");
+ check(w.view.editor.undo()&&sameDoc(before,w.view.editor.state().doc),
+       "Undo da cremalheira nao restaurou geometria");
+
+ alaser::mechanisms::MechanismStudioDialog studio;
+ auto* preset=studio.findChild<QComboBox*>("mechanism_preset_19_9");
+ auto* material=studio.findChild<QComboBox*>("mechanism_material_19_9");
+ auto* thickness=studio.findChild<QDoubleSpinBox*>("mechanism_thickness_19_9");
+ auto* driver=studio.findChild<QSpinBox*>("mechanism_teeth_driver_19_9");
+ auto* driven=studio.findChild<QSpinBox*>("mechanism_teeth_driven_19_9");
+ auto* play=studio.findChild<QPushButton*>("mechanism_play_19_9");
+ auto* pause=studio.findChild<QPushButton*>("mechanism_pause_19_9");
+ auto* reset=studio.findChild<QPushButton*>("mechanism_reset_19_9");
+ auto* canvas=studio.findChild<QWidget*>("mechanism_animation_canvas_19_9");
+ auto* studioInfo=studio.findChild<QLabel*>("mechanism_info_19_9");
+ auto* warnings=studio.findChild<QLabel*>("mechanism_warnings_19_9");
+ check(preset&&material&&thickness&&driver&&driven&&play&&pause&&reset&&canvas&&studioInfo&&warnings,
+       "Oficina de mecanismos: widgets essenciais ausentes");
+ check(preset->count()==3&&material->count()==3&&
+       studioInfo->text().contains("Distância nominal")&&
+       warnings->text().contains("NAO aplicados"),
+       "Oficina de mecanismos: presets, materiais ou avisos ausentes");
+ auto* simpleAction=w.findChild<QAction*>("generate_gear_offline_19_9");
+ auto* pairAction=w.findChild<QAction*>("generate_gear_pair_offline_19_9");
+ auto* rackAction=w.findChild<QAction*>("generate_gear_rack_offline_19_9");
+ auto* mechanismAction=w.findChild<QAction*>("open_mechanism_studio_19_9");
+ check(simpleAction&&pairAction&&rackAction&&mechanismAction&&
+       !simpleAction->icon().isNull()&&!pairAction->icon().isNull()&&
+       !rackAction->icon().isNull()&&!mechanismAction->icon().isNull(),
+       "Engrenagens e mecanismos precisam de icones reais nas acoes");
+ check(w.findChild<QAction*>("open_mechanism_studio_19_9")!=nullptr,
+       "Gerar > Engrenagens > Oficina de Mecanismos ausente");
+ studio.show();QApplication::processEvents();
+ play->click();QApplication::processEvents();
+ check(!play->isEnabled()&&pause->isEnabled(),"Animação offline não iniciou");
+ pause->click();QApplication::processEvents();
+ check(play->isEnabled()&&!pause->isEnabled(),"Pausar simulação falhou");
+ reset->click();
+ preset->setCurrentIndex(0);
+ check(studio.settings().preset==alaser::mechanisms::Template::ClockTrain,
+       "Preset de estudo de relógio não foi selecionado");
+ const auto countBefore=w.view.editor.state().doc.contours.size();
+ const auto undoBefore=w.view.editor.undoCount();
+ w.insertMechanismStudy(studio.settings());
+ check(w.view.editor.undoCount()==undoBefore+1&&
+       w.view.editor.state().doc.contours.size()==countBefore+6,
+       "Trem de três engrenagens não criou contornos em Undo único");
+ check(w.view.editor.undo()&&sameDoc(before,w.view.editor.state().doc),
+       "Undo do mecanismo não preservou a arte anterior");
+ preset->setCurrentIndex(2);
+ check(studio.settings().preset==alaser::mechanisms::Template::SchoolRack,
+       "Preset escolar de cremalheira ausente");
+ const auto rackBefore=w.view.editor.undoCount();
+ w.insertMechanismStudy(studio.settings());
+ check(w.view.editor.undoCount()==rackBefore+1&&
+       w.view.editor.state().doc.contours.size()==countBefore+3,
+       "Pinhão/cremalheira não gerados numa transação");
+ check(w.view.editor.undo()&&sameDoc(before,w.view.editor.state().doc),
+       "Undo da biblioteca escolar falhou");
+ studio.reject();
+ return {{"status","PASS"},{"gear_preview",true},{"editable_contours",true},
+         {"single_undo",true},{"old_objects_preserved",true},
+         {"pair_nominal_preview_and_undo",true},{"rack_nominal_preview_and_undo",true},
+         {"mechanism_studio_animation_presets_and_undo",true},
+         {"hardware_commands_sent",false}};
 }
 static QJsonObject rasterObject198Test(){
  QTemporaryDir temporary;
@@ -6647,8 +9221,800 @@ static QJsonObject rasterObject198Test(){
          {"image_position_scale_preserved",true},{"sha256_guard",true},
          {"legacy_without_bitmap",true},{"hardware_commands_sent",false}};
 }
+
+QJsonObject nativeImportGui199Test(){
+ // Test the actual LabWindow experimental integration with synthetic geometry.
+ // No confirmation dialog, no QSettings persistence, no laser hardware.
+ QTemporaryDir temp;check(temp.isValid(),"native GUI temporary directory unavailable");
+ const QString file=temp.filePath("native_gui_19_9.lbrn2");
+ QFile fixture(file);check(fixture.open(QIODevice::WriteOnly),"native GUI fixture unavailable");
+ const QByteArray xml=R"XML(<?xml version="1.0"?>
+<LightBurnProject MirrorX="False" MirrorY="False">
+<Shape Type="Path" CutIndex="1" VertID="1" PrimID="1">
+<XForm>1 0 0 1 0 0</XForm>
+<VertList>V0 0V10 0V10 10V0 10</VertList>
+<PrimList>LineClosed</PrimList></Shape>
+<Shape Type="Ellipse" CutIndex="2" Rx="2" Ry="3">
+<XForm>1 0 0 1 20 25</XForm></Shape>
+</LightBurnProject>)XML";
+ check(fixture.write(xml)==xml.size(),"native GUI fixture write incomplete");
+ fixture.close();
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ w.view.editor.rectangle({2.,3.},5.,5.);w.view.rebuild();
+ check(w.view.editor.state().doc.contours.size()==1,"native GUI initial polygon fixture missing");
+ const auto before=stateText(w.view.editor.state());
+ const QString invalidPath=temp.filePath("bad_native_gui.lbrn2");
+ QFile invalid(invalidPath);check(invalid.open(QIODevice::WriteOnly),"native GUI invalid fixture unavailable");
+ const QByteArray invalidXml=R"XML(<LightBurnProject><Shape Type="Ellipse" CutIndex="2" Rx="-1" Ry="3"/></LightBurnProject>)XML";
+ check(invalid.write(invalidXml)==invalidXml.size(),"native GUI invalid fixture incomplete");
+ invalid.close();
+ bool refused=false;
+ try{w.importNativeLightBurn199(invalidPath,false);}
+ catch(const std::exception&){refused=true;}
+ check(refused&&stateText(w.view.editor.state())==before,
+       "Native GUI parser failure destroyed unsaved current project");
+ // Nested groups must NOT be silently flattened into editable contours.
+ // Guard the current limitation until native group IDs/transforms are saved.
+ const QString groupedFile=temp.filePath("nested_groups_19_9.lbrn2");
+ const QByteArray groupedXml=R"GROUP(<LightBurnProject>
+<Shape Type="Group"><XForm>1 0 0 1 10 20</XForm><Children>
+<Shape Type="Path" CutIndex="1"><XForm>1 0 0 1 0 0</XForm>
+<VertList>V0 0V10 0V10 10V0 10</VertList>
+<PrimList>LineClosed</PrimList></Shape>
+</Children></Shape></LightBurnProject>)GROUP";
+ QFile groupFixture(groupedFile);
+ check(groupFixture.open(QIODevice::WriteOnly),"nested group fixture not writable");
+ check(groupFixture.write(groupedXml)==groupedXml.size(),
+       "nested group fixture incomplete");
+ groupFixture.close();
+ bool groupRefused=false;
+ try{w.importNativeLightBurn199(groupedFile,false);}
+ catch(const std::exception& ex){
+  groupRefused=QString::fromUtf8(ex.what()).contains("group hierarchy");
+ }
+ check(groupRefused&&stateText(w.view.editor.state())==before,
+       "Native GUI silently flattened groups or replaced unsaved work");
+ check(QFileInfo(groupedFile).size()==groupedXml.size(),
+       "Native GUI changed rejected LightBurn group source");
+ w.importNativeLightBurn199(file,false);QApplication::processEvents();
+ check(w.view.editor.state().doc.contours.empty(),"native GUI imported polylines instead of native cubics");
+ check(w.curves&&w.curves->committed().contours.size()==2,"native GUI curve document mismatch");
+ check(w.view.nativeItemCount()==2&&w.view.hasNativeDocument(),
+       "native GUI scene native curves were not rendered");
+ check(w.view.nativeModeActive(),"native GUI mode was not enabled");
+ check(w.projectPath.isEmpty(),"native GUI import could overwrite LBRN2 original");
+ // Selecting a native path must not recreate every other imported curve.
+ const auto secondPathBeforeSelect=w.view.nativeItemPath(w.curves->committed().contours.at(1).key);
+ const auto completeBuildsBeforeSelect=w.view.nativeFullPathBuilds();
+ const auto selectiveBuildsBeforeSelect=w.view.nativeSelectivePathBuilds();
+ check(w.view.selectNativeAt(Pt{5.,0.},false),"native GUI could not select the first closed contour");
+ QApplication::processEvents();
+ check(!w.view.nativeLegacySelectionRebuild(),
+       "native GUI regression must use the default selective update policy");
+ check(w.view.nativeFullPathBuilds()==completeBuildsBeforeSelect,
+       "native selection triggered full scene Bézier geometry rebuild");
+ check(w.view.nativeSelectivePathBuilds()-selectiveBuildsBeforeSelect<=1,
+       "native selection rebuilt more than the selected contour");
+ check(w.view.nativeItemPath(w.curves->committed().contours.at(1).key)==secondPathBeforeSelect,
+       "native selection changed an unrelated cubic path");
+ const auto& state=w.view.editor.state();
+ check(state.layers.count(1)&&state.layers.count(2)&&
+       !state.layers.at(1).parametersVerified&&
+       !state.layers.at(2).parametersVerified,
+       "native GUI import dropped source CutIndex or trusted unknown settings");
+ const auto& imported=w.curves->committed();
+ check(imported.contours.at(0).edgeKind.size()==4&&
+       imported.contours.at(1).edgeKind.size()==16,
+       "native GUI line and ellipse edges missing");
+ check(w.view.nativeItemPath(imported.contours.at(1).key).elementCount()>16,
+       "native GUI cubic paths were not rendered");
+ const QString copy=temp.filePath("native_gui_roundtrip.alaser");
+ (void)saveNative(copy,w.view.editor.state(),imported);
+ const auto reopened=openNative(copy);
+ check(reopened.version==5&&reopened.curves.contours.size()==imported.contours.size(),
+       "native GUI saved project not reopened");
+ check(serialize(encodeCurves(reopened.curves))==serialize(encodeCurves(imported)),
+       "native GUI saved geometry not identical");
+ const auto restored=editorStateForIntegratedProject(reopened);
+ check(restored.layers.count(1)&&restored.layers.count(2)&&
+       !restored.layers.at(1).parametersVerified&&
+       !restored.layers.at(2).parametersVerified,
+       "native GUI v5 ZIP lost unverified source CutIndex metadata");
+ const auto withNative=sim198::withNativeCurves(restored,&reopened.curves);
+ check(withNative.missingLayers==0&&withNative.unverifiedLayerParameters==2,
+       "native GUI preview silently trusted unverified LightBurn settings");
+ // Prior v5 files with Bézier layer IDs but no matching layer definitions must
+ // recover their IDs in memory without rewriting or remapping any curves.
+ const auto historical=buildEditedIntegratedProject(fromDocument(Document{}),imported);
+ const auto repaired=editorStateForIntegratedProject(historical);
+ check(repaired.layers.count(1)&&repaired.layers.count(2)&&
+       !repaired.layers.at(1).parametersVerified&&
+       !repaired.layers.at(2).parametersVerified,
+       "legacy v5 native layer references not repaired safely on open");
+ check(serialize(encodeCurves(historical.curves))==serialize(encodeCurves(imported)),
+       "legacy v5 layer repair changed native geometry");
+ const auto original=QFileInfo(file).size();
+ check(original==xml.size(),"native GUI modified original LightBurn file");
+ return QJsonObject{{"status","PASS"},{"shapes",2},{"native_nodes",int(imported.contours[0].nodes.size()+imported.contours[1].nodes.size())},
+                    {"alaser_v5_zip_roundtrip",true},{"layer_ids_preserved",true},
+                    {"unverified_parameters_preserved",true},
+                    {"legacy_missing_layers_repaired_in_memory",true},
+                    {"selection_path_rebuild_is_incremental",true},
+                    {"grouped_lbrn2_rejected_without_data_loss",true},
+                    {"original_lbrn2_unchanged",true},
+                    {"hardware_commands_sent",false}};
+}
+
+QJsonObject groupedDrag199Test(){
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ auto& v=w.view;
+ v.setTransform(QTransform::fromScale(4.,4.));v.centerOn(QPointF(85,65));
+ for(int i=0;i<40;++i)v.editor.rectangle(Pt{30.+12.*(i%8),30.+12.*(i/8)},8.,8.);
+ v.rebuild();QApplication::processEvents();
+ check(v.editor.state().doc.contours.size()==40,"Fixture: 40 contours missing");
+ const auto before=stateText(v.editor.state());
+ const Pt original=v.editor.state().doc.contours.front().nodes.front().p;
+ v.selectAllVisible();check(v.selected.size()==40,"Fixture: selection missing");
+ const QPoint origin=v.mapFromScene(QPointF(70.,54.)),finish=v.mapFromScene(QPointF(74.,57.));
+ const QPointF delta=v.mapToScene(finish)-v.mapToScene(origin);
+ QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,origin);
+ QApplication::processEvents();
+ check(v.groupedDragStarts()==1,"40-object drag did not group preview");
+ int groupsDuringPreview=0;
+ for(auto* item:v.scene()->items())if(item->type()==QGraphicsItemGroup::Type)++groupsDuringPreview;
+ check(groupsDuringPreview==1,"Drag preview must use exactly one temporary graphics group");
+ QTest::mouseMove(v.viewport(),finish);QApplication::processEvents();
+ check(v.groupedDragFrameUpdates()>0,"Grouped preview did not move");
+ if(v.dragOverlayLocalExperiment199()){
+  check(v.dragOverlayLocalRequests199()>0,"Opt-in drag did not request local overlay repaint");
+  check(v.dragOverlayFullFallbacks199()==0,"Opt-in drag fell back to full viewport unexpectedly");
+ }else{
+  check(v.dragOverlayLocalRequests199()==0,"Legacy drag unexpectedly used local repaint");
+ }
+ check(stateText(v.editor.state())==before,"Preview altered canonical state");
+ QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,finish);
+ QApplication::processEvents();checkRendered(w);
+ for(const auto& contour:v.editor.state().doc.contours){
+  auto* item=v.pathItem(contour.key);
+  check(!item->parentItem()&&item->pos()==QPointF{},
+        "Transient drag transform leaked into a canonical shape item");
+ }
+ for(auto* item:v.scene()->items())
+  check(item->type()!=QGraphicsItemGroup::Type,
+        "Transient graphics group leaked after release");
+ const Pt moved=v.editor.state().doc.contours.front().nodes.front().p;
+ check(std::abs(moved.x-original.x-delta.x())<1e-6&&std::abs(moved.y-original.y-delta.y())<1e-6,
+       "Grouped drag committed wrong delta");
+ check(v.editor.undoCount()==40,"Drag did not create atomic history");
+ pressKey(w,Qt::Key_Z,Qt::ControlModifier);
+ check(stateText(v.editor.state())==before,"Undo of grouped drag mismatch");
+ checkRendered(w);pressKey(w,Qt::Key_Y,Qt::ControlModifier);checkRendered(w);
+ const Pt redo=v.editor.state().doc.contours.front().nodes.front().p;
+ check(std::abs(redo.x-moved.x)<1e-6&&std::abs(redo.y-moved.y)<1e-6,
+       "Redo of grouped drag mismatch");
+ return QJsonObject{{"status","PASS"},{"selected_objects",40},
+                    {"grouped_starts",v.groupedDragStarts()},
+                    {"grouped_frames",v.groupedDragFrameUpdates()},
+                    {"drag_overlay_local_experiment",v.dragOverlayLocalExperiment199()},
+                    {"drag_overlay_cached_experiment",v.dragOverlayCachedExperiment199()},
+                    {"drag_overlay_dense_guard",v.dragOverlayDenseGuard199()},
+                    {"drag_overlay_dense_legacy_updates",double(v.dragOverlayDenseLegacyUpdates199())},
+                    {"drag_overlay_local_requests",double(v.dragOverlayLocalRequests199())},
+                    {"drag_overlay_full_fallbacks",double(v.dragOverlayFullFallbacks199())},
+                    {"undo_redo_preserved",true},{"hardware_commands_sent",false}};
+}
+
+
+// Controlled synthetic input, REAL 575-contour fixture. Same Qt mouse events,
+// zoom, selection and geometry for OFF/ON; NOT a substitute for manual visual QA.
+QJsonObject controlledDenseDrag199Test(const QString& csv){
+ constexpr int kFrames=144;
+ LabWindow w(readCsv(csv.toStdString()));
+ w.resize(1180,680);w.show();QApplication::processEvents();
+ auto& v=w.view;
+ const auto& initialDoc=v.editor.state().doc;
+ check(initialDoc.contours.size()==575,"Dense drag requires 575 contours");
+ check(countNodes(initialDoc)==13415,"Dense drag fixture nodes mismatch");
+ check(initialDoc.contours[0].nodes.size()>15,"Dense drag fixture missing reference node");
+ const QPointF seed=toQt(initialDoc.contours[0].nodes[15].p);
+ v.setTransform(QTransform::fromScale(1.2,1.2));
+ v.centerOn(seed);QApplication::processEvents();
+ v.selectAllVisible();QApplication::processEvents();
+ check(v.selected.size()==575,"Dense drag failed to select 575 shapes");
+ const auto originalState=stateText(v.editor.state());
+ const Document originalDoc=v.editor.state().doc;
+ const QPoint start=v.mapFromScene(seed);
+ check(v.viewport()->rect().adjusted(20,20,-60,-50).contains(start),
+       "Dense drag anchor outside safe viewport area");
+ v.setFocus();v.viewport()->setFocus();
+ QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,start);
+ QApplication::processEvents();
+ check(v.groupedDragStarts()==1,"Dense drag preview was not grouped");
+ const int initialOverlay= int(v.dragOverlayLocalRequests199());
+ // Discard startup, marquee/selection and press paints from the measurement.
+ v.paintMs.clear();v.inputToPaintMs.clear();v.viewportPaintBBoxFractions.clear();
+ v.foregroundMs.clear();v.backgroundMs.clear();
+ v.pairedOtherInclusiveMs199.clear();v.pairedTotalMs199.clear();
+ v.pairedPhaseInvalid199=0;
+ v.contourPaintFrameMs20_.clear();v.noncontourInclusiveMs20_.clear();
+ v.contourPaintItemCalls20_.clear();v.contourProbeInvalid20_=0;
+ v.resetContourPaintStats20();
+ v.measurePairedPaintPhases199=true;
+ QPoint finish=start;
+ for(int i=1;i<=kFrames;++i){
+  // Deterministic bounded trajectory, ends at known displacement.
+  const int dx=8+((i*7)%32),dy=6+((i*3)%18);
+  finish=start+QPoint(dx,dy);
+  QTest::mouseMove(v.viewport(),finish,1);
+  QApplication::processEvents();
+ }
+ // Allow pending paint updates without forcing artificial full-view repaint.
+ QTest::qWait(25);QApplication::processEvents();
+ check(v.groupedDragFrameUpdates()>=kFrames,
+       "Dense drag mouse events were not accepted");
+ const int paints=int(v.paintMs.size());
+ const int inputPaints=int(v.inputToPaintMs.size());
+ check(paints>=30,"Dense drag paint sampling too sparse");
+ check(inputPaints>=20,"Dense drag input-to-paint sampling too sparse");
+ check(!v.viewportPaintBBoxFractions.empty(),"Missing repaint area data");
+ // Phase probes are already part of the Qt view. Collect their p95/p99
+ // for the same drag window as paintMs, without modifying paint behavior.
+ check(!v.backgroundMs.empty()&&!v.foregroundMs.empty(),
+       "Controlled drag paint phase sampling missing");
+ check(v.pairedOtherInclusiveMs199.size()>=30&&
+       v.pairedTotalMs199.size()==v.pairedOtherInclusiveMs199.size(),
+       "Controlled drag paired phase sampling missing");
+ check(v.pairedPhaseInvalid199==0,"Paint phase instrumentation returned invalid residual");
+ if(v.vectorPaintProbeEnabled20()){
+  check(v.contourProbeInvalid20_==0,"Contour paint probe invalid frame");
+  check(v.contourPaintFrameMs20_.size()==v.pairedOtherInclusiveMs199.size(),
+        "Contour paint sampling count differs from paired total");
+  check(percentile(v.contourPaintItemCalls20_,.95)>=1.,
+        "No vector contour paints collected in benchmark");
+ }
+ v.measurePairedPaintPhases199=false;
+ // Privacy: export only aggregate node bands and rank by cost. No IDs or paths.
+ QJsonArray contourBuckets20,contourTop20;
+ quint64 totalCalls20=0;
+ double totalVectorMs20=0.;
+ if(v.vectorPaintProbeEnabled20()){
+  struct Bucket20{int contours=0;quint64 calls=0;double ms=0.;};
+  std::array<Bucket20,4> bins{};
+  std::vector<std::size_t> ranked;
+  ranked.reserve(v.contourPaintStats20().size());
+  for(std::size_t i=0;i<v.contourPaintStats20().size();++i){
+   const auto& st=v.contourPaintStats20()[i];
+   check(st.nodeCount>0&&st.pathElements>=0,
+         "Invalid contour paint complexity");
+   check(std::isfinite(st.elapsedMs)&&std::isfinite(st.maxMs)&&
+         st.elapsedMs>=0.&&st.maxMs>=0.,"Nonfinite contour paint time");
+   const int b=st.nodeCount<=8?0:st.nodeCount<=32?1:st.nodeCount<=128?2:3;
+   ++bins[b].contours;bins[b].calls+=st.calls;bins[b].ms+=st.elapsedMs;
+   totalCalls20+=st.calls;totalVectorMs20+=st.elapsedMs;
+   ranked.push_back(i);
+  }
+  check(ranked.size()==575,"Missing contour paint profile items");
+  const std::array<const char*,4> bands{{"1-8","9-32","33-128","129+"}};
+  for(std::size_t i=0;i<bins.size();++i){
+   const auto& b=bins[i];
+   contourBuckets20.append(QJsonObject{
+    {"node_band",bands[i]},{"contours",b.contours},
+    {"paint_calls",double(b.calls)},{"total_ms",b.ms}});
+  }
+  std::sort(ranked.begin(),ranked.end(),[&](std::size_t a,std::size_t b){
+   const auto& left=v.contourPaintStats20()[a];
+   const auto& right=v.contourPaintStats20()[b];
+   return left.elapsedMs==right.elapsedMs?a<b:left.elapsedMs>right.elapsedMs;
+  });
+  const int n=std::min(10,int(ranked.size()));
+  for(int rank=0;rank<n;++rank){
+   const auto& st=v.contourPaintStats20()[ranked[std::size_t(rank)]];
+   contourTop20.append(QJsonObject{
+    {"rank",rank+1},{"node_count",st.nodeCount},
+    {"path_element_count",st.pathElements},{"paint_calls",double(st.calls)},
+    {"total_ms",st.elapsedMs},
+    {"mean_ms_per_call",st.calls?st.elapsedMs/double(st.calls):0.},
+    {"max_single_call_ms",st.maxMs}});
+  }
+  check(totalCalls20>=quint64(v.contourPaintFrameMs20_.size()),
+        "Insufficient profiled contour calls");
+ }
+ const QJsonObject measured{
+  {"frames",kFrames},{"paint_samples",paints},
+  {"paint_p50_ms",percentile(v.paintMs,.50)},
+  {"paint_p95_ms",percentile(v.paintMs,.95)},
+  {"paint_p99_ms",percentile(v.paintMs,.99)},
+  {"background_samples",int(v.backgroundMs.size())},
+  {"background_p95_ms",percentile(v.backgroundMs,.95)},
+  {"background_p99_ms",percentile(v.backgroundMs,.99)},
+  {"foreground_samples",int(v.foregroundMs.size())},
+  {"foreground_p95_ms",percentile(v.foregroundMs,.95)},
+  {"foreground_p99_ms",percentile(v.foregroundMs,.99)},
+  {"paired_frame_samples",int(v.pairedOtherInclusiveMs199.size())},
+  {"paired_other_inclusive_p50_ms",percentile(v.pairedOtherInclusiveMs199,.50)},
+  {"paired_other_inclusive_p95_ms",percentile(v.pairedOtherInclusiveMs199,.95)},
+  {"paired_other_inclusive_p99_ms",percentile(v.pairedOtherInclusiveMs199,.99)},
+  {"paired_total_p95_ms",percentile(v.pairedTotalMs199,.95)},
+  {"paired_phase_invalid",double(v.pairedPhaseInvalid199)},
+  {"vector_probe_enabled",v.vectorPaintProbeEnabled20()},
+  {"vector_paint_frame_samples",int(v.contourPaintFrameMs20_.size())},
+  {"vector_paint_p95_ms",v.vectorPaintProbeEnabled20()?
+     percentile(v.contourPaintFrameMs20_,.95):0.},
+  {"vector_paint_p99_ms",v.vectorPaintProbeEnabled20()?
+     percentile(v.contourPaintFrameMs20_,.99):0.},
+  {"vector_paint_item_calls_p95",v.vectorPaintProbeEnabled20()?
+     percentile(v.contourPaintItemCalls20_,.95):0.},
+  {"noncontour_inclusive_p95_ms",v.vectorPaintProbeEnabled20()?
+     percentile(v.noncontourInclusiveMs20_,.95):0.},
+  {"noncontour_inclusive_p99_ms",v.vectorPaintProbeEnabled20()?
+     percentile(v.noncontourInclusiveMs20_,.99):0.},
+  {"vector_probe_invalid_frames",double(v.contourProbeInvalid20_)},
+  {"vector_total_paint_calls",double(totalCalls20)},
+  {"vector_total_paint_time_ms",totalVectorMs20},
+  {"vector_calls_mean_per_frame",v.vectorPaintProbeEnabled20()&&paints>0?
+    double(totalCalls20)/double(paints):0.},
+  {"vector_complexity_buckets",contourBuckets20},
+  {"vector_top_paint_cost",contourTop20},
+  {"input_to_paint_samples",inputPaints},
+  {"input_to_paint_p95_ms",percentile(v.inputToPaintMs,.95)},
+  {"viewport_bbox_p95_fraction",percentile(v.viewportPaintBBoxFractions,.95)},
+  {"viewport_bbox_samples",int(v.viewportPaintBBoxFractions.size())}
+ };
+ check(stateText(v.editor.state())==originalState,
+       "Dense drag changed model before mouse release");
+ const QPointF delta=v.mapToScene(finish)-v.mapToScene(start);
+ QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,finish);
+ QApplication::processEvents();
+ check(v.editor.state().doc.contours.size()==575,"Dense drag changed contour count");
+ const auto& moved=v.editor.state().doc.contours;
+ for(size_t i=0;i<moved.size();++i){
+  check(moved[i].key==originalDoc.contours[i].key,
+        "Dense drag changed contour identity");
+  check(moved[i].nodes.size()==originalDoc.contours[i].nodes.size(),
+        "Dense drag changed node count");
+  for(size_t n=0;n<moved[i].nodes.size();++n){
+   const Pt actual=moved[i].nodes[n].p,old=originalDoc.contours[i].nodes[n].p;
+   check(std::abs(actual.x-old.x-delta.x())<1e-5 &&
+         std::abs(actual.y-old.y-delta.y())<1e-5,
+         "Dense drag changed canonical node geometry unexpectedly");
+  }
+ }
+ for(auto* item:v.scene()->items())
+  check(item->type()!=QGraphicsItemGroup::Type,
+        "Dense drag left a transient graphics group");
+ const auto movedText=stateText(v.editor.state());
+ pressKey(w,Qt::Key_Z,Qt::ControlModifier);QApplication::processEvents();
+ check(stateText(v.editor.state())==originalState,
+       "Dense drag Undo did not restore canonical geometry");
+ pressKey(w,Qt::Key_Y,Qt::ControlModifier);QApplication::processEvents();
+ check(stateText(v.editor.state())==movedText,
+       "Dense drag Redo did not restore committed geometry");
+ checkRendered(w);
+ check(v.dragOverlayLocalExperiment199() || v.dragOverlayLocalRequests199()==0,
+       "OFF mode unexpectedly used local overlay updates");
+ if(v.dragOverlayLocalExperiment199()){
+  if(v.dragOverlayDenseGuard199()){
+   check(v.dragOverlayLocalRequests199()==quint64(initialOverlay) &&
+         v.dragOverlayDenseLegacyUpdates199()>=kFrames,
+         "Mode 3 large selection must use legacy repaint fallback");
+  }else{
+   check(v.dragOverlayLocalRequests199()>quint64(initialOverlay),
+         "ON mode did not enter local overlay repaint");
+  }
+ }
+ return {
+  {"schema","alencar-laser-controlled-drag-575-19.9"},
+  {"status","PASS_SYNTHETIC_MANUAL_PENDING"},
+  {"selected_contours",575},{"fixture_nodes",13415},
+  {"zoom_factor",1.2},
+  {"viewport_width",v.viewport()->width()},
+  {"viewport_height",v.viewport()->height()},
+  {"dpr",v.viewport()->devicePixelRatioF()},
+  {"qt",qVersion()},
+  {"overlay_local_enabled",v.dragOverlayLocalExperiment199()},
+  {"overlay_cached_bounds_enabled",v.dragOverlayCachedExperiment199()},
+  {"overlay_dense_guard_enabled",v.dragOverlayDenseGuard199()},
+  {"overlay_dense_legacy_updates",double(v.dragOverlayDenseLegacyUpdates199())},
+  {"overlay_local_requests",double(v.dragOverlayLocalRequests199())},
+  {"overlay_full_fallbacks",double(v.dragOverlayFullFallbacks199())},
+  {"measured",measured},
+  {"geometry_preserved",true},
+  {"undo_redo_preserved",true},
+  {"machine_commands_sent",false},
+  {"production_homologated",false}
+ };
+}
+
+QJsonObject groupedCenterTransform199Test(){
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ auto& v=w.view;
+ v.setTransform(QTransform::fromScale(4.,4.));v.centerOn(QPointF(76.,58.));
+ for(int i=0;i<40;++i)v.editor.rectangle(Pt{30.+12.*(i%8),30.+12.*(i/8)},8.,8.);
+ v.rebuild();v.selectAllVisible();QApplication::processEvents();
+ check(v.selected.size()==40,"center-transform fixture did not select 40");
+ const auto before=stateText(v.editor.state());
+ const Pt first=v.editor.state().doc.contours.front().nodes.front().p;
+ const QPoint start=v.mapFromScene(QPointF(76.,58.));
+ const QPoint end=v.mapFromScene(QPointF(80.,61.));
+ const QPointF delta=v.mapToScene(end)-v.mapToScene(start);
+ QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,start);
+ QApplication::processEvents();
+ check(v.groupedTransformStarts()==1,"Center handle did not enter grouped transform path");
+ int during=0;
+ for(auto* item:v.scene()->items())if(item->type()==QGraphicsItemGroup::Type)++during;
+ check(during==1,"Expected exactly one center-transform graphics group");
+ QTest::mouseMove(v.viewport(),end);QApplication::processEvents();
+ check(v.groupedTransformFrameUpdates()>0,"Center-transform group was not moved");
+ check(stateText(v.editor.state())==before,"Center-transform preview changed canonical geometry");
+ QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,end);
+ QApplication::processEvents();checkRendered(w);
+ for(const auto& shape:v.editor.state().doc.contours){
+  const auto* item=v.pathItem(shape.key);
+  check(!item->parentItem()&&item->pos()==QPointF{}&&item->transform().isIdentity(),
+        "Transient center transform leaked into canonical QGraphicsPathItem");
+ }
+ for(auto* item:v.scene()->items())
+  check(item->type()!=QGraphicsItemGroup::Type,
+        "Center-transform group leaked after release");
+ const Pt moved=v.editor.state().doc.contours.front().nodes.front().p;
+ check(std::abs(moved.x-first.x-delta.x())<1e-6&&
+       std::abs(moved.y-first.y-delta.y())<1e-6,
+       "Grouped center-transform committed unexpected coordinates");
+ pressKey(w,Qt::Key_Z,Qt::ControlModifier);
+ check(stateText(v.editor.state())==before,"Undo failed after grouped center-transform");
+ checkRendered(w);
+ pressKey(w,Qt::Key_Y,Qt::ControlModifier);
+ checkRendered(w);
+ const Pt redone=v.editor.state().doc.contours.front().nodes.front().p;
+ check(std::abs(redone.x-moved.x)<1e-6&&std::abs(redone.y-moved.y)<1e-6,
+       "Redo failed after grouped center-transform");
+ return QJsonObject{{"status","PASS"},{"selected_objects",40},
+                    {"center_group_starts",v.groupedTransformStarts()},
+                    {"center_group_frames",v.groupedTransformFrameUpdates()},
+                    {"document_unchanged_during_preview",true},
+                    {"undo_redo_preserved",true},{"hardware_commands_sent",false}};
+}
+
+
+QJsonObject nativePaintBench199(const QString& source){
+ // Offline GUI benchmark: use only a COPY of the operator's .lbrn2.
+ // Never opens serial/TCP, sends G-code or writes to the source file.
+ check(source.endsWith(".lbrn2",Qt::CaseInsensitive),
+       "Bezier benchmark requires a .lbrn2 copy");
+ QFile file(source);
+ check(file.open(QIODevice::ReadOnly),"Bezier benchmark cannot read source");
+ check(file.size()>0&&file.size()<=64*1024*1024,
+       "Bezier benchmark source outside 64 MiB read-only limit");
+ const QByteArray originalHash=QCryptographicHash::hash(
+   file.readAll(),QCryptographicHash::Sha256);
+ file.close();
+
+ LabWindow w(Document{});
+ w.resize(1200,800);w.show();
+ QApplication::processEvents();
+ w.importNativeLightBurn199(source,false);
+ QApplication::processEvents();
+ auto& v=w.view;
+ check(w.curves&&!w.curves->committed().contours.empty()&&
+       w.view.nativeItemCount()==w.curves->committed().contours.size(),
+       "Bezier benchmark failed to attach native geometry");
+ const auto unchangedCurves=serialize(encodeCurves(w.curves->committed()));
+ const int contourCount=int(w.curves->committed().contours.size());
+ // Fixed workstation reference frame; record actual viewport and DPR.
+ v.fitInView(QRectF(0,0,400,400),Qt::KeepAspectRatio);
+ QApplication::processEvents();
+ const bool deviceCacheBenchmark199=
+   qEnvironmentVariable("ALENCAR_NATIVE_DEVICE_CACHE_BENCH_19_9")=="1";
+ // Compare viewport pixels in memory ONLY; never export design imagery.
+ // Cache-off screenshot is the visual baseline at the same fixed zoom.
+ const QImage referencePixels=v.viewport()->grab().toImage()
+    .convertToFormat(QImage::Format_ARGB32);
+ v.setNativeDeviceCacheForBenchmark199(deviceCacheBenchmark199);
+ QApplication::processEvents();
+ const QImage cachePixels=v.viewport()->grab().toImage()
+    .convertToFormat(QImage::Format_ARGB32);
+ check(!referencePixels.isNull()&&referencePixels.size()==cachePixels.size(),
+       "Bezier cache benchmark viewport pixel size changed");
+ quint64 visualDiffOver8=0,visualPixelCount=0;
+ int maxChannelDiff=0;
+ for(int y=0;y<referencePixels.height();++y){
+  const auto* original=referencePixels.constScanLine(y);
+  const auto* rendered=cachePixels.constScanLine(y);
+  for(int x=0;x<referencePixels.width();++x){
+   int biggest=0;
+   for(int channel=0;channel<4;++channel){
+    const int offset=x*4+channel;
+    biggest=std::max(biggest,std::abs(int(original[offset])-int(rendered[offset])));
+   }
+   maxChannelDiff=std::max(maxChannelDiff,biggest);
+   if(biggest>8)++visualDiffOver8;
+   ++visualPixelCount;
+  }
+ }
+
+ // Force complete paint frames after warmup to isolate draw time from load.
+ for(int i=0;i<3;++i){v.viewport()->repaint();QApplication::processEvents();}
+ v.paintMs.clear();v.foregroundMs.clear();v.backgroundMs.clear();
+ constexpr int kFrames=24;
+ for(int i=0;i<kFrames;++i){
+  v.viewport()->repaint();
+  QApplication::processEvents();
+ }
+ check(v.paintMs.size()>=kFrames,
+       "Bezier benchmark cannot collect synchronous Qt paint samples");
+ const int nativePaintSamples=int(v.paintMs.size());
+ const double paintP50=percentile(v.paintMs,.5);
+ const double paintP95=percentile(v.paintMs,.95);
+ const double paintP99=percentile(v.paintMs,.99);
+ const double backgroundP95=percentile(v.backgroundMs,.95);
+ const double foregroundP95=percentile(v.foregroundMs,.95);
+
+ // Same native contour selection toggled 12 times. No geometry mutation,
+ // GUI preference reset, file saves or machine interactions.
+ const Key firstKey=w.curves->committed().contours.front().key;
+ const quint64 fullStart=v.nativeFullPathBuilds();
+ const quint64 selectiveStart=v.nativeSelectivePathBuilds();
+ const quint64 localRepaintStart=v.nativeSelectionLocalRepaints();
+ const quint64 fullRepaintStart=v.nativeSelectionFullRepaints();
+ const size_t paintBBoxStart=v.viewportPaintBBoxFractions.size();
+ QElapsedTimer selectionTimer;selectionTimer.start();
+ constexpr int kSelectionCycles=12;
+ for(int i=0;i<kSelectionCycles;++i){
+  w.curves->select(firstKey);v.nativeLayerChanged();
+  QApplication::processEvents();
+  w.curves->clearSelection();v.nativeLayerChanged();
+  QApplication::processEvents();
+ }
+ const double selectionTotalMs=selectionTimer.nsecsElapsed()/1e6;
+ const auto pixelBboxStart=v.viewportPaintBBoxFractions.begin()+
+   std::min(paintBBoxStart,v.viewportPaintBBoxFractions.size());
+ const std::vector<double> selectionPaintBboxRatios(
+   pixelBboxStart,v.viewportPaintBBoxFractions.end());
+ check(serialize(encodeCurves(w.curves->committed()))==unchangedCurves,
+       "Bezier benchmark changed canonical geometry during selection");
+ // Isolate baseline Qt viewport/scene/background/foreground cost by hiding
+ // ONLY the native path items in this temporary off-line benchmark window.
+ // Re-show them before leaving the routine. No geometry data is modified.
+ v.setNativeItemsVisibleForBenchmark199(false);
+ for(int i=0;i<3;++i){v.viewport()->repaint();QApplication::processEvents();}
+ v.paintMs.clear();
+ constexpr int kWithoutNativeFrames=12;
+ for(int i=0;i<kWithoutNativeFrames;++i){
+  v.viewport()->repaint();QApplication::processEvents();
+ }
+ check(v.paintMs.size()>=kWithoutNativeFrames,
+       "Bezier benchmark did not measure hidden-native viewport");
+ const double paintWithoutNativeP95=percentile(v.paintMs,.95);
+ v.setNativeItemsVisibleForBenchmark199(true);
+ QApplication::processEvents();
+ check(v.nativeItemCount()==size_t(contourCount)&&
+       serialize(encodeCurves(w.curves->committed()))==unchangedCurves,
+       "Hidden-native benchmark changed source geometry or item ownership");
+
+ // Extra opt-in QA: test 1x, 2x and 4x relative to the original fit.
+ // No screenshots are saved. Device cache is explicitly disabled to capture
+ // the vector reference at each zoom, then enabled for exact same viewport.
+ const bool zoomAudit199=
+   qEnvironmentVariable("ALENCAR_NATIVE_CACHE_ZOOM_AUDIT_19_9")=="1";
+ QJsonArray zoomAuditResults;
+
+ if(zoomAudit199){
+  const QPointF denseFocus=v.nativeDenseFocusForBenchmark199();
+  for(const double zoomFactor:{1.0,2.0,4.0}){
+   // Always start from the identical reference zoom, then zoom around
+   // actual artwork rather than the empty bed corner at (0,0).
+   v.resetTransform();
+   v.fitInView(QRectF(0,0,400,400),Qt::KeepAspectRatio);
+   v.scale(zoomFactor,zoomFactor);
+   v.centerOn(denseFocus);
+   v.setNativeDeviceCacheForBenchmark199(false);
+   QApplication::processEvents();
+   const int visibleItemCount=v.nativeViewportVisibleItemCountForBenchmark199();
+   check(visibleItemCount>0,"Zoom QA viewport has zero native paths");
+
+   const QImage withoutCache=v.viewport()->grab().toImage()
+      .convertToFormat(QImage::Format_ARGB32);
+   // Verify we are measuring real strokes, not two equally blank images.
+   v.setNativeItemsVisibleForBenchmark199(false);
+   QApplication::processEvents();
+   const QImage backgroundOnly=v.viewport()->grab().toImage()
+      .convertToFormat(QImage::Format_ARGB32);
+   v.setNativeItemsVisibleForBenchmark199(true);
+   QApplication::processEvents();
+   check(!withoutCache.isNull()&&withoutCache.size()==backgroundOnly.size(),
+         "Zoom QA visible/hidden viewport sizes differ");
+
+   for(int i=0;i<2;++i){v.viewport()->repaint();QApplication::processEvents();}
+   v.paintMs.clear();
+   constexpr int kZoomFrames=12;
+   for(int i=0;i<kZoomFrames;++i){
+    v.viewport()->repaint();QApplication::processEvents();
+   }
+   check(v.paintMs.size()>=kZoomFrames,"Zoom no-cache paint samples missing");
+   const double zoomNoCacheP95=percentile(v.paintMs,.95);
+
+   v.setNativeDeviceCacheForBenchmark199(true);
+   QApplication::processEvents();
+   const QImage withCache=v.viewport()->grab().toImage()
+      .convertToFormat(QImage::Format_ARGB32);
+   check(withoutCache.size()==withCache.size(),
+         "Zoom cache changed viewport image dimensions");
+   quint64 compared=0,over8=0,nativeInkPixels=0;
+   int maxDifference=0;
+   for(int y=0;y<withoutCache.height();++y){
+    const auto* original=withoutCache.constScanLine(y);
+    const auto* cached=withCache.constScanLine(y);
+    const auto* background=backgroundOnly.constScanLine(y);
+    for(int x=0;x<withoutCache.width();++x){
+     int peak=0,ink=0;
+     for(int channel=0;channel<4;++channel){
+      const int offset=4*x+channel;
+      peak=std::max(peak,std::abs(int(original[offset])-int(cached[offset])));
+      ink=std::max(ink,std::abs(int(original[offset])-int(background[offset])));
+     }
+     maxDifference=std::max(maxDifference,peak);
+     if(peak>8)++over8;
+     if(ink>8)++nativeInkPixels;
+     ++compared;
+    }
+   }
+   check(nativeInkPixels>=32,
+         "Zoom QA cannot compare empty native artwork: recenter or use another source");
+   const quint64 zoomCachedItemCount=v.nativeDeviceCacheItemsForBenchmark199();
+   for(int i=0;i<2;++i){v.viewport()->repaint();QApplication::processEvents();}
+   v.paintMs.clear();
+   for(int i=0;i<kZoomFrames;++i){
+    v.viewport()->repaint();QApplication::processEvents();
+   }
+   check(v.paintMs.size()>=kZoomFrames,"Zoom cached paint samples missing");
+   zoomAuditResults.append(QJsonObject{
+    {"relative_zoom_factor",zoomFactor},
+    {"visible_native_items",visibleItemCount},
+    {"native_ink_pixels",double(nativeInkPixels)},
+    {"cache_items",double(zoomCachedItemCount)},
+    {"cache_estimated_bytes",double(v.nativeDeviceCacheBudgetEstimateForBenchmark199())},
+    {"paint_samples",kZoomFrames},
+    {"no_cache_paint_p95_ms",zoomNoCacheP95},
+    {"cached_paint_p95_ms",percentile(v.paintMs,.95)},
+    {"cache_performance_comparable",zoomCachedItemCount>0},
+    {"visual_pixels_compared",double(compared)},
+    {"visual_pixels_over8_percent",compared?100.*over8/compared:0.},
+    {"visual_max_channel_difference",maxDifference},
+    {"requires_visual_review",over8>0}
+   });
+  }
+  check(serialize(encodeCurves(w.curves->committed()))==unchangedCurves,
+        "Zoom cache audit modified native Bezier geometry");
+  v.resetTransform();
+  v.fitInView(QRectF(0,0,400,400),Qt::KeepAspectRatio);
+  v.setNativeDeviceCacheForBenchmark199(deviceCacheBenchmark199);
+  QApplication::processEvents();
+ }
+
+ QFile sourceAfter(source);
+ check(sourceAfter.open(QIODevice::ReadOnly),
+       "Bezier benchmark source unavailable after GUI test");
+ const bool originalPreserved=QCryptographicHash::hash(
+   sourceAfter.readAll(),QCryptographicHash::Sha256)==originalHash;
+ sourceAfter.close();
+ check(originalPreserved,"Bezier benchmark source file was modified");
+ quint64 rssBytes=0;
+#ifdef Q_OS_WIN
+ PROCESS_MEMORY_COUNTERS_EX memory{};
+ if(GetProcessMemoryInfo(GetCurrentProcess(),
+    reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),sizeof(memory)))
+   rssBytes=quint64(memory.WorkingSetSize);
+#endif
+ return QJsonObject{
+  {"status","PASS"},{"experiment","native-bezier-real-paint-19.9"},
+  {"contours",contourCount},{"paint_samples",nativePaintSamples},
+  {"paint_p50_ms",paintP50},{"paint_p95_ms",paintP95},
+  {"paint_p99_ms",paintP99},
+  {"paint_without_native_items_p95_ms",paintWithoutNativeP95},
+  {"paint_without_native_items_samples",kWithoutNativeFrames},
+  {"native_device_cache_benchmark",deviceCacheBenchmark199},
+  {"native_cache_zoom_audit_enabled",zoomAudit199},
+  {"native_cache_zoom_audit",zoomAuditResults},
+  {"native_device_cache_items",double(v.nativeDeviceCacheItemsForBenchmark199())},
+  {"native_device_cache_estimated_bytes",double(v.nativeDeviceCacheBudgetEstimateForBenchmark199())},
+  {"cache_visual_pixels_compared",double(visualPixelCount)},
+  {"cache_visual_pixels_over8",double(visualDiffOver8)},
+  {"cache_visual_pixels_over8_percent",visualPixelCount?100.*visualDiffOver8/visualPixelCount:0.},
+  {"cache_visual_max_channel_difference",maxChannelDiff},
+  {"rss_bytes_after_benchmark",double(rssBytes)},
+  {"background_p95_ms",backgroundP95},
+  {"foreground_p95_ms",foregroundP95},
+  {"selection_cycles",kSelectionCycles},
+  {"selection_total_ms",selectionTotalMs},
+  {"native_full_path_builds_delta",double(v.nativeFullPathBuilds()-fullStart)},
+  {"native_selective_path_builds_delta",double(v.nativeSelectivePathBuilds()-selectiveStart)},
+  {"native_local_repaint_requests_delta",double(v.nativeSelectionLocalRepaints()-localRepaintStart)},
+  {"native_full_repaint_requests_delta",double(v.nativeSelectionFullRepaints()-fullRepaintStart)},
+  {"selection_paint_events",int(selectionPaintBboxRatios.size())},
+  {"selection_viewport_paint_bbox_fraction_p95",percentile(selectionPaintBboxRatios,.95)},
+  {"legacy_selection_rebuild",v.nativeLegacySelectionRebuild()},
+  {"legacy_full_viewport_on_select",v.nativeLegacyFullViewportOnSelect()},
+  {"viewport_width_px",v.viewport()->width()},
+  {"viewport_height_px",v.viewport()->height()},
+  {"dpr",v.viewport()->devicePixelRatioF()},
+  {"qt",qVersion()},
+  {"source_sha256_unchanged",originalPreserved},
+  {"geometry_unchanged",true},
+  {"machine_commands_sent",false},
+  {"fabrication_enabled",false}
+ };
+}
+
 int main(int argc,char** argv){
  QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";
+
+ if(mode=="--grouped-center-transform-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=groupedCenterTransform199Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile file(out+"/RESULTADO_TRANSFORMACAO_CENTRAL_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--native-paint-bench-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=nativePaintBench199(csv);}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())},
+                      {"machine_commands_sent",false}};
+  }
+  QFile file(out+"/RESULTADO_PERFORMANCE_BEZIER_REAL_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--native-import-gui-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=nativeImportGui199Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile file(out+"/RESULTADO_IMPORTACAO_NATIVA_GUI_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--controlled-drag-575-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=controlledDenseDrag199Test(csv);}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())},
+                      {"machine_commands_sent",false}};
+  }
+  QFile file(out+"/RESULTADO_ARRASTE_CONTROLADO_575_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--grouped-drag-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=groupedDrag199Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile file(out+"/RESULTADO_ARRASTE_AGRUPADO_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--icon-pack-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=sketchIcons199Audit(out);}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile file(out+"/RESULTADO_ICONES_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
+ if(mode=="--gear-generator-19-9-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=gearGenerator199Test();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile file(out+"/RESULTADO_ENGRENAGENS_19_9.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
  if(mode=="--layout-icons-19-8-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=layoutIcons198Test();}
@@ -6853,3 +10219,4 @@ int main(int argc,char** argv){
  QFile f(out+(mode=="--workspace-test"?"/RESULTADO_TESTE_19_2.json":mode=="--navigation-test"?"/RESULTADO_TESTE_19_1.json":mode=="--reopen"?"/REABERTURA_TESTE_6.json":"/RESULTADO_TESTE_6.json"));if(!f.open(QIODevice::WriteOnly))return 2;f.write(QJsonDocument(report).toJson());
  qInfo().noquote()<<mode<<report["status"].toString()<<report["error"].toString();return success?0:1;
 }
+

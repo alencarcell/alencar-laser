@@ -50,12 +50,37 @@ inline std::optional<Layer> edit(QWidget* parent,const Layer& original){
  powerMode->addItem("M3 — potencia constante",QString("M3"));
  powerMode->setCurrentIndex(original.powerMode=="M3"?1:0);
  powerMode->setToolTip("M4 acompanha a velocidade (GRBL compativel); M3 mantém potencia constante. Somente metadados.");
+ auto* lineInterval=new QDoubleSpinBox;
+ lineInterval->setObjectName("layer_settings_line_interval");
+ lineInterval->setRange(0.05,5.0);
+ lineInterval->setDecimals(3);
+ lineInterval->setSingleStep(0.05);
+ lineInterval->setSuffix(" mm");
+ lineInterval->setValue(original.lineIntervalMm);
+ lineInterval->setToolTip("Espaçamento entre linhas vizinhas de preenchimento (Fill). "
+   "Menor valor = mais linhas e maior densidade; independente do modo M3/M4. "
+   "Previa offline apenas, sem comandar laser.");
  form->addRow("Nome",name);form->addRow("Tipo",mode);
  form->addRow("Velocidade virtual",speed);
  form->addRow("Potencia nominal",power);
  form->addRow("Passagens previstas",passes);
  form->addRow("Modo GRBL (referencia)",powerMode);
+ form->addRow("Intervalo entre linhas (Fill)",lineInterval);
  column->addLayout(form);
+ auto* intervalInfo=new QLabel;
+ intervalInfo->setObjectName("layer_settings_line_interval_info");
+ intervalInfo->setWordWrap(true);
+ const auto updateIntervalInfo=[&]{
+  intervalInfo->setText(QString(
+    "Densidade teórica: %1 linhas/polegada (LPI). "
+    "O ajuste atua no preenchimento virtual de camadas Fill; "
+    "não altera potência, velocidade, número de passagens ou saída física.")
+    .arg(25.4/lineInterval->value(),0,'f',0));
+ };
+ QObject::connect(lineInterval,QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+     &window,[&](double){updateIntervalInfo();});
+ updateIntervalInfo();
+ column->addWidget(intervalInfo);
  auto* optimize=new QCheckBox("Permitir otimizar rota desta camada na previa");
  optimize->setObjectName("layer_settings_optimize");
  optimize->setChecked(original.optimizeTravel);
@@ -100,6 +125,7 @@ inline std::optional<Layer> edit(QWidget* parent,const Layer& original){
  result.powerPercent=power->value();
  result.passes=passes->value();
  result.powerMode=powerMode->currentData().toString().toStdString();
+ result.lineIntervalMm=lineInterval->value();
  result.optimizeTravel=optimize->isChecked();
  return result;
 }

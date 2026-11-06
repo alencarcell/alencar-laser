@@ -2,6 +2,7 @@
 // Alencar Laser 19.8 - read-only preview. No serial/TCP/G-code/machine calls.
 // Motion estimate is approximate: simplified axes + stop/start at angular runs.
 #include "preview_sim_19_8.hpp"
+#include "preview_native_19_8.hpp"
 #include "preview_motion_19_8.hpp"
 #include "preview_raster_19_8.hpp"
 #include "preview_route_19_8.hpp"
@@ -150,8 +151,11 @@ protected:
 inline void showPreviewDialog(QWidget* parent,const EditorState& source,
                                double drawingWidthMm,double drawingHeightMm,
                                const QImage& sourceImage=QImage(),
-                               const QRectF& imageBounds=QRectF()){
- const Plan sourcePlan=build(source);
+                               const QRectF& imageBounds=QRectF(),
+                               const CurveDocument* nativeCurves=nullptr){
+ const auto nativePreview=withNativeCurves(source,nativeCurves);
+ const EditorState& planningSource=nativePreview.state;
+ const Plan sourcePlan=build(planningSource);
  Plan shown=sourcePlan;
  motion::Settings settings;
  motion::Timeline timeline;
@@ -168,8 +172,10 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  settingsColumn->setContentsMargins(5,4,5,4);
  settingsColumn->setSpacing(4);
  auto* note=new QLabel(
-   "PREVIA EXPERIMENTAL OFFLINE: contornos Line, Fill vetorial e bitmap P&B "
-   "com trajetorias de varredura simplificadas; overscan apenas visual. "
+   "PREVIA EXPERIMENTAL OFFLINE: Line, curvas Bézier v5 (abertas/fechadas), "
+   "Fill vetorial e bitmap P&B. Curvas nativas fechadas sao uma unica forma "
+   "editavel no projeto; apenas a previa cria segmentos temporarios. " 
+   "Varredura e overscan simplificados, somente visuais. "
    "Nao replica o planejador GRBL/LightBurn, nem calibra potencia ou movimento fisico. "
    "Sem envio de G-code, rede ou comandos ao laser.");
  note->setWordWrap(true);settingsColumn->addWidget(note);
@@ -210,8 +216,11 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
     "Imagem original intacta; simula limiar/dither sem aplicar vetorizacao":
     "Nenhuma imagem importada na mesa");
  auto* interval=new QDoubleSpinBox;interval->setRange(.05,5.0);
- interval->setDecimals(2);interval->setSingleStep(.05);
+ interval->setObjectName("preview_global_line_interval_19_8");
+ interval->setDecimals(3);interval->setSingleStep(.05);
  interval->setValue(.20);interval->setSuffix(" mm");
+ interval->setToolTip("Intervalo global: aplica-se às imagens; "
+    "ao Fill aplica-se apenas quando desmarcado o uso dos intervalos por camada.");
  auto* overscan=new QDoubleSpinBox;overscan->setRange(0,20.0);
  overscan->setDecimals(1);overscan->setSingleStep(.5);
  overscan->setValue(1.0);overscan->setSuffix(" mm");
@@ -223,7 +232,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  bitmapThreshold->setValue(128);
  rasterControls->addWidget(enableFill,0,0,1,2);
  rasterControls->addWidget(enableImage,0,2,1,2);
- rasterControls->addWidget(new QLabel("Intervalo:"),1,0);
+ rasterControls->addWidget(new QLabel("Intervalo global:"),1,0);
  rasterControls->addWidget(interval,1,1);
  rasterControls->addWidget(new QLabel("Overscan virtual:"),1,2);
  rasterControls->addWidget(overscan,1,3);
@@ -231,6 +240,23 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  rasterControls->addWidget(bitmapMode,2,2);
  rasterControls->addWidget(bitmapThreshold,2,3);
  settingsColumn->addLayout(rasterControls);
+ auto* useLayerIntervals=new QCheckBox("Fill: usar intervalo entre linhas salvo por camada");
+ useLayerIntervals->setObjectName("preview_use_layer_intervals_19_8");
+ useLayerIntervals->setToolTip("Ativado: cada camada Fill usa seu intervalo em mm. "
+    "Desativado: Fill usa o global. Imagens sempre usam o intervalo global. "
+    "Somente simulação OFFLINE; independente de M3/M4.");
+ // Preserve the legacy global interval on projects without custom Fill
+ // settings. Once the operator changes a Fill layer pitch, select per-layer
+ // scanning automatically; users can still override with the checkbox.
+ bool customFillPitch=false;
+ for(const auto& [id,layer]:source.layers){
+  (void)id;
+  if(layer.mode=="Fill"&&std::abs(layer.lineIntervalMm-0.20)>1e-8){
+   customFillPitch=true;break;
+  }
+ }
+ useLayerIntervals->setChecked(customFillPitch);
+ settingsColumn->addWidget(useLayerIntervals);
  auto* optimizeTravel=new QCheckBox("Reduzir deslocamentos (heuristica local por camada)");
  optimizeTravel->setToolTip("Vizinho mais proximo; reordena apenas Line, nao garante a rota global mais curta. Sem modificar o projeto.");
  auto* innerFirst=new QCheckBox("Contornos internos primeiro (corte virtual)");
@@ -246,9 +272,29 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
  auto* boundsWarning=new QLabel;
  boundsWarning->setObjectName("preview_bed_warning");
  boundsWarning->setWordWrap(true);
- boundsWarning->setStyleSheet("color:#FFA64B;");
+ // Warning remains visible above the scrolling settings.
+ boundsWarning->setStyleSheet("color:#FFA64B; background:#36261B; padding:7px; border:1px solid #B96922;");
+ boundsWarning->setAccessibleName("Aviso de geometria fora da mesa");
+ boundsWarning->setMinimumHeight(36);
  settingsColumn->addWidget(restrictBed);
- settingsColumn->addWidget(boundsWarning);
+ column->addWidget(boundsWarning);
+ // Layer registration and unverified LightBurn machining parameters are
+ // separate conditions; neither is a physical bed-limit issue.
+ auto* nativeLayerWarning=new QLabel;
+ nativeLayerWarning->setObjectName("preview_native_layer_warning_19_8");
+ nativeLayerWarning->setWordWrap(true);
+ nativeLayerWarning->setStyleSheet("color:#FFD48A; background:#3A2919; padding:7px; border:1px solid #CE8235;");
+ nativeLayerWarning->setText(QString(
+   "ATENÇÃO — %1 curva(s) Bézier com camada ausente; %2 curva(s) com parâmetros "
+   "de camada NÃO verificados após importação. Os identificadores da origem "
+   "foram preservados. Velocidade, Fill, potência e intervalo desta prévia são "
+   "apenas hipóteses virtuais, não configurações para produção. "
+   "Não envie ao laser até revisão específica da fabricação.")
+   .arg(qulonglong(nativePreview.missingLayers))
+   .arg(qulonglong(nativePreview.unverifiedLayerParameters)));
+ nativeLayerWarning->setVisible(nativePreview.missingLayers>0||
+                                nativePreview.unverifiedLayerParameters>0);
+ column->addWidget(nativeLayerWarning);
  auto* useLayerFeeds=new QCheckBox("Utilizar velocidades virtuais salvas por camada");
  useLayerFeeds->setChecked(true);
  useLayerFeeds->setToolTip("Velocidade e passes de cada camada influenciam a simulacao. Potencia/M3/M4 continuam apenas registrados.");
@@ -359,11 +405,11 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    scan.bidirectional=bidirectional->isChecked();
    nestedPairs=0;
    Plan combined=optimizeTravel->isChecked()?
-      route::nearestNeighborLines(source,300000,1500,innerFirst->isChecked(),&nestedPairs):
+      route::nearestNeighborLines(planningSource,300000,1500,innerFirst->isChecked(),&nestedPairs):
       sourcePlan;
    optimizedLineTravelMm=combined.travelMm;
    if(enableFill->isChecked()){
-    raster::appendFill(combined,source,scan);
+    raster::appendFill(combined,planningSource,scan,250000,useLayerIntervals->isChecked());
     combined.ignoredFill=0; // Fill vetorial incluido; contornos abertos nao geram hatch.
    }
    if(enableImage->isChecked()&&imagePresent){
@@ -387,17 +433,26 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
     raster::appendMask(combined,mask,{imageBounds.x(),imageBounds.y(),
                        imageBounds.width(),imageBounds.height()},scan);
    }
-   const Plan repeated=repeatedByLayer(combined,source,passes->value());
-   if(restrictBed->isChecked()){
-    shown=bed198::restrictToBed(repeated,drawingWidthMm,drawingHeightMm,&bedReport);
-   }else{
-    shown=repeated;bedReport={};
+   const Plan repeated=repeatedByLayer(combined,planningSource,passes->value());
+   // Diagnose ALWAYS, including when limiting the preview is unchecked.
+   // Otherwise the operator loses the warning when inspecting full geometry.
+   const Plan bounded=bed198::restrictToBed(repeated,drawingWidthMm,drawingHeightMm,&bedReport);
+   shown=restrictBed->isChecked()?bounded:repeated;
+   // Completely external paths can remain in the editor as spare art.
+   // Highlight ONLY active laser lines that cross the bed boundary.
+   const bool crossesBed=bed198::partiallyOutsideActiveGeometry(bedReport);
+   boundsWarning->setVisible(crossesBed);
+   if(crossesBed){
+    boundsWarning->setText(QString(
+      "ATENÇÃO — %1 trecho(s) de gravação cruzam o limite da mesa. "
+      "%2 mm de percurso foram cortados nesses cruzamentos. "
+      "%3. Objetos totalmente externos não precisam ser executados.")
+      .arg(qulonglong(bedReport.clippedLaserSegments))
+      .arg(bedReport.clippedLaserMm,0,'f',2)
+      .arg(restrictBed->isChecked()?
+        "Prévia parcial: ajuste a arte que cruza a borda":
+        "Recorte desligado apenas para inspeção; laser físico bloqueado"));
    }
-   const std::size_t omitted=bedReport.outsideSegments+bedReport.clippedSegments;
-   boundsWarning->setText(omitted?
-     QString("Atenção: %1 trechos fora ou parcialmente fora da mesa; %2 mm de gravação virtual fora da área ignorados.")
-       .arg(qulonglong(omitted)).arg(bedReport.omittedLaserMm,0,'f',1):
-     QString("Prévia: percursos dentro da mesa; emissão física permanece bloqueada."));
    const auto layerSpeed=[&](int id){
     const auto it=source.layers.find(id);
     return useLayerFeeds->isChecked()&&it!=source.layers.end()?
@@ -420,7 +475,9 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    play->setEnabled(!shown.moves.empty()&&timeline.totalSeconds>0);
    render();
   }catch(const std::exception& e){
-   shown={};timeline={};nominalSeconds=0.0;bedReport={};boundsWarning->setText("Prévia indisponível até corrigir dados.");
+   shown={};timeline={};nominalSeconds=0.0;bedReport={};
+   boundsWarning->setVisible(true);
+   boundsWarning->setText("Prévia indisponível até corrigir dados.");
    stats->setText(QString("Previa limitada: %1").arg(QString::fromUtf8(e.what())));
    play->setEnabled(false);render();
   }
@@ -433,12 +490,25 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
   if(filename.isEmpty())return;
   QJsonObject data{
    {"schema","alencar-laser-simulation-report-19.8"},
+   {"native_bezier_contours",int(nativePreview.paths)},
+   {"native_bezier_closed",int(nativePreview.closed)},
+   {"native_bezier_open",int(nativePreview.open)},
+   {"native_bezier_virtual_segments",int(nativePreview.segments)},
+   {"native_bezier_missing_layer_fallbacks",int(nativePreview.missingLayers)},
+   {"native_bezier_unverified_layer_parameters",int(nativePreview.unverifiedLayerParameters)},
+   {"native_bezier_layer_mapping_requires_review",nativePreview.missingLayers>0||
+      nativePreview.unverifiedLayerParameters>0},
+   {"native_bezier_source_unchanged",true},
    {"experimental",true},{"machine_commands_sent",false},
    {"model","kinematic-start-stop-angular-runs-12deg"},
    {"limited_to_bed",restrictBed->isChecked()},
    {"outside_segments_omitted",int(bedReport.outsideSegments)},
    {"outside_segments_clipped",int(bedReport.clippedSegments)},
+   {"outside_laser_segments_omitted",int(bedReport.outsideLaserSegments)},
+   {"outside_laser_segments_clipped",int(bedReport.clippedLaserSegments)},
    {"outside_laser_mm_omitted",bedReport.omittedLaserMm},
+   {"outside_laser_mm_from_clipped",bedReport.clippedLaserMm},
+   {"partial_workarea_warning",bed198::partiallyOutsideActiveGeometry(bedReport)},
    {"notes","Experimental Line, vector Fill, binary image. Simplified scan, no GRBL/LightBurn equivalence"},
    {"global_passes",passes->value()},
    {"layer_passes_applied",true},
@@ -453,6 +523,8 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
    {"fill_simulation_enabled",enableFill->isChecked()},
    {"image_simulation_enabled",enableImage->isChecked()&&imagePresent},
    {"scan_line_interval_mm",interval->value()},
+   {"fill_layer_intervals_enabled",useLayerIntervals->isChecked()},
+   {"fill_layer_intervals_are_machine_commands",false},
    {"virtual_overscan_mm",overscan->value()},
    {"bidirectional_scan",bidirectional->isChecked()},
    {"image_mode",bitmapMode->currentIndex()==1?"ordered_dither":"threshold"},
@@ -481,6 +553,7 @@ inline void showPreviewDialog(QWidget* parent,const EditorState& source,
   }
  });
  QObject::connect(restrictBed,&QCheckBox::toggled,&dialog,[&](bool){recalculate();});
+ QObject::connect(useLayerIntervals,&QCheckBox::toggled,&dialog,[&](bool){recalculate();});
  QObject::connect(progress,&QSlider::valueChanged,&dialog,[&](int){render();});
  for(auto* box:{cut,rapid,maxX,maxY,accelX,accelY,rapidAx,rapidAy})
   QObject::connect(box,QOverload<double>::of(&QDoubleSpinBox::valueChanged),

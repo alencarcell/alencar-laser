@@ -17,7 +17,9 @@
 #include <QTextEdit>
 #include <QVBoxLayout>
 #include <QXmlStreamReader>
+#include <algorithm>
 #include <stdexcept>
+#include <vector>
 
 namespace alaser::reference {
 struct LightBurnSummary {
@@ -26,6 +28,7 @@ struct LightBurnSummary {
  struct Setting {QString name,type,speed,power,index;};
  QList<Setting> settings;
  int count=0,anchors=0,withPrimitives=0,withoutPrimitives=0,bezierSegments=0,lineSegments=0,transforms=0;
+ int groups=0,maxShapeDepth=0,disconnectedTransitions=0,zeroLengthPrimitives=0;
  QByteArray embeddedPreview;
  bool valid=false;
  QString report() const {
@@ -33,10 +36,16 @@ struct LightBurnSummary {
   r+="Arquivo: "+sourceName+"\n";
   r+="Formato: "+formatVersion+"  |  LightBurn: "+appVersion+"  |  Dispositivo declarado: "+deviceName+"\n\n";
   r+="GEOMETRIA (inventário, NÃO importada para edição)\n";
-  r+=QString("Figuras: %1 | âncoras Path: %2 | XForm: %3\n").arg(count).arg(anchors).arg(transforms);
+  r+=QString("Figuras: %1 | grupos: %2 | profundidade máxima: %3 | âncoras Path: %4 | XForm: %5\n")
+    .arg(count).arg(groups).arg(maxShapeDepth).arg(anchors).arg(transforms);
   for(auto it=types.cbegin();it!=types.cend();++it)r+=QString("  %1: %2\n").arg(it.key()).arg(it.value());
   r+=QString("Path com PrimList: %1 | Path sem PrimList: %2\n").arg(withPrimitives).arg(withoutPrimitives);
-  r+=QString("Primitivas explícitas B: %1 | L: %2\n\n").arg(bezierSegments).arg(lineSegments);
+  r+=QString("Primitivas explícitas B: %1 | L: %2\n").arg(bezierSegments).arg(lineSegments);
+  r+=QString("Transições entre segmentos desconectados: %1 | segmentos de comprimento zero (índices iguais): %2\n\n")
+       .arg(disconnectedTransitions).arg(zeroLengthPrimitives);
+  if(disconnectedTransitions>0||zeroLengthPrimitives>0)
+   r+="AVISO DE COMPATIBILIDADE: o importador de edição atual exige caminhos contínuos. "
+      "Este projeto inclui traços desconectados ou degenerados e NÃO deve ser apresentado como importação integral homologada.\n\n";
   r+="CAMADAS (CutIndex associado aos objetos)\n";
   for(auto it=layers.cbegin();it!=layers.cend();++it)r+=QString("  Índice %1: %2 objetos\n").arg(it.key()).arg(it.value());
   r+="\nAJUSTES GRAVADOS NO XML — VALORES BRUTOS, NÃO PRESCRIÇÕES DE LASER\n";
@@ -59,8 +68,10 @@ inline LightBurnSummary readLightBurn(const QString& path){
  if(!file.open(QIODevice::ReadOnly)){s.error="Não foi possível abrir o XML em modo leitura.";return s;}
  if(file.size()>64LL*1024*1024){s.error="Arquivo maior que o limite de 64 MiB para inspeção.";return s;}
  QXmlStreamReader xml(&file);
- bool inProject=false,inSetting=false,inShape=false,pathWithPrims=false;
- QString shapeType;
+ bool inProject=false,inSetting=false;
+ struct ShapeFrame {QString type;bool hasPrims=false;};
+ std::vector<ShapeFrame> shapeStack;
+ static const QRegularExpression primitivePattern(R"(([LB])(\d+)\s+(\d+))");
  LightBurnSummary::Setting current;
  static const QRegularExpression anchorPattern(R"(V(?=\s*[-+]?\d))");
  static const QRegularExpression bezierPattern(R"(B\s*\d+\s+\d+)");
@@ -79,23 +90,41 @@ inline LightBurnSummary readLightBurn(const QString& path){
     const QString v=attributes.value("Source").toString();
     if(v.size()<4*1024*1024)s.embeddedPreview=QByteArray::fromBase64(v.toLatin1());
    }else if(tag=="Shape"){
-    // Esta fase suporta inventário de Shape; não aceita grupos aninhados como geometria nativa.
-    if(inShape){s.error="Shape aninhada: estrutura requer importador específico.";return s;}
-    inShape=true;pathWithPrims=false;shapeType=attributes.value("Type").toString();
+    // Preserve frame scope: Shape/Group can contain Children/Shape.
+    // This inspector counts them without importing or interpreting laser commands.
+    if(shapeStack.size()>=16){s.error="Profundidade de grupos LightBurn excedida.";return s;}
+    QString shapeType=attributes.value("Type").toString();
     if(shapeType.isEmpty())shapeType="Tipo não declarado";
-    s.types[shapeType]++;s.layers[attributes.value("CutIndex").toString()]++;s.count++;
+    shapeStack.push_back({shapeType,false});
+    s.maxShapeDepth=std::max(s.maxShapeDepth,int(shapeStack.size()));
+    s.groups+=shapeType=="Group"?1:0;
+    s.types[shapeType]++;
+    if(shapeType!="Group")s.layers[attributes.value("CutIndex").toString()]++;
+    s.count++;
    }else if(tag=="CutSetting"||tag=="CutSetting_Img"){
     inSetting=true;current={};current.type=attributes.value("type").toString();
-   }else if(tag=="XForm"&&inShape){
+   }else if(tag=="XForm"&&!shapeStack.empty()){
     ++s.transforms;
-   }else if(tag=="VertList"&&inShape){
+   }else if(tag=="VertList"&&!shapeStack.empty()){
     const auto v=xml.readElementText(QXmlStreamReader::SkipChildElements);
     s.anchors+=countPattern(v,anchorPattern);
-   }else if(tag=="PrimList"&&inShape){
+   }else if(tag=="PrimList"&&!shapeStack.empty()){
     const auto v=xml.readElementText(QXmlStreamReader::SkipChildElements);
-    pathWithPrims=true;
+    shapeStack.back().hasPrims=true;
     s.bezierSegments+=countPattern(v,bezierPattern);
     s.lineSegments+=countPattern(v,linePattern);
+    auto it=primitivePattern.globalMatch(v);
+    int previous=-1;
+    while(it.hasNext()){
+     const auto m=it.next();
+     bool okA=false,okB=false;
+     const int first=m.captured(2).toInt(&okA);
+     const int last=m.captured(3).toInt(&okB);
+     if(!okA||!okB)continue;
+     if(previous>=0&&first!=previous)++s.disconnectedTransitions;
+     if(first==last)++s.zeroLengthPrimitives;
+     previous=last;
+    }
    }else if(inSetting&&(tag=="name"||tag=="index"||tag=="speed"||tag=="maxPower")){
     auto value=attributes.value("Value").toString();
     if(tag=="name")current.name=value;
@@ -105,11 +134,12 @@ inline LightBurnSummary readLightBurn(const QString& path){
    }
   }else if(token==QXmlStreamReader::EndElement){
    const auto tag=xml.name().toString();
-   if(tag=="Shape"&&inShape){
-    if(shapeType=="Path"){
-     if(pathWithPrims)++s.withPrimitives;else ++s.withoutPrimitives;
+   if(tag=="Shape"&&!shapeStack.empty()){
+    const auto frame=shapeStack.back();
+    if(frame.type=="Path"){
+     if(frame.hasPrims)++s.withPrimitives;else ++s.withoutPrimitives;
     }
-    inShape=false;
+    shapeStack.pop_back();
    }else if(tag=="CutSetting"||tag=="CutSetting_Img"){
     s.settings.push_back(current);inSetting=false;
    }

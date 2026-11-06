@@ -195,7 +195,7 @@ target_link_libraries(alencar_test15_core PRIVATE ${MINIZIP_LIBRARY} ZLIB::ZLIB)
 if(Qt6_FOUND)
  add_executable(alencar_test15_qt_integrated qt/qt6_test15_integrated.cpp src/boost_json_impl.cpp)
  target_include_directories(alencar_test15_qt_integrated PRIVATE src ${BOOST_JSON_INCLUDE_DIR} ${MINIZIP_INCLUDE_DIR})
- target_link_libraries(alencar_test15_qt_integrated PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test ${MINIZIP_LIBRARY} ZLIB::ZLIB)
+ target_link_libraries(alencar_test15_qt_integrated PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test Qt6::Network ${MINIZIP_LIBRARY} ZLIB::ZLIB)
  if(MSVC)
   target_compile_options(alencar_test15_qt_integrated PRIVATE /O2 /W4 /utf-8)
  else()
@@ -219,14 +219,14 @@ endif()
 if(Qt6_FOUND)
  add_executable(alencar_test16_qt_persistence qt/qt6_test16_persistence.cpp src/boost_json_impl.cpp)
  target_include_directories(alencar_test16_qt_persistence PRIVATE src ${BOOST_JSON_INCLUDE_DIR} ${MINIZIP_INCLUDE_DIR})
- target_link_libraries(alencar_test16_qt_persistence PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test ${MINIZIP_LIBRARY} ZLIB::ZLIB)
+ target_link_libraries(alencar_test16_qt_persistence PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test Qt6::Network ${MINIZIP_LIBRARY} ZLIB::ZLIB)
 endif()
 
 # TESTE_17: same LabWindow, identity assertions and independent process oracle.
 if(Qt6_FOUND)
  add_executable(alencar_test17_mission qt/qt6_test17_mission.cpp src/boost_json_impl.cpp)
  target_include_directories(alencar_test17_mission PRIVATE src ${BOOST_JSON_INCLUDE_DIR} ${MINIZIP_INCLUDE_DIR})
- target_link_libraries(alencar_test17_mission PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test ${MINIZIP_LIBRARY} ZLIB::ZLIB)
+ target_link_libraries(alencar_test17_mission PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test Qt6::Network ${MINIZIP_LIBRARY} ZLIB::ZLIB)
  if(WIN32)
   foreach(t alencar_test15_qt_integrated alencar_test16_qt_persistence alencar_test17_mission)
    target_link_libraries(${t} PRIVATE psapi)
@@ -275,4 +275,96 @@ add_executable(alencar_test19_8_scissors_span tests/test19_8_scissors_span.cpp s
 target_include_directories(alencar_test19_8_scissors_span PRIVATE src ${BOOST_JSON_INCLUDE_DIR})
 if(NOT MSVC)
  target_compile_options(alencar_test19_8_scissors_span PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
+
+# Native Bezier in OFFLINE preview, Fill and v5 layer metadata.
+add_executable(alencar_test19_8_native_preview tests/preview_native_bezier_19_8_standalone.cpp src/boost_json_impl.cpp)
+target_include_directories(alencar_test19_8_native_preview PRIVATE src ${BOOST_JSON_INCLUDE_DIR})
+target_link_libraries(alencar_test19_8_native_preview PRIVATE ${MINIZIP_LIBRARY} ZLIB::ZLIB)
+
+# TESTE_19.8: delete only node/side of selected contour, Undo/Redo safety.
+add_executable(alencar_test19_8_selected_local_edit tests/selected_local_edit_19_8_standalone.cpp)
+target_include_directories(alencar_test19_8_selected_local_edit PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_8_selected_local_edit PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
+
+# Native Bezier diagnostic events (strict opt-in allowlist; no hardware).
+add_executable(alencar_work_local_edit_stress tests/local_edit_stress_work.cpp)
+target_include_directories(alencar_work_local_edit_stress PRIVATE src ${BOOST_JSON_INCLUDE_DIR})
+
+add_executable(alencar_test19_8_native_diagnostics tests/diagnostics_native_events_19_8_standalone.cpp)
+target_include_directories(alencar_test19_8_native_diagnostics PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_8_native_diagnostics PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
+
+# Native Bezier scissors removal contract; portable and machine-independent.
+add_executable(alencar_test19_8_native_scissors_realcut tests/native_scissors_realcut_19_8_standalone.cpp)
+target_include_directories(alencar_test19_8_native_scissors_realcut PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_8_native_scissors_realcut PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
+
+
+# TESTE_19.8: equal-gap distribution; closed/open polylines, groups, no laser.
+add_executable(alencar_test19_8_distribute_offline tests/distribution_19_8_standalone.cpp src/boost_json_impl.cpp)
+target_include_directories(alencar_test19_8_distribute_offline PRIVATE src ${BOOST_JSON_INCLUDE_DIR})
+if(NOT MSVC)
+ target_compile_options(alencar_test19_8_distribute_offline PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
+
+# TESTE 19.9: matemáticas e perfis de rolo/mandril, sem Qt/hardware.
+add_executable(alencar_test19_9_rotary_offline tests/rotary_offline_19_9_standalone.cpp)
+target_include_directories(alencar_test19_9_rotary_offline PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_9_rotary_offline PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
+
+# 19.9 — C++ portable gear generator; no printer, laser or Qt dependency.
+add_executable(alencar_test19_9_gear_offline tests/gear_generator_19_9_standalone.cpp)
+target_include_directories(alencar_test19_9_gear_offline PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_9_gear_offline PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
+
+# 19.9 — Oficina de mecanismos: matematica, materiais e animação idealizada OFFLINE.
+add_executable(alencar_test19_9_mechanisms_offline tests/mechanism_studio_19_9_standalone.cpp)
+target_include_directories(alencar_test19_9_mechanisms_offline PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_9_mechanisms_offline PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
+
+# TESTE_19.9 — Undo/Redo com transferência de snapshot sem cópia dupla.
+# Consolida as métricas estimadas de memória (apenas payload dos nós).
+add_executable(alencar_test19_9_history_memory tests/history_memory_19_9_standalone.cpp)
+target_include_directories(alencar_test19_9_history_memory PRIVATE src)
+if(NOT MSVC)
+ target_compile_options(alencar_test19_9_history_memory PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
+
+# 19.9 — LightBurn conservative parser: Rx/Ry, strict dimensions, and
+# node-budget preflight. Offline; no Windows UI or machine communication.
+if(Qt6_FOUND)
+ add_executable(alencar_test19_9_lbrn2_safe_import tests/lightburn_safe_import_19_9.cpp)
+ target_include_directories(alencar_test19_9_lbrn2_safe_import PRIVATE src)
+ target_link_libraries(alencar_test19_9_lbrn2_safe_import PRIVATE Qt6::Core Qt6::Gui)
+ if(MSVC)
+  target_compile_options(alencar_test19_9_lbrn2_safe_import PRIVATE /O2 /W4 /utf-8)
+ else()
+  target_compile_options(alencar_test19_9_lbrn2_safe_import PRIVATE -O2 -Wall -Wextra -Wpedantic)
+ endif()
+endif()
+
+# 19.9 — exact native cubic LBRN2 read-only parser. No GUI/hardware, no
+# 24-segment polygonal expansion. Full app import remains behind validation.
+if(Qt6_FOUND)
+ add_executable(alencar_test19_9_lbrn2_native tests/lightburn_native_19_9.cpp src/boost_json_impl.cpp)
+ target_include_directories(alencar_test19_9_lbrn2_native PRIVATE src ${BOOST_JSON_INCLUDE_DIR} ${MINIZIP_INCLUDE_DIR})
+ target_link_libraries(alencar_test19_9_lbrn2_native PRIVATE Qt6::Core Qt6::Gui ${MINIZIP_LIBRARY} ZLIB::ZLIB)
+ if(MSVC)
+  target_compile_options(alencar_test19_9_lbrn2_native PRIVATE /O2 /W4 /utf-8)
+ else()
+  target_compile_options(alencar_test19_9_lbrn2_native PRIVATE -O2 -Wall -Wextra -Wpedantic)
+ endif()
 endif()

@@ -20,7 +20,8 @@ struct Options{
  int threshold=128;      // pixels com cinza <= threshold sao pretos
  int minPixels=5;        // remove ilhas isoladas, nao pequenos furos de letras
  double optimizePx=.45;  // distancia max. da simplificacao, em pixels
- bool smooth=false;      // modo conservador desativado por padrao
+ bool smooth=false;      // arredondamento opcional (pode deformar cantos)
+ bool antiStaircase=false; // elimina microdegraus de pixels sem fechar buracos
  double widthMm=100.;
 };
 struct Result{
@@ -97,6 +98,39 @@ inline std::vector<Pt> simplifyClosed(std::vector<Pt> pts,double eps){
   pts=std::move(next);
  }
  return pts;
+}
+// Optional, conservative anti-staircase pass in PIXEL coordinates.
+// A real 90-degree corner has one turn and remains untouched. A diagonal
+// represented by a sawtooth of short orthogonal pixel edges has multiple
+// nearby turns and is nudged inward by at most 0.25 pixel. No nodes created
+// and original source image remains unchanged.
+inline std::vector<Pt> reducePixelStaircases(std::vector<Pt> ring){
+ if(ring.size()<9)return ring;
+ const std::size_t n=ring.size();
+ for(int pass=0;pass<2;++pass){
+  const auto before=ring;
+  for(std::size_t i=0;i<n;++i){
+   const Pt pm2=before[(i+n-2)%n],pm1=before[(i+n-1)%n];
+   const Pt at=before[i],pp1=before[(i+1)%n],pp2=before[(i+2)%n];
+   const Pt trend=pp2-pm2;
+   if(std::abs(trend.x)<1.0||std::abs(trend.y)<1.0)continue;
+   const auto edgeA=at-pm1,edgeB=pp1-at;
+   if(std::hypot(edgeA.x,edgeA.y)>1.5||
+      std::hypot(edgeB.x,edgeB.y)>1.5)continue;
+   int turns=0;
+   for(int j=-2;j<=1;++j){
+    const Pt u=before[(i+n+j+1)%n]-before[(i+n+j)%n];
+    const Pt v=before[(i+n+j+2)%n]-before[(i+n+j+1)%n];
+    if(std::abs(u.x*v.y-u.y*v.x)>0.3)++turns;
+   }
+   if(turns<2)continue;
+   const Pt mid=(pm1+pp1)*0.5;
+   const Pt displacement=mid-at;
+   if(std::hypot(displacement.x,displacement.y)>0.75)continue;
+   ring[i]=at+displacement*0.50;
+  }
+ }
+ return ring;
 }
 inline Result trace(const QImage& input,Options opt){
  if(input.isNull())throw std::runtime_error("Imagem nao carregada");
@@ -193,6 +227,7 @@ inline Result trace(const QImage& input,Options opt){
    edge=next;
   }
   if(!closed||ring.size()<4)continue;
+  if(opt.antiStaircase)ring=reducePixelStaircases(std::move(ring));
   ring=simplifyClosed(std::move(ring),opt.optimizePx);
   if(ring.size()<3)continue;
   if(opt.smooth&&ring.size()>=6){

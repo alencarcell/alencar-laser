@@ -47,6 +47,39 @@ inline json::value preserveEditorMetadata(const json::value& source,const Editor
  }
  return output;
 }
+// 19.9 native LightBurn: retain every CutIndex as a real *editor* layer.
+// Source LBRN2 CutIndex supplies an identity, NOT trusted speed/Fill/power values.
+// This repairs older v5 projects in memory without reassigning native curves,
+// touching their cubic handles, or enabling fabrication.
+inline std::size_t registerNativeLayerReferences(EditorState& state,
+                                                  const CurveDocument& native){
+ std::size_t registered=0;
+ for(const auto& contour:native.contours){
+  if(contour.layer<0)throw std::runtime_error("native LightBurn layer is negative");
+  if(state.layers.count(contour.layer))continue;
+  Layer placeholder;
+  placeholder.id=contour.layer;
+  placeholder.name="LightBurn C"+std::to_string(contour.layer)+" (parametros nao verificados)";
+  placeholder.mode="Line"; // editor display only, not original LightBurn operation
+  placeholder.parametersVerified=false;
+  placeholder.output=contour.layer!=1001&&contour.layer!=1002;
+  state.layers.emplace(contour.layer,std::move(placeholder));
+  ++registered;
+ }
+ return registered;
+}
+// A brand-new LBRN2 import cannot assume that even the default C00 settings
+// represent those in LightBurn. Keep all imported layer IDs, flag every
+// referenced layer's settings as unverified, and preserve the source geometry.
+inline EditorState newEditorStateForNativeLightBurn(const CurveDocument& native){
+ validateCurve(native);
+ EditorState state=fromDocument(Document{});
+ registerNativeLayerReferences(state,native);
+ for(const auto& contour:native.contours)
+  state.layers.at(contour.layer).parametersVerified=false;
+ validate(state);
+ return state;
+}
 // V5 experimental dos TESTES 13-15 inclui projects com layers={"source":...},
 // sem schema do editor. Um projeto SEM schema utiliza a camada padrão,
 // mantendo a origem em campo adicional ao ser salvo. Schema desconhecido não
@@ -56,10 +89,16 @@ inline EditorState editorStateForIntegratedProject(const IntegratedProject& proj
  if(!stored.is_object())throw std::runtime_error("invalid editor layer metadata");
  const auto& root=stored.as_object();
  auto it=root.find("schema");
- if(it==root.end())return fromDocument(project.legacy.doc);
- if(!it->value().is_string()||it->value().as_string()!="editor-meta-1")
-  throw std::runtime_error("unknown editor schema: migration requires review");
- return fromMetadata(project.legacy.doc,stored);
+ EditorState state;
+ if(it==root.end())state=fromDocument(project.legacy.doc);
+ else{
+  if(!it->value().is_string()||it->value().as_string()!="editor-meta-1")
+   throw std::runtime_error("unknown editor schema: migration requires review");
+  state=fromMetadata(project.legacy.doc,stored);
+ }
+ registerNativeLayerReferences(state,project.curves);
+ validate(state);
+ return state;
 }
 // A interface não habilita laser. Mantém os ajustes de trabalho e desabilita
 // apenas o sinal explícito de fabricação, inclusive em projetos antigos.

@@ -1,0 +1,70 @@
+# Alencar Laser 19.9 — Importador LightBurn de Bézier nativa (03/11/2026)
+
+## Objetivo e estado
+Evitar transformar cada aresta Bézier `B` da fonte LightBurn em 24 segmentos retos, preservando âncoras, tangentes de entrada/saída, tipos de aresta, fechamento, camadas e transformações `XForm` no formato `alaser::CurveDocument`.
+
+**Estado:** módulo novo **somente leitura e independente da GUI** `src/lightburn_native_import_19_9.hpp`, testes novos `tests/lightburn_native_19_9.cpp`, alvo CMake `alencar_test19_9_lbrn2_native`, gate `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteBezierNativo`. Ainda não foi compilado com Qt no Windows do operador nesta revisão, nem foi conectado ao menu Arquivo. Sem merge, sem uso de hardware.
+
+## Evidência independente do arquivo real
+Fonte: arquivo `ampulheita do tempo(1).lbrn2`, lido localmente, SHA-256 `65638a6fd7425fa69e1af47d02182eee57e372f42fd46e1608b7de0cdffbe86d`, LightBurn XML com 2.134 formas: 2.133 `Path` e 1 `Ellipse`. Sem grupos. Há reutilização de `VertID`/`PrimID` e o parser resolve referências só após ler todo o XML, preservando referências futuras. Os campos `c0x/y` e `c1x/y` de cada vértice representam alças que são aplicadas à aresta `B`; `L` fica reta.
+
+| Geometria | Conversão poligonal legada | Conversão nativa planejada |
+|---|---:|---:|
+| Quantidade de formas da fonte | 2.134 | 2.134 |
+| Contornos editáveis (esperado) | não homologado | 2.134 |
+| Nós/âncoras resultantes | ~397 mil (estimativa) | **17.947** |
+| Arestas cúbicas nativas | 0 após tesselação | **16.417**, incluindo 16 da elipse |
+| Arestas retas | segmentos tessellados misturados | **1.530** |
+| Curvas Bézier originais da fonte | 16.401 | 16.401 preservadas como cúbicas |
+
+A contagem acima foi obtida por uma leitura independente do XML com Python, **não por execução do novo código C++ Qt no Windows**. Foi convertida em asserção precisa no teste do arquivo original: em caso de divergência, teste FAIL.
+
+## Regras de segurança
+- `readNativeGeometry199()` não altera o editor, não seleciona camadas nem gera G-code. Valida `CurveDocument` inteiro antes do retorno; erro impede qualquer importação parcial.
+- Preserva transformações `XForm` tanto de âncoras quanto das alças, também aceita curvas mistas `B` e `L` sem costurar subcaminhos desconexos.
+- Respeita limites: arquivo até 32 MiB, `readShape` limita formas e profundidade, até 30 mil contornos e 250 mil âncoras nativas, posições finitas e dentro de alcance seguro.
+- Rejeita `Group` até existir persistência fiel de agrupamento no formato nativo; recusar é mais seguro que descartar hierarquia.
+- Elipse é uma cônica exata na origem, mas `CurveDocument` contém cúbicas: **somente a elipse** é aproximada com 16 arcos cúbicos curtos. Registrar esta limitação e comparar tolerância visual antes da integração à GUI.
+- `MirrorX/MirrorY` ativos são rejeitados por não haver homologação de referência/origem de máquina.
+- Sem envio de fonte do usuário ao GitHub, GitHub Actions, terceiro ou máquina laser; a fixture sintética é suficiente para teste mínimo. Arquivo real usado no computador do operador com `-ArquivoLbrn2`.
+
+## GATE Windows
+```powershell
+cd C:\ProjetoAlencarLaser
+git status --short
+# Somente após preservar modificações rastreadas e fechar Alencar Laser:
+git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\TESTAR_19_8_WINDOWS.ps1" -SomenteBezierNativo
+# Auditoria do arquivo original, quando caminho local estiver disponível:
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\TESTAR_19_8_WINDOWS.ps1" -SomenteBezierNativo -ArquivoLbrn2 "C:\CAMINHO\ampulheita do tempo.lbrn2"
+```
+
+A aprovação exige `PASS native LBRN2 19.9` e `REAL LBRN2: sourceShapes=2134 nativeContours=2134 nativeAnchors=17947 cubicEdges=16417 straightEdges=1530`. Se falhar, corrigir parser antes de integrar à UI.
+
+## Próximos gates — AINDA NÃO REALIZADOS
+1. Compilar/rodar no Windows e testar arquivo real, comparar 3–5 amostras de cúbicas por avaliação matemática e verificar contornos fechados.
+2. Integrar como fluxo **experimental opt-in e transacional** ao editor, sem apagar desenho atual antes da validação/decisão de salvar ou descartar; persistir `CurveDocument` integral em `.alaser` v5 e reabrir com hashes corretos.
+3. Medir RAM, tempo de carregar, `paint_p95_ms`, seleção de objetos, Undo/Redo e estabilidade com o arquivo original.
+4. Somente depois decidir se importador nativo pode substituir conversão legada, com rollback e revisão manual.
+
+Versão homologada, `main`, `APLICATIVO`, instalador e máquina não foram alterados.
+
+
+## 03/11/2026 — Gate adicional de persistência (ainda sem GUI)
+- O teste offline `alencar_test19_9_lbrn2_native` passou no Windows na etapa anterior (captura do operador). **A versão nova do teste abaixo ainda não foi executada**.
+- O teste foi ampliado para converter `CurveDocument` no esquema de persistência real `bezier-1` com `encodeCurves()/decodeCurves()`; compara, em todos os contornos e nós, IDs, camada, estado fechado, tipos de aresta e os bits exatos dos doubles de âncoras e alças.
+- Também constrói um projeto `.alaser` v5 **temporário**, via `buildEditedIntegratedProject`/`writeIntegratedProject`, reabre com `readIntegratedProject`, e exige igualdade estrita do `bezier-1`; nenhuma geometria poligonal artificial pode aparecer; `fabricationEnabled=false` obrigatório.
+- O arquivo de exemplo nativo convertido é criado em diretório temporário do Windows, não substitui `.lbrn2` nem grava nada no diretório de trabalho do cliente. O processo não inicializa hardware.
+- CMake recebeu `src/boost_json_impl.cpp` e dependências de Boost JSON/MiniZip/ZLIB para exercitar o formato v5 real. Teste sintético e teste do `.lbrn2` real devem produzir `PASS native LBRN2 19.9`; no caso real, linha `REAL LBRN2: ... roundtrip_exact=true` com 2134 Shapes/17947 âncoras/16417 cubicas/1530 linhas.
+- **A integração do menu Arquivo continua bloqueada até validação Windows desse ZIP roundtrip**, dos contornos do arquivo original e medição. A máquina permanece fisicamente desconectada.
+
+
+## 03/11/2026 — Integração Qt experimental com opt-in
+- **Evidência do operador:** `TESTAR_19_8_WINDOWS.ps1 -SomenteBezierNativo` passou após atualização do gate ZIP v5: `PASS native LBRN2 19.9: cubic controls, shared refs, native v5 ZIP exact reopen, fabrication off`. São fixtures sintéticas, ainda **não** o arquivo real.
+- Módulo integrado no `qt6_test6.cpp`, **DESATIVADO POR PADRÃO**. A variável **de processo** `ALENCAR_NATIVE_LBRN2_PREVIEW_19_9=1` permite escolher o parser nativo ao abrir `.lbrn2` na candidata Qt. Sem essa variável, todo fluxo anterior permanece.
+- O parser e a sessão Bézier são preparados antes de pedir permissão para substituir o desenho anterior. Ao operador, confirmação é negativa por padrão, com aviso de importar uma cópia e de que não existe Undo global da troca de documento. Documentos com edições não salvas continuam exigindo `ensureSafeToReplace()`. Arquivo original jamais recebe salvamento (projectPath limpo); só `.alaser` v5 para salvar a cópia.
+- O editor mantém `CurveDocument` em `CurveDragSession` e desenha com `QGraphicsPathItem` nativos. Não cria uma lista artificial de ~397 mil pontos e não habilita movimento de laser/G-code. A elipse permanece aproximação cúbica explícita; grupos são rejeitados em vez de perdidos.
+- Novo teste Qt `--native-import-gui-19-9-test`: fixture LBRN2 sintética, recusa atômica por XML inválido preservando desenho em edição, substituição aprovada **somente no teste** sem caixa de diálogo, criação dos 2 itens Bézier, validação dos contornos e alças, cópia `.alaser` ZIP v5 em diretório temporário, reabertura exata, arquivo fonte intacto. Relatório `RESULTADO_IMPORTACAO_NATIVA_GUI_19_9.json`.
+- Novo gate PowerShell: `SCRIPTS/TESTAR_19_8_WINDOWS.ps1 -SomenteBezierNativoUI`, compila Qt e executa o teste de interface isolada **sem abrir o arquivo do cliente**. O teste está incluído apenas no modo explícito; **ainda não foi executado no Windows**.
+- Abertura da origem real permanece **bloqueada até** obter PASS do parser/ZIP com `-SomenteBezierNativo -ArquivoLbrn2 "<caminho da copia>"`, PASS GUI sintético e então prova A/B de fluidez. A flag da interface fica desligada na instalação e no código padrão.
+- Não modificar `main`, `APLICATIVO`, instalador, original LightBurn ou conexão com máquina. PR #13 draft e sem merge.

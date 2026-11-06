@@ -12,7 +12,7 @@ inline object encodeCurves(const CurveDocument& d){
  validateCurve(d);object root;root["schema"]="bezier-1";root["coordinateUnit"]="mm";root["nextCurveNodeId"]=d.nextId;
  array curves;
  for(const auto& c:d.contours){
-  object co;co["objectId"]=c.key.object;co["subpathId"]=c.key.sub;co["closed"]=c.closed;
+  object co;co["objectId"]=c.key.object;co["subpathId"]=c.key.sub;co["closed"]=c.closed;co["layerId"]=c.layer;
   array edges;for(uint8_t e:c.edgeKind)edges.push_back(e?"cubic":"line");co["edgeKinds"]=std::move(edges);
   array nodes;
   for(const auto& n:c.nodes){
@@ -29,6 +29,7 @@ inline CurveDocument decodeCurves(const object& root){
  CurveDocument d;d.nextId=root.at("nextCurveNodeId").as_int64();
  for(auto& cv:root.at("contours").as_array()){
   const auto& co=cv.as_object();CurveContour c;c.key={int(co.at("objectId").as_int64()),int(co.at("subpathId").as_int64())};c.closed=co.at("closed").as_bool();
+  c.layer=co.if_contains("layerId")?int(co.at("layerId").as_int64()):0;
   for(auto& edge:co.at("edgeKinds").as_array()){
    auto s=edge.as_string();if(s=="cubic")c.edgeKind.push_back(1);else if(s=="line")c.edgeKind.push_back(0);else throw std::runtime_error("invalid edge type");
   }

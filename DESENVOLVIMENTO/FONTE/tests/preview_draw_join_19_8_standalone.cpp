@@ -99,8 +99,11 @@ int main(){
  const Key straight=native.addEditablePath(
   {{0,{30,0},{30,0},{30,0}},{0,{40,0},{40,0},{40,0}}},false,202);
  assert(straight.object==202&&native.committed().contours.back().edgeKind[0]==0);
- // Regression: an already finished native cubic must be selectable,
- // editable, cut without flattening, deletable and fully undoable.
+ // Regression: a finished native cubic is selectable, removable by scissors,
+ // restorable with Undo, deletable and redoable without phantom contours.
+ // IMPORTANT: the old 19.8 test assumed split-but-retain-all geometry.
+ // Native scissors now REMOVE the targeted full edge; it does not preserve
+ // two half-curves or insert a virtual bridge across the removed interval.
  CurveDragSession lifecycle(CurveDocument{});
  const Key original=lifecycle.addEditablePath(
   {{0,{0,0},{0,0},{3,8}},
@@ -112,30 +115,41 @@ int main(){
  lifecycle.select(original);
  CurveHit cut{original,0,0,CurvePart::Edge,0,0.5,{5,6}};
  assert(lifecycle.cutContourAtEdge(cut,302));
- assert(lifecycle.committed().contours.size()==2);
- const auto& left=lifecycle.committed().contours[0];
- const auto& right=lifecycle.committed().contours[1];
- assert(left.nodes.size()==2&&right.nodes.size()==2);
- assert(left.edgeKind[0]==1&&right.edgeKind[0]==1);
- assert(eq(cubicPoint(edgeAt(left,0),0.5),cubicPoint(baseline,0.25)));
- assert(eq(cubicPoint(edgeAt(right,0),0.5),cubicPoint(baseline,0.75)));
+ // A single open cubic has only one edge: the contour disappears entirely.
+ assert(lifecycle.committed().contours.empty());
+ assert(!lifecycle.selected());
  assert(lifecycle.undo()&&lifecycle.committed().contours.size()==1);
- assert(lifecycle.redo()&&lifecycle.committed().contours.size()==2);
- assert(lifecycle.deleteSelectedContour()&&lifecycle.committed().contours.size()==1);
- assert(lifecycle.undo()&&lifecycle.committed().contours.size()==2);
+ const auto& restored=lifecycle.committed().contours.front();
+ assert(restored.key==original&&restored.edgeKind.size()==1&&restored.edgeKind[0]==1);
+ const Cubic afterUndo=edgeAt(restored,0);
+ for(double t:{0.,0.25,0.5,0.75,1.})
+  assert(eq(cubicPoint(afterUndo,t),cubicPoint(baseline,t)));
+ assert(lifecycle.redo()&&lifecycle.committed().contours.empty());
+ assert(lifecycle.undo()&&lifecycle.committed().contours.size()==1);
+ lifecycle.select(original);
+ assert(lifecycle.deleteSelectedContour()&&lifecycle.committed().contours.empty());
  assert(lifecycle.undo()&&lifecycle.committed().contours.size()==1);
  assert(lifecycle.undo()&&lifecycle.committed().contours.empty());
- assert(!lifecycle.selected()); // no dangling selected key after undo of creation
+ assert(!lifecycle.selected()); // No dangling selected key after undo of creation.
  assert(lifecycle.redo()&&lifecycle.committed().contours.size()==1);
+ // A closed triangle loses exactly ONE edge, opening the ring rather than
+ // duplicating the first vertex and keeping the original closed geometry.
  CurveDragSession closedNative(CurveDocument{});
  const Key ring=closedNative.addEditablePath(
   {{0,{0,0},{0,0},{0,0}},{0,{10,0},{10,0},{10,0}},
    {0,{10,10},{10,10},{10,10}}},true,305);
+ const auto beforeRing=closedNative.committed().contours.front();
  assert(closedNative.cutContourAtEdge(
   {ring,1,0,CurvePart::Edge,0,0.5,{10,5}},306));
  assert(closedNative.committed().contours.size()==1);
- assert(!closedNative.committed().contours.front().closed);
- assert(closedNative.committed().contours.front().nodes.size()==5);
- assert(closedNative.undo()&&closedNative.committed().contours.front().closed);
+ const auto& opened=closedNative.committed().contours.front();
+ assert(!opened.closed&&opened.nodes.size()==3&&opened.edgeKind.size()==2);
+ assert(eq(opened.nodes.front().anchor,{10,10})&&
+        eq(opened.nodes.back().anchor,{10,0}));
+ assert(closedNative.undo()&&closedNative.committed().contours.size()==1);
+ const auto& closedAgain=closedNative.committed().contours.front();
+ assert(closedAgain.closed&&closedAgain.nodes.size()==beforeRing.nodes.size()&&
+        closedAgain.edgeKind==beforeRing.edgeKind);
+ assert(closedNative.redo()&&!closedNative.committed().contours.front().closed);
  std::cout<<"PASS: atomic join, closed rectangle, cross-contour merge, snap constraints, mixed native Bézier, undo/redo\n";
 }

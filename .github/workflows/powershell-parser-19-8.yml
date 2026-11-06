@@ -1,0 +1,38 @@
+name: Alencar Laser 19.8 - PowerShell parser gate
+on:
+  push:
+    branches:
+      - fix/curvas-tesoura-preflight-19-8-20261030
+    paths:
+      - SCRIPTS/TESTAR_19_8_WINDOWS.ps1
+      - .github/workflows/powershell-parser-19-8.yml
+  pull_request:
+    branches:
+      - fix/validacao-real-19-8-20261029
+    paths:
+      - SCRIPTS/TESTAR_19_8_WINDOWS.ps1
+      - .github/workflows/powershell-parser-19-8.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate-powershell-syntax:
+    runs-on: windows-latest
+    steps:
+      - name: Check out experimental branch
+        uses: actions/checkout@v4
+      - name: Parse TESTAR_19_8_WINDOWS.ps1 without executing it
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:GITHUB_WORKSPACE 'SCRIPTS/TESTAR_19_8_WINDOWS.ps1'
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            $target, [ref]$tokens, [ref]$errors
+          ) | Out-Null
+          foreach ($problem in $errors) {
+            Write-Host "::error file=SCRIPTS/TESTAR_19_8_WINDOWS.ps1,line=$($problem.Extent.StartLineNumber)::$($problem.Message)"
+          }
+          if ($errors.Count -gt 0) { exit 1 }
+          Write-Host 'PASS: PowerShell syntax parsed; no build or hardware run.'

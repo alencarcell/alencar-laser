@@ -7,6 +7,7 @@
 #include <limits>
 #include <tuple>
 #include <cmath>
+#include <numbers>
 #include <memory>
 
 namespace alaser {
@@ -170,8 +171,8 @@ public:
  bool dragging()const{return dragging_.has_value()||contourMoving_.has_value();}
  // Draw Lines interaction: corner nodes are clicks, smooth nodes derive
  // symmetric tangents from click-and-drag. One atomic history entry.
- Key addEditablePath(std::vector<CurveNode> points,bool closed,int objectId){
-  if(dragging()||objectId<=0||points.size()<2||points.size()>20000||
+ Key addEditablePath(std::vector<CurveNode> points,bool closed,int objectId,int layer=0){
+  if(dragging()||objectId<=0||layer<0||points.size()<2||points.size()>20000||
      (closed&&points.size()<3))
    throw std::runtime_error("invalid native path creation");
   for(const auto& n:points){
@@ -183,7 +184,7 @@ public:
   for(const auto& old:committed().contours)
    if(old.key==key)throw std::runtime_error("native path ID already used");
   history_.change([&](CurveDocument& d){
-   CurveContour contour;contour.key=key;contour.closed=closed;
+   CurveContour contour;contour.key=key;contour.closed=closed;contour.layer=layer;
    for(auto p:points){
     p.id=d.nextId++;
     contour.nodes.push_back(p);
@@ -202,19 +203,31 @@ public:
   return key;
  }
  // Nova curva cúbica nativa com âncoras/alças e Ctrl+Z na mesma sessão.
- Key addEditableCubic(Pt a,Pt out,Pt in,Pt b,int objectId){
-  if(dragging()||objectId<=0||dist(a,b)<1e-6)
+ Key addEditableCubic(Pt a,Pt out,Pt in,Pt b,int objectId,int layer=0){
+  if(dragging()||objectId<=0||layer<0||dist(a,b)<1e-6)
    throw std::runtime_error("invalid cubic creation");
   const Key key{objectId,0};
   history_.change([&](CurveDocument& d){
    for(const auto& c:d.contours)if(c.key==key)
     throw std::runtime_error("duplicate native curve object");
-   CurveContour c;c.key=key;c.closed=false;c.edgeKind={1};
+   CurveContour c;c.key=key;c.closed=false;c.layer=layer;c.edgeKind={1};
    c.nodes.push_back({d.nextId++,a,a,out});
    c.nodes.push_back({d.nextId++,b,in,b});
    d.contours.push_back(std::move(c));
   });
   selected_=key;index_.reset();return key;
+ }
+ bool setLayer(Key key,int layer){
+  if(dragging()||layer<0)return false;
+  bool found=false;
+  for(const auto& contour:committed().contours)
+   if(contour.key==key){found=true;if(contour.layer==layer)return true;break;}
+  if(!found)return false;
+  history_.change([&](CurveDocument& d){
+   for(auto& contour:d.contours)
+    if(contour.key==key){contour.layer=layer;break;}
+  });
+  index_.reset();return true;
  }
  void select(Key key){
   if(dragging())throw std::runtime_error("cannot select while dragging");
@@ -279,48 +292,52 @@ public:
   index_.reset();
   return created;
  }
- // Scissors on a NATIVE cubic: split an open path into two editable
- // contours or open a closed path at the clicked position. Exact de
- // Casteljau subdivision preserves the curve; one undo transaction.
- // The new object ID is supplied by the editor to avoid ID collisions.
+ // Native scissors REMOVE the clicked mathematical edge between anchors.
+ // The old split-at-click preserved the entire curve, appearing to do nothing.
+ // Surviving cubics remain exact and Undo restores the complete original.
+ // Crossings-based multi-edge trimming remains future work.
  bool cutContourAtEdge(const CurveHit& hit,int newObjectId){
-  if(dragging()||hit.part!=CurvePart::Edge||
-     !std::isfinite(hit.t)||hit.t<=0.01||hit.t>=0.99||
-     newObjectId<=0)return false;
-  for(const auto& c:committed().contours)
-   if(c.key.object==newObjectId)return false;
+  if(dragging()||hit.part!=CurvePart::Edge||newObjectId<=0)return false;
+  const auto& doc=committed();
+  std::size_t index=0;
+  while(index<doc.contours.size()&&doc.contours[index].key!=hit.key)++index;
+  if(index>=doc.contours.size())return false;
+  const CurveContour& current=doc.contours[index];
+  if(hit.edge<0||std::size_t(hit.edge)>=edgeCount(current))return false;
+  const std::size_t edge=std::size_t(hit.edge),n=current.nodes.size();
+  const bool twoPieces=!current.closed&&edge>0&&edge+1<n-1;
+  if(twoPieces)for(const auto& other:doc.contours)
+   if(other.key.object==newObjectId)return false;
   history_.change([&](CurveDocument& d){
-   std::size_t index=0;
-   while(index<d.contours.size()&&d.contours[index].key!=hit.key)++index;
-   if(index>=d.contours.size())throw std::runtime_error("Bezier cut target missing");
-   const bool wasClosed=d.contours[index].closed;
-   const size_t edge=size_t(hit.edge);
-   if(hit.edge<0||edge>=edgeCount(d.contours[index]))
-    throw std::runtime_error("Bezier cut invalid edge");
-   splitEdge(d,index,edge,hit.t);
-   CurveContour& original=d.contours[index];
-   const size_t pivot=edge+1;
-   if(wasClosed){
-    // Rotate the ring so the inserted node is the first and duplicate
-    // only its ID at the end; do not flatten or drop the closing edge.
-    std::rotate(original.nodes.begin(),original.nodes.begin()+pivot,original.nodes.end());
-    std::rotate(original.edgeKind.begin(),original.edgeKind.begin()+pivot,original.edgeKind.end());
-    CurveNode tail=original.nodes.front();tail.id=d.nextId++;
-    original.nodes.push_back(tail);
-    original.closed=false;
+   CurveContour& c=d.contours[index];
+   if(c.closed){
+    // Remove i->i+1; rotate remaining edges into an OPEN path.
+    CurveContour open;open.key=c.key;open.closed=false;open.layer=c.layer;
+    for(std::size_t k=0;k<n;++k)
+     open.nodes.push_back(c.nodes[(edge+1+k)%n]);
+    for(std::size_t k=0;k<n-1;++k)
+     open.edgeKind.push_back(c.edgeKind[(edge+1+k)%n]);
+    c=std::move(open);
+   }else if(n==2){
+    // A one-edge open path disappears entirely.
+    d.contours.erase(d.contours.begin()+static_cast<std::ptrdiff_t>(index));
+   }else if(edge==0){
+    c.nodes.erase(c.nodes.begin());
+    c.edgeKind.erase(c.edgeKind.begin());
+   }else if(edge+1==n-1){
+    c.nodes.pop_back();
+    c.edgeKind.pop_back();
    }else{
-    CurveContour right;
-    right.key={newObjectId,0};right.closed=false;
-    right.nodes.assign(original.nodes.begin()+pivot,original.nodes.end());
-    right.edgeKind.assign(original.edgeKind.begin()+pivot,original.edgeKind.end());
-    // Both subpaths share the cut coordinate, but may not share node IDs.
-    right.nodes.front().id=d.nextId++;
-    original.nodes.erase(original.nodes.begin()+pivot+1,original.nodes.end());
-    original.edgeKind.erase(original.edgeKind.begin()+pivot,original.edgeKind.end());
+    // Interior removal: preserve left and right without a connecting edge.
+    CurveContour right;right.key={newObjectId,0};right.closed=false;right.layer=c.layer;
+    right.nodes.assign(c.nodes.begin()+static_cast<std::ptrdiff_t>(edge+1),c.nodes.end());
+    right.edgeKind.assign(c.edgeKind.begin()+static_cast<std::ptrdiff_t>(edge+1),c.edgeKind.end());
+    c.nodes.erase(c.nodes.begin()+static_cast<std::ptrdiff_t>(edge+1),c.nodes.end());
+    c.edgeKind.erase(c.edgeKind.begin()+static_cast<std::ptrdiff_t>(edge),c.edgeKind.end());
     d.contours.push_back(std::move(right));
    }
   });
-  selected_=hit.key;index_.reset();
+  selected_.reset();index_.reset();
   return true;
  }
  // Remove âncora do contorno selecionado.
@@ -333,6 +350,40 @@ public:
   });
   index_.reset();
   return true;
+ }
+ // Affine transform of a WHOLE native Bezier. Exact cubic controls are
+ // transformed along with anchors: no polyline flattening or fake contour.
+ // Commits as ONE history entry; destination must be finite and nondegenerate.
+ bool transformSelectedContour(Pt pivot,double sx,double sy,double degrees,Pt offset={}){
+  if(dragging()||!selected_)return false;
+  if(!std::isfinite(pivot.x)||!std::isfinite(pivot.y)||
+     !std::isfinite(sx)||!std::isfinite(sy)||
+     !std::isfinite(degrees)||!std::isfinite(offset.x)||!std::isfinite(offset.y)||
+     sx<=0.0||sy<=0.0||sx>100.0||sy>100.0)
+   throw std::invalid_argument("invalid native transform");
+  if(std::abs(sx-1)<1e-10&&std::abs(sy-1)<1e-10&&
+     std::abs(degrees)<1e-10&&dist(offset,{})<1e-10)return false;
+  const Key key=*selected_;
+  bool found=false;
+  for(const auto& c:committed().contours)if(c.key==key){found=true;break;}
+  if(!found)return false;
+  const double angle=degrees*std::numbers::pi/180.0;
+  const double c=std::cos(angle),s=std::sin(angle);
+  const auto changePoint=[&](Pt pt){
+   const double dx=(pt.x-pivot.x)*sx,dy=(pt.y-pivot.y)*sy;
+   return Pt{pivot.x+dx*c-dy*s+offset.x,
+             pivot.y+dx*s+dy*c+offset.y};
+  };
+  history_.change([&](CurveDocument& d){
+   for(auto& contour:d.contours)if(contour.key==key){
+    for(auto& node:contour.nodes){
+     node.anchor=changePoint(node.anchor);
+     node.handleIn=changePoint(node.handleIn);
+     node.handleOut=changePoint(node.handleOut);
+    }
+   }
+  });
+  index_.reset();return true;
  }
  // Move um contorno inteiro (âncoras E alças) com uma única entrada no histórico.
  // A prévia não altera o documento confirmado nem o índice espacial.

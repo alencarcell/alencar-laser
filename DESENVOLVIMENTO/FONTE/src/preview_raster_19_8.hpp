@@ -60,7 +60,7 @@ inline void emitRow(Plan& out,double y,const std::vector<std::pair<double,double
  }
 }
 inline void appendFill(Plan& out,const EditorState& state,const Settings& settings,
-                       std::size_t cap=250000){
+                       std::size_t cap=250000,bool useLayerIntervals=false){
  validate(settings);
  // Detect open contours in Fill explicitly: no accidental closure or emission.
  std::map<int,std::vector<const Contour*>> groups;
@@ -79,6 +79,11 @@ inline void appendFill(Plan& out,const EditorState& state,const Settings& settin
  std::size_t scanBudget=0;
  constexpr std::size_t maxScanChecks=6000000;
  for(const auto& [layer,paths]:groups){
+  // Explicit per-layer Fill pitch is optional for callers; global preview
+  // interval stays usable and image raster remains independently configured.
+  const double pitch=useLayerIntervals?state.layers.at(layer).lineIntervalMm:settings.intervalMm;
+  if(!std::isfinite(pitch)||pitch<0.05||pitch>5.0)
+   throw std::runtime_error("Intervalo de preenchimento da camada invalido");
   double ymin=std::numeric_limits<double>::infinity(),ymax=-ymin;
   for(const auto* c:paths)for(const auto& node:c->nodes){
    ymin=std::min(ymin,node.p.y);ymax=std::max(ymax,node.p.y);
@@ -88,7 +93,7 @@ inline void appendFill(Plan& out,const EditorState& state,const Settings& settin
   if(!std::isfinite(range)||range>10000)
    throw std::runtime_error("Altura Fill virtual fora do limite");
   if(range<=0)continue;
-  const double rows=std::ceil(range/settings.intervalMm);
+  const double rows=std::ceil(range/pitch);
   if(rows>1500)throw std::runtime_error("Fill ultrapassa 1500 linhas virtuais");
   std::size_t edges=0;
   for(const Contour* shape:paths){
@@ -103,7 +108,7 @@ inline void appendFill(Plan& out,const EditorState& state,const Settings& settin
    throw std::runtime_error("Fill excedeu limite de intersecoes virtuais");
   scanBudget+=edges*rowCount;
   int row=0;
-  for(double y=ymin+settings.intervalMm*0.5;y<ymax;++row,y=ymin+settings.intervalMm*(row+0.5)){
+  for(double y=ymin+pitch*0.5;y<ymax;++row,y=ymin+pitch*(row+0.5)){
    std::vector<double> xs;
    for(const Contour* contour:paths){
     const auto& nodes=contour->nodes;

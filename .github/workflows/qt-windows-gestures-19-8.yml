@@ -1,0 +1,99 @@
+name: Alencar Laser 19.8 - Qt Windows drawing gate
+on:
+  push:
+    branches:
+      - fix/curvas-tesoura-preflight-19-8-20261030
+    paths:
+      - DESENVOLVIMENTO/FONTE/qt/**
+      - DESENVOLVIMENTO/FONTE/src/**
+      - DESENVOLVIMENTO/FONTE/CMakeLists.txt
+      - .github/workflows/qt-windows-gestures-19-8.yml
+  pull_request:
+    branches:
+      - fix/validacao-real-19-8-20261029
+    paths:
+      - DESENVOLVIMENTO/FONTE/qt/**
+      - DESENVOLVIMENTO/FONTE/src/**
+      - DESENVOLVIMENTO/FONTE/CMakeLists.txt
+      - .github/workflows/qt-windows-gestures-19-8.yml
+permissions:
+  contents: read
+jobs:
+  windows-qt6-gestures:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-boost
+            mingw-w64-ucrt-x86_64-minizip
+            mingw-w64-ucrt-x86_64-zlib
+      - name: Build actual Qt6 desktop target offline
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cmake -S DESENVOLVIMENTO/FONTE -B DESENVOLVIMENTO/FONTE/build_ci_qt_198 -G Ninja -DALENCAR_REQUIRE_QT=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=/ucrt64
+          cmake --build DESENVOLVIMENTO/FONTE/build_ci_qt_198 --parallel 2 --target alencar_test7_qt6 alencar_test15_qt_integrated alencar_test16_qt_persistence alencar_test17_mission alencar_test15_core alencar_work_local_edit_stress alencar_test19_8_distribute_offline alencar_test19_9_rotary_offline alencar_test19_9_gear_offline alencar_test19_9_mechanisms_offline
+      - name: Test Bezier resize and abandoned-gesture recovery without hardware
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          export QT_QPA_PLATFORM=offscreen
+          mkdir -p DESENVOLVIMENTO/FONTE/build_ci_qt_198/gesture_results
+          DESENVOLVIMENTO/FONTE/build_ci_qt_198/alencar_test7_qt6.exe --draw-join-19-8-test DESENVOLVIMENTO/FONTE/fixtures/web_nodes_normalized.csv DESENVOLVIMENTO/FONTE/build_ci_qt_198/gesture_results
+          cat DESENVOLVIMENTO/FONTE/build_ci_qt_198/gesture_results/RESULTADO_DESENHO_UNIAO_19_8.json
+
+      - name: Work regression suite on Windows (offline)
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          export QT_QPA_PLATFORM=offscreen
+          build="$PWD/DESENVOLVIMENTO/FONTE/build_ci_qt_198"
+          fixture="$PWD/DESENVOLVIMENTO/FONTE/fixtures/web_nodes_normalized.csv"
+          out="$build/work_results"
+          mkdir -p "$out"
+          "$build/alencar_work_local_edit_stress.exe"
+          "$build/alencar_test19_8_distribute_offline.exe"
+          "$build/alencar_test19_9_rotary_offline.exe"
+          "$build/alencar_test19_9_gear_offline.exe"
+          "$build/alencar_test19_9_mechanisms_offline.exe"
+          for mode in icon-pack-19-9 gear-generator-19-9 layout-icons-19-8 raster-object-19-8 recovery-19-8 edit-tools-19-7 refine-curves-trace-19-8 scissor-closures-19-8 layers-ungroup-19-8 simulation-raster-19-8 route-nesting-19-8 layer-route-19-8 simulation-motion-19-8 text-fill-align-19-8 text-format-19-8 inline-transforms-19-8 editor-multitool-19-8 drawing-tools-19-8 lbrn2-import shape-operations navigation workspace; do
+            mkdir -p "$out/$mode"
+            if ! "$build/alencar_test7_qt6.exe" "--$mode-test" "$fixture" "$out/$mode"; then
+              echo "FAIL Qt GUI regression: $mode"
+              for result in "$out/$mode"/*.json; do
+                if [ -f "$result" ]; then cat "$result"; fi
+              done
+              exit 1
+            fi
+          done
+          for dpr in 1 2; do
+            export QT_SCALE_FACTOR="$dpr"
+            for mode in interaction singleton; do
+              mkdir -p "$out/test17_${mode}_dpr$dpr"
+              "$build/alencar_test17_mission.exe" "--$mode" "$out/test17_${mode}_dpr$dpr"
+            done
+          done
+          export QT_SCALE_FACTOR=1
+          "$build/alencar_test15_core.exe" --write "$out/seed.alaser"
+          "$build/alencar_test15_core.exe" --verify "$out/seed.alaser"
+          for target in alencar_test16_qt_persistence alencar_test17_mission; do
+            "$build/$target.exe" --write "$out/seed.alaser" "$out/$target.alaser"
+            "$build/$target.exe" --verify "$out/seed.alaser" "$out/$target.alaser"
+          done
+      - name: Preserve offline Windows evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-work-regression
+          path: |
+            DESENVOLVIMENTO/FONTE/build_ci_qt_198/gesture_results
+            DESENVOLVIMENTO/FONTE/build_ci_qt_198/work_results
