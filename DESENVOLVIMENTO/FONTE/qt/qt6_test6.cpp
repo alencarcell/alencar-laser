@@ -9712,6 +9712,83 @@ QJsonObject groupedCenterTransform199Test(){
 }
 
 
+QJsonObject groupedCenterTransformDense20iTest(){
+ LabWindow w(Document{});w.show();QApplication::processEvents();
+ auto& v=w.view;
+ v.setTransform(QTransform::fromScale(1.4,1.4));v.centerOn(QPointF(178.,166.));
+ for(int i=0;i<575;++i)v.editor.rectangle(Pt{30.+12.*(i%25),30.+12.*(i/25)},8.,8.);
+ v.rebuild();v.selectAllVisible();QApplication::processEvents();
+ check(v.selected.size()==575,"center-transform fixture did not select 40");
+ const auto before=stateText(v.editor.state());
+ const Pt first=v.editor.state().doc.contours.front().nodes.front().p;
+ const QPoint start=v.mapFromScene(QPointF(178.,166.));
+ const QPoint end=v.mapFromScene(QPointF(182.,169.));
+ const QPointF delta=v.mapToScene(end)-v.mapToScene(start);
+ QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,start);
+ QApplication::processEvents();
+ check(v.groupedTransformStarts()==1,"Center handle did not enter grouped transform path");
+ int during=0;
+ for(auto* item:v.scene()->items())if(item->type()==QGraphicsItemGroup::Type)++during;
+ check(during==1,"Expected exactly one center-transform graphics group");
+ v.paintMs.clear();v.viewportPaintBBoxFractions.clear();
+ for(int step=1;step<=12;++step){
+  const QPoint intermediate=start+(end-start)*step/12;
+  QTest::mouseMove(v.viewport(),intermediate);
+  QApplication::processEvents();
+ }
+ const double paintP95=percentile(v.paintMs,.95);
+ const double paintP99=percentile(v.paintMs,.99);
+ const double bboxP95=percentile(v.viewportPaintBBoxFractions,.95);
+ check(v.paintMs.size()>=6,"Dense transform lacked paint samples");
+ check(v.groupedTransformFrameUpdates()>0,"Center-transform group was not moved");
+ check(stateText(v.editor.state())==before,"Center-transform preview changed canonical geometry");
+ const QImage previewPixels=v.viewport()->grab().toImage().convertToFormat(QImage::Format_ARGB32);
+ check(!previewPixels.isNull(),"Center-transform preview capture failed");
+ const QByteArray previewRaw(reinterpret_cast<const char*>(previewPixels.constBits()),
+                             qsizetype(previewPixels.sizeInBytes()));
+ const QString previewHash=QString::fromLatin1(
+   QCryptographicHash::hash(previewRaw,QCryptographicHash::Sha256).toHex());
+ check(v.transformLocalRepaint20h()
+       ?(v.transformLocalUpdates20h()>0&&v.transformFullFallbacks20h()==0)
+       :(v.transformLocalUpdates20h()==0),
+       "Unexpected local repaint behavior for center transform");
+ QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,end);
+ QApplication::processEvents();checkRendered(w);
+ for(const auto& shape:v.editor.state().doc.contours){
+  const auto* item=v.pathItem(shape.key);
+  check(!item->parentItem()&&item->pos()==QPointF{}&&item->transform().isIdentity(),
+        "Transient center transform leaked into canonical QGraphicsPathItem");
+ }
+ for(auto* item:v.scene()->items())
+  check(item->type()!=QGraphicsItemGroup::Type,
+        "Center-transform group leaked after release");
+ const Pt moved=v.editor.state().doc.contours.front().nodes.front().p;
+ check(std::abs(moved.x-first.x-delta.x())<1e-6&&
+       std::abs(moved.y-first.y-delta.y())<1e-6,
+       "Grouped center-transform committed unexpected coordinates");
+ pressKey(w,Qt::Key_Z,Qt::ControlModifier);
+ check(stateText(v.editor.state())==before,"Undo failed after grouped center-transform");
+ checkRendered(w);
+ pressKey(w,Qt::Key_Y,Qt::ControlModifier);
+ checkRendered(w);
+ const Pt redone=v.editor.state().doc.contours.front().nodes.front().p;
+ check(std::abs(redone.x-moved.x)<1e-6&&std::abs(redone.y-moved.y)<1e-6,
+       "Redo failed after grouped center-transform");
+ return QJsonObject{{"status","PASS"},{"selected_objects",575},
+                    {"center_group_starts",v.groupedTransformStarts()},
+                    {"center_group_frames",v.groupedTransformFrameUpdates()},
+                    {"transform_local_repaint_optin",v.transformLocalRepaint20h()},
+                    {"transform_local_update_requests",double(v.transformLocalUpdates20h())},
+                    {"transform_full_fallbacks",double(v.transformFullFallbacks20h())},
+                    {"preview_sha256",previewHash},
+                    {"paint_samples",int(v.paintMs.size())},
+                    {"paint_p95_ms",paintP95},{"paint_p99_ms",paintP99},
+                    {"viewport_bbox_p95_fraction",bboxP95},
+                    {"document_unchanged_during_preview",true},
+                    {"undo_redo_preserved",true},{"hardware_commands_sent",false}};
+}
+
+
 QJsonObject nativePaintBench199(const QString& source){
  // Offline GUI benchmark: use only a COPY of the operator's .lbrn2.
  // Never opens serial/TCP, sends G-code or writes to the source file.
@@ -9984,6 +10061,15 @@ QJsonObject nativePaintBench199(const QString& source){
 int main(int argc,char** argv){
  QApplication app(argc,argv);QString mode=argc>1?argv[1]:"--interactive",csv=argc>2?argv[2]:"fixtures/web_nodes_normalized.csv",out=argc>3?argv[3]:"results/TESTE_6";
 
+ if(mode=="--grouped-center-transform-575-20i-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=groupedCenterTransformDense20iTest();}
+  catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
+  QFile file(out+"/RESULTADO_TRANSFORMACAO_CENTRAL_575_20I.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
  if(mode=="--grouped-center-transform-19-9-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=groupedCenterTransform199Test();}
