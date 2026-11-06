@@ -1677,6 +1677,9 @@ public:
  int groupedDragStarts()const noexcept{return groupedDragStarts_;}
  int groupedDragFrameUpdates()const noexcept{return groupedDragFrameUpdates_;}
  int groupedTransformStarts()const noexcept{return groupedTransformStarts_;}
+ bool transformLocalRepaint20h()const noexcept{return localTransformOverlay20h_;}
+ quint64 transformLocalUpdates20h()const noexcept{return transformOverlayLocalUpdates20h_;}
+ quint64 transformFullFallbacks20h()const noexcept{return transformOverlayFullFallbacks20h_;}
  int groupedTransformFrameUpdates()const noexcept{return groupedTransformFrameUpdates_;}
  bool previewMatches(const Document& expected)const{
   if(!dragChunkKey_)return false;
@@ -9665,6 +9668,16 @@ QJsonObject groupedCenterTransform199Test(){
  QTest::mouseMove(v.viewport(),end);QApplication::processEvents();
  check(v.groupedTransformFrameUpdates()>0,"Center-transform group was not moved");
  check(stateText(v.editor.state())==before,"Center-transform preview changed canonical geometry");
+ const QImage previewPixels=v.viewport()->grab().toImage().convertToFormat(QImage::Format_ARGB32);
+ check(!previewPixels.isNull(),"Center-transform preview capture failed");
+ const QByteArray previewRaw(reinterpret_cast<const char*>(previewPixels.constBits()),
+                             qsizetype(previewPixels.sizeInBytes()));
+ const QString previewHash=QString::fromLatin1(
+   QCryptographicHash::hash(previewRaw,QCryptographicHash::Sha256).toHex());
+ check(v.transformLocalRepaint20h()
+       ?(v.transformLocalUpdates20h()>0&&v.transformFullFallbacks20h()==0)
+       :(v.transformLocalUpdates20h()==0),
+       "Unexpected local repaint behavior for center transform");
  QTest::mouseRelease(v.viewport(),Qt::LeftButton,Qt::NoModifier,end);
  QApplication::processEvents();checkRendered(w);
  for(const auto& shape:v.editor.state().doc.contours){
@@ -9690,6 +9703,10 @@ QJsonObject groupedCenterTransform199Test(){
  return QJsonObject{{"status","PASS"},{"selected_objects",40},
                     {"center_group_starts",v.groupedTransformStarts()},
                     {"center_group_frames",v.groupedTransformFrameUpdates()},
+                    {"transform_local_repaint_optin",v.transformLocalRepaint20h()},
+                    {"transform_local_update_requests",double(v.transformLocalUpdates20h())},
+                    {"transform_full_fallbacks",double(v.transformFullFallbacks20h())},
+                    {"preview_sha256",previewHash},
                     {"document_unchanged_during_preview",true},
                     {"undo_redo_preserved",true},{"hardware_commands_sent",false}};
 }
