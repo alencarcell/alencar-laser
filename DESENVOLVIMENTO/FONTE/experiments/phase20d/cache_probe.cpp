@@ -57,8 +57,9 @@ static QImage frame(QGraphicsScene& scene,double zoom) {
  QPainter painter(&img);
  painter.setRenderHint(QPainter::Antialiasing,true);
  painter.setRenderHint(QPainter::TextAntialiasing,true);
- painter.scale(zoom,zoom);
- scene.render(&painter,QRectF(0,0,W/zoom,H/zoom),QRectF(0,0,420,420),
+ // Viewport-equivalent zoom: fixed output pixels, source scene shrinks
+ // as zoom grows. Do not scale painter AND shrink target: those cancel.
+ scene.render(&painter,QRectF(0,0,W,H),QRectF(0,0,420.0/zoom,420.0/zoom),
               Qt::IgnoreAspectRatio);
  painter.end();
  return img;
@@ -122,7 +123,9 @@ int main(int argc,char**argv) {
     {"cached_median_ms",cached.medianMs},
     {"changed_pixels",double(cached.changedPixels)},
     {"max_channel_difference",double(cached.maxChannelDiff)},
-    {"pixels_compared",double(baseImage.width())*baseImage.height()}
+    {"pixels_compared",double(baseImage.width())*baseImage.height()},
+    {"source_scene_width",420.0/zoom},
+    {"eligible_cache_items",count>561?count-561:0}
    });
    std::printf("%d items / zoom %.1f: OFF %.3f ms / CACHE %.3f ms / pixel changes %llu / max diff %llu\n",
     count,zoom,raw.medianMs,cached.medianMs,
