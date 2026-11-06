@@ -1677,6 +1677,12 @@ public:
  int groupedDragStarts()const noexcept{return groupedDragStarts_;}
  int groupedDragFrameUpdates()const noexcept{return groupedDragFrameUpdates_;}
  int groupedTransformStarts()const noexcept{return groupedTransformStarts_;}
+ // Diagnostic accessor: exact center of selection quad captured at press.
+ // A viewport QPoint rounds the center to integer pixels, which may not
+ // map back to this exact scene-space pivot at noninteger zoom.
+ QPointF transformCenterPivot20i()const noexcept{
+  return (transformQuad_[0]+transformQuad_[2])*0.5;
+ }
  bool transformLocalRepaint20h()const noexcept{return localTransformOverlay20h_;}
  quint64 transformLocalUpdates20h()const noexcept{return transformOverlayLocalUpdates20h_;}
  quint64 transformFullFallbacks20h()const noexcept{return transformOverlayFullFallbacks20h_;}
@@ -9723,10 +9729,20 @@ QJsonObject groupedCenterTransformDense20iTest(){
  const Pt first=v.editor.state().doc.contours.front().nodes.front().p;
  const QPoint start=v.mapFromScene(QPointF(178.,166.));
  const QPoint end=v.mapFromScene(QPointF(190.,175.));
- const QPointF delta=v.mapToScene(end)-v.mapToScene(start);
+ // At fractional zoom, mapFromScene() rounds to integer viewport pixels.
+ // The actual transform uses mapToScene(end) minus the stored selection
+ // center, NOT mapToScene(end) minus the rounded mouse-press coordinate.
+ const QPointF expectedPivot=QPointF(178.,166.);
+ const QPointF roundedPress=v.mapToScene(start);
+ check(QLineF(expectedPivot,roundedPress).length() <
+       7.0/1.4,"Center handle fixture out of hit tolerance");
  QTest::mousePress(v.viewport(),Qt::LeftButton,Qt::NoModifier,start);
  QApplication::processEvents();
  check(v.groupedTransformStarts()==1,"Center handle did not enter grouped transform path");
+ const QPointF actualPivot=v.transformCenterPivot20i();
+ check(QLineF(actualPivot,expectedPivot).length()<1.0,
+       "Actual selected center differs from fixture; inspect scene bounds");
+ const QPointF delta=v.mapToScene(end)-actualPivot;
  int during=0;
  for(auto* item:v.scene()->items())if(item->type()==QGraphicsItemGroup::Type)++during;
  check(during==1,"Expected exactly one center-transform graphics group");
@@ -9763,9 +9779,14 @@ QJsonObject groupedCenterTransformDense20iTest(){
   check(item->type()!=QGraphicsItemGroup::Type,
         "Center-transform group leaked after release");
  const Pt moved=v.editor.state().doc.contours.front().nodes.front().p;
- check(std::abs(moved.x-first.x-delta.x())<1e-6&&
-       std::abs(moved.y-first.y-delta.y())<1e-6,
-       "Grouped center-transform committed unexpected coordinates");
+ const double errorX=moved.x-first.x-delta.x();
+ const double errorY=moved.y-first.y-delta.y();
+ check(std::abs(errorX)<1e-6&&std::abs(errorY)<1e-6,
+       QString("Grouped center-transform coordinate mismatch: dx=%1 dy=%2 expected=(%3,%4) actual=(%5,%6)")
+        .arg(errorX,0,'g',12).arg(errorY,0,'g',12)
+        .arg(delta.x(),0,'g',12).arg(delta.y(),0,'g',12)
+        .arg(moved.x-first.x,0,'g',12).arg(moved.y-first.y,0,'g',12)
+        .toStdString().c_str());
  pressKey(w,Qt::Key_Z,Qt::ControlModifier);
  check(stateText(v.editor.state())==before,"Undo failed after grouped center-transform");
  checkRendered(w);
