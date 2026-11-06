@@ -143,17 +143,34 @@ try {
  $on99=Mediana @($b | ForEach-Object { $_.paint_p99_ms })
  $offInput=Mediana @($a | ForEach-Object { $_.input_to_paint_p95_ms })
  $onInput=Mediana @($b | ForEach-Object { $_.input_to_paint_p95_ms })
- $gate=if ($balance -lt 0.70) { 'INCONCLUSIVE_SAMPLE_IMBALANCE' }
-       else { 'CONTROLLED_SYNTHETIC_MEASURED_MANUAL_PENDING' }
+ # Heuristic gate is not a significance test: >=10% worse in BOTH
+ # paint P95 and P99 blocks promoting this experiment. No auto-homologation.
+ $paintP95Regression = if ($off95 -gt 0) { 100*($on95-$off95)/$off95 } else { 0 }
+ $paintP99Regression = if ($off99 -gt 0) { 100*($on99-$off99)/$off99 } else { 0 }
+ $performanceGate = if ($balance -lt 0.70) { 'INCONCLUSIVE_SAMPLE_IMBALANCE' }
+                    elseif ($paintP95Regression -ge 10 -and $paintP99Regression -ge 10) {
+                      'REGRESSION_OBSERVED_DO_NOT_PROMOTE'
+                    } else { 'SYNTHETIC_RESULTS_MANUAL_REVIEW_REQUIRED' }
+ $gate = if ($balance -lt 0.70) { 'INCONCLUSIVE_SAMPLE_IMBALANCE' }
+         else { 'CONTROLLED_SYNTHETIC_MEASURED_MANUAL_PENDING' }
  $report=[ordered]@{
   schema='alencar-laser-controlled-drag-575-ab-19.9'
   status=$gate
+  performance_gate=$performanceGate
+  regression_threshold_percent=10
+  automatic_promotion_allowed=$false
   fixture_sha256=$fixtureSha
   binary_sha256=$binarySha
   environment=$reference
   protocol='OFF-ON-ON-OFF-OFF-ON; 144 mouse moves; 575 contours, 13415 nodes; zoom=1.2'
   paint_sample_balance_ratio=[math]::Round($balance,4)
   medians=[ordered]@{
+    viewport_bbox_p95_fraction_off=(Mediana @($a | ForEach-Object { $_.viewport_bbox_p95_fraction }))
+    viewport_bbox_p95_fraction_on=(Mediana @($b | ForEach-Object { $_.viewport_bbox_p95_fraction }))
+    local_requests_off=($a | Measure-Object -Property local_requests -Sum).Sum
+    local_requests_on=($b | Measure-Object -Property local_requests -Sum).Sum
+    full_fallbacks_off=($a | Measure-Object -Property full_fallbacks -Sum).Sum
+    full_fallbacks_on=($b | Measure-Object -Property full_fallbacks -Sum).Sum
     paint_p95_off_ms=$off95; paint_p95_on_ms=$on95
     paint_p99_off_ms=$off99; paint_p99_on_ms=$on99
     input_to_paint_p95_off_ms=$offInput; input_to_paint_p95_on_ms=$onInput
@@ -175,9 +192,15 @@ try {
  [IO.File]::WriteAllText($output,(($report|ConvertTo-Json -Depth 8)+[Environment]::NewLine),
    [Text.UTF8Encoding]::new($false))
  Write-Host ('Gate sintetico: {0}, razao amostras: {1:N3}' -f $gate,$balance) -ForegroundColor Yellow
+ Write-Host ('Gate de desempenho: {0}' -f $performanceGate) -ForegroundColor Yellow
  Write-Host ('P95 pintura OFF/ON: {0} / {1} ms, delta {2}%' -f $off95,$on95,(Reducao $off95 $on95))
  Write-Host ('P99 pintura OFF/ON: {0} / {1} ms, delta {2}%' -f $off99,$on99,(Reducao $off99 $on99))
  Write-Host ('P95 entrada-pintura OFF/ON: {0} / {1} ms, delta {2}%' -f $offInput,$onInput,(Reducao $offInput $onInput))
+ Write-Host ('Repintura bbox P95 fracao OFF/ON: {0:N3} / {1:N3}' -f (Mediana @($a | ForEach-Object { $_.viewport_bbox_p95_fraction })),(Mediana @($b | ForEach-Object { $_.viewport_bbox_p95_fraction })))
+ Write-Host ('Requisicoes local ON: {0}, fallbacks full ON: {1}' -f (($b | Measure-Object -Property local_requests -Sum).Sum),(($b | Measure-Object -Property full_fallbacks -Sum).Sum))
+ if ($performanceGate -eq 'REGRESSION_OBSERVED_DO_NOT_PROMOTE') {
+  Write-Warning 'REGRESSAO CONTROLADA: modo ON tem P95 e P99 >=10% piores. NAO PROMOVER.'
+ }
  Write-Host "Resumo JSON local: $output" -ForegroundColor Green
  Write-Host 'Sem Git push e sem hardware. Homologacao visual/produçao pendente.'
 }
