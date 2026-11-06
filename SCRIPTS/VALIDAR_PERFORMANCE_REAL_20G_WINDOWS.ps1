@@ -38,17 +38,17 @@ function Save([string]$status,[string]$message){
  }
  [IO.File]::WriteAllText($reportFile,($report|ConvertTo-Json -Depth 12),[Text.UTF8Encoding]::new($false))
 }
-function Capture([string]$id,[string]$scriptPath,[string[]]$args){
+function Capture([string]$id,[string]$scriptPath,[string[]]$arguments){
  $stdout=Join-Path $session ($id+'_OUT.txt')
  $stderr=Join-Path $session ($id+'_ERR.txt')
  Write-Host "TESTANDO: $id" -ForegroundColor Cyan
  $command=@('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$scriptPath+'"'))
- foreach($part in $args){
+ foreach($part in $arguments){
   if($part.Contains('"')){throw 'Aspas em argumento nao permitido'}
   $command+= $(if($part -match '\s') { '"'+$part+'"' }else{$part})
  }
  $p=Start-Process -FilePath 'powershell.exe' -ArgumentList $command -WorkingDirectory $root -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
- $steps+= [ordered]@{id=$id;exit_code=$p.ExitCode;stdout=$stdout;stderr=$stderr}
+ $script:steps+= [ordered]@{id=$id;exit_code=$p.ExitCode;stdout=$stdout;stderr=$stderr}
  if($p.ExitCode -ne 0){
   Write-Host "FALHA $id - veja o primeiro erro real:" -ForegroundColor Red
   if(Test-Path $stderr){Get-Content $stderr -Tail 25 | Out-Host}
