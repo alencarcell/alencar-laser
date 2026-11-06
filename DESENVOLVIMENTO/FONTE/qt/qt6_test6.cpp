@@ -372,14 +372,22 @@ class QtEditorLab final:public QGraphicsView{
  // A/B opt-in: Qt already invalidates moving scene items automatically;
  // explicit viewport updates here are only for the selection foreground.
  // Rollback immediately: unset ALENCAR_LOCAL_DRAG_OVERLAY_19_9.
- // 0/default: legacy full update; 1: original QRegion opt-in;
- // 2: same QRegion with cached selection frame (no per-frame bounds scan).
+ // 0/default: full viewport update; 1: QRegion recomputed;
+ // 2: QRegion with cached frame; 3: cached frame only for SMALL selections.
+ // On >=128 preview items, mode 3 uses legacy updates for safety.
+ const QByteArray dragOverlayMode199_=qgetenv("ALENCAR_LOCAL_DRAG_OVERLAY_19_9");
  const bool localDragOverlay199_=
-   qEnvironmentVariable("ALENCAR_LOCAL_DRAG_OVERLAY_19_9")=="1"||
-   qEnvironmentVariable("ALENCAR_LOCAL_DRAG_OVERLAY_19_9")=="2";
- const bool cachedDragOverlay199_=
-   qEnvironmentVariable("ALENCAR_LOCAL_DRAG_OVERLAY_19_9")=="2";
+   dragOverlayMode199_=="1"||dragOverlayMode199_=="2"||dragOverlayMode199_=="3";
+ const bool cachedDragOverlay199_=dragOverlayMode199_=="2"||dragOverlayMode199_=="3";
+ const bool denseGuardDragOverlay199_=dragOverlayMode199_=="3";
+ static constexpr std::size_t kLocalizedOverlayMaxItems199=127;
  quint64 dragOverlayLocalRequests199_=0,dragOverlayFullFallbacks199_=0;
+ quint64 dragOverlayDenseLegacyUpdates199_=0;
+ bool shouldUseLocalDragOverlay199()const noexcept{
+  return localDragOverlay199_&&
+    (!denseGuardDragOverlay199_||
+     shapePreviewItems_.size()<=kLocalizedOverlayMaxItems199);
+ }
  // Alcas independentes dos dados; commit unico no mouseRelease.
  bool transformDragging_=false;
  int transformHandle_=-1; // 0..7 tamanho; 8..11 rotacao; 12 move pelo centro
@@ -791,7 +799,8 @@ class QtEditorLab final:public QGraphicsView{
    const auto it=nativeItems_.find(*nativeSession_->selected());
    if(it!=nativeItems_.end())return quadFromRect(it->second->path().boundingRect());
   }
-  if(shapeDragging_&&cachedDragOverlay199_&&dragOverlayBaseQuad199_){
+  if(shapeDragging_&&cachedDragOverlay199_&&dragOverlayBaseQuad199_&&
+     shouldUseLocalDragOverlay199()){
    auto cached=*dragOverlayBaseQuad199_;
    for(auto& p:cached)p+=shapePreviewDelta_;
    return cached;
@@ -1083,7 +1092,9 @@ class QtEditorLab final:public QGraphicsView{
   if(!shapePreviewBounds_){clearShapePreview();return;}
   shapePreviewDelta_={};
   shapeDragStart_=origin;
-  if(cachedDragOverlay199_){
+  if(cachedDragOverlay199_&&
+     (!denseGuardDragOverlay199_||
+      shapePreviewItems_.size()<=kLocalizedOverlayMaxItems199)){
    // Capture once while shapeDragging_ is false. This preserves existing
    // oriented frames and avoids repeated selectedBounds() on 13k+ nodes.
    dragOverlayBaseQuad199_=selectionQuadScene();
@@ -1725,6 +1736,8 @@ public:
  bool fastDenseDisplay()const noexcept{return fastDenseDisplay_;}
  bool dragOverlayLocalExperiment199()const noexcept{return localDragOverlay199_;}
  bool dragOverlayCachedExperiment199()const noexcept{return cachedDragOverlay199_;}
+ bool dragOverlayDenseGuard199()const noexcept{return denseGuardDragOverlay199_;}
+ quint64 dragOverlayDenseLegacyUpdates199()const noexcept{return dragOverlayDenseLegacyUpdates199_;}
  quint64 dragOverlayLocalRequests199()const noexcept{return dragOverlayLocalRequests199_;}
  quint64 dragOverlayFullFallbacks199()const noexcept{return dragOverlayFullFallbacks199_;}
  void rebuild(){
@@ -2487,7 +2500,8 @@ void mouseMoveEvent(QMouseEvent* e)override{
    if(transformDragging_){updateSelectionTransform(e->position(),e->modifiers());e->accept();return;}
    if(marqueeActive_){showMarquee(e->position());e->accept();return;}
   if(shapeDragging_){
-   const auto oldQuad=localDragOverlay199_?selectionQuadScene():
+   const bool localForThisDrag=shouldUseLocalDragOverlay199();
+   const auto oldQuad=localForThisDrag?selectionQuadScene():
                       std::optional<std::array<QPointF,4>>{};
    shapePreviewDelta_=mapToScene(e->position().toPoint())-mapToScene(shapeDragStart_.toPoint());
    if(shapePreviewGroup_){
@@ -2498,7 +2512,7 @@ void mouseMoveEvent(QMouseEvent* e)override{
    }
    // Scene items invalidate their own geometry. In opt-in mode, update only
    // OLD and NEW selection handles; default preserves previous full update.
-   if(localDragOverlay199_){
+   if(localForThisDrag){
     const auto oldRect=shapeOverlayDirtyRect199(oldQuad);
     const auto newRect=shapeOverlayDirtyRect199(selectionQuadScene());
     if(oldRect&&newRect){
@@ -2508,7 +2522,10 @@ void mouseMoveEvent(QMouseEvent* e)override{
     }else{
      viewport()->update();++dragOverlayFullFallbacks199_;
     }
-   }else viewport()->update();
+   }else{
+    viewport()->update();
+    if(denseGuardDragOverlay199_)++dragOverlayDenseLegacyUpdates199_;
+   }
    ++frameUpdates;e->accept();return;
   }
   if(draggingNode_&&active_){
@@ -3199,6 +3216,8 @@ public:
       {"grouped_drag_frame_updates",view.groupedDragFrameUpdates()},
       {"drag_overlay_local_experiment_19_9",view.dragOverlayLocalExperiment199()},
       {"drag_overlay_cached_experiment_19_9",view.dragOverlayCachedExperiment199()},
+      {"drag_overlay_dense_guard_19_9",view.dragOverlayDenseGuard199()},
+      {"drag_overlay_dense_legacy_updates_19_9",double(view.dragOverlayDenseLegacyUpdates199())},
       {"drag_overlay_local_requests_19_9",double(view.dragOverlayLocalRequests199())},
       {"drag_overlay_full_fallbacks_19_9",double(view.dragOverlayFullFallbacks199())},
       {"grouped_transform_starts",view.groupedTransformStarts()},
@@ -9262,6 +9281,8 @@ QJsonObject groupedDrag199Test(){
                     {"grouped_frames",v.groupedDragFrameUpdates()},
                     {"drag_overlay_local_experiment",v.dragOverlayLocalExperiment199()},
                     {"drag_overlay_cached_experiment",v.dragOverlayCachedExperiment199()},
+                    {"drag_overlay_dense_guard",v.dragOverlayDenseGuard199()},
+                    {"drag_overlay_dense_legacy_updates",double(v.dragOverlayDenseLegacyUpdates199())},
                     {"drag_overlay_local_requests",double(v.dragOverlayLocalRequests199())},
                     {"drag_overlay_full_fallbacks",double(v.dragOverlayFullFallbacks199())},
                     {"undo_redo_preserved",true},{"hardware_commands_sent",false}};
@@ -9355,9 +9376,16 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
  checkRendered(w);
  check(v.dragOverlayLocalExperiment199() || v.dragOverlayLocalRequests199()==0,
        "OFF mode unexpectedly used local overlay updates");
- if(v.dragOverlayLocalExperiment199())
-  check(v.dragOverlayLocalRequests199()>quint64(initialOverlay),
-        "ON mode did not enter local overlay repaint");
+ if(v.dragOverlayLocalExperiment199()){
+  if(v.dragOverlayDenseGuard199()){
+   check(v.dragOverlayLocalRequests199()==quint64(initialOverlay) &&
+         v.dragOverlayDenseLegacyUpdates199()>=kFrames,
+         "Mode 3 large selection must use legacy repaint fallback");
+  }else{
+   check(v.dragOverlayLocalRequests199()>quint64(initialOverlay),
+         "ON mode did not enter local overlay repaint");
+  }
+ }
  return {
   {"schema","alencar-laser-controlled-drag-575-19.9"},
   {"status","PASS_SYNTHETIC_MANUAL_PENDING"},
@@ -9369,6 +9397,8 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
   {"qt",qVersion()},
   {"overlay_local_enabled",v.dragOverlayLocalExperiment199()},
   {"overlay_cached_bounds_enabled",v.dragOverlayCachedExperiment199()},
+  {"overlay_dense_guard_enabled",v.dragOverlayDenseGuard199()},
+  {"overlay_dense_legacy_updates",double(v.dragOverlayDenseLegacyUpdates199())},
   {"overlay_local_requests",double(v.dragOverlayLocalRequests199())},
   {"overlay_full_fallbacks",double(v.dragOverlayFullFallbacks199())},
   {"measured",measured},
