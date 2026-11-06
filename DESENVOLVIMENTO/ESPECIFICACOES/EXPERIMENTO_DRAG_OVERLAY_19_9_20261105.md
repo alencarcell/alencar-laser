@@ -148,3 +148,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_DRAG_CON
 ```
 
 **Ainda não compilado/executado:** não afirmar PASS nem melhoria. O novo teste deve validar seis rodadas, integridade de 575 contornos, Undo/Redo, cache ligado em ON2, P95/P99, equilíbrio de amostras e zero hardware. Mesmo que P95 melhore, homologação visual com ratros de moldura, zoom/Tesoura e GPU ainda fica pendente. Não utilizar `-Publicar` nem promover para `main`.
+
+
+## 06/11/2026 — ON2 reprovado e guarda experimental ON3
+
+Captura do operador apos compilar e executar `-ModoOtimizado 2`: seis rodadas automatizadas sobre 575 contornos, 13.415 nos, 144 movimentos, equilibrio de amostras 1,000, teste de integridade Qt 40 objetos PASS, hardware desconectado. **REGRESSION_OBSERVED_DO_NOT_PROMOTE**. Medianas: pintura P95 OFF **16,4751 ms** vs ON2 **30,4121 ms** (+84,59% ON); pintura P99 **17,8071** vs **32,2839 ms** (+81,30%); entrada→pintura P95 **19,8845** vs **32,9958 ms** (+65,94%). Bbox P95 OFF 1,000 / ON2 ~0,300; 432 requests localizadas ON2; 0 fallbacks. A comparacao OFF-ON2 e pareada e controlada; os valores OFF de outra execucao OFF-ON1 nao sao diretamente comparaveis por variacao temporal.
+
+**Diagnostico:** caching dos limites de selecao reduziu custos de varredura potencialmente presentes no modo 1, mas **nao resolveu** a regressao; as medições não isolam se o custo remanescente vem de clipping QRegion, chamadas extras, desenho do foreground, plataforma raster ou outros fatores. NAO presumir causa comprovada apenas com a area repintada.
+
+**Proxima protecao experimental (nao adotada em producao):** fonte Qt recebeu modo `ALENCAR_LOCAL_DRAG_OVERLAY_19_9=3` (commit `e95ca46`) com **guarda de densidade**. Em arraste com `shapePreviewItems_.size() >= 128`, usa a estrategia legada de repaint completo; com ate 127 items, usa QRegion e quadro cacheado como ON2. Adiciona diagnosticos `overlay_dense_guard_enabled` e `overlay_dense_legacy_updates`. Requisicoes ON3 de repintura local devem ser zero para 575 e os updates legados >= 144. A variavel ausente segue como OFF; 1/2 continuam referencias experimentais.
+
+O script `COMPARAR_DRAG_CONTROLADO_575_19_9.ps1` aceita `-ModoOtimizado 3` (commit `e21f960`) e valida fallback em todas as rodadas ON3; testa a mesma geometria, Undo/Redo e ausencia de comandos laser. **Ainda não compilado ou executado no Windows.** Nao tratar volta ao modo legado como ganho comprovado ou algoritmo adaptativo otimizado. Mesmo se PASS, o proximo teste deve cobrir selecoes pequenas com imagens e Undo/Redo, e continuar com QA visual antes de qualquer promocao.
+
+Com o editor fechado e maquina laser desconectada:
+```powershell
+cd C:\ProjetoAlencarLaser
+git status --short
+git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030
+if ($LASTEXITCODE -ne 0) { throw "Falha na atualizacao" }
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_DRAG_CONTROLADO_575_19_9.ps1" -ModoOtimizado 3
+```
+O resultado fica somente em `RELATORIOS`, ignorado pelo Git; nao e preciso publicar nem conectar hardware. Mantem main, APLICATIVO, instalador e controle fisico intocados.
