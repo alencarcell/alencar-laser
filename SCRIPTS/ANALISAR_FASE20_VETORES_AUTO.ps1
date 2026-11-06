@@ -111,7 +111,37 @@ Write-Host 'MEDIANAS P95 em milissegundos (nao aditivas):' -ForegroundColor Cyan
  OFF=(Med $off 'noncontour_inclusive_p95_ms')
  ON3=(Med $on 'noncontour_inclusive_p95_ms')
 } | Format-Table -AutoSize
+$hasHotspots = ($null -ne $rows[0].PSObject.Properties['vector_top_ten_share_percent'])
+if ($hasHotspots) {
+ foreach($row in $rows){
+  [void](Num $row 'vector_calls_mean_per_frame')
+  [void](Num $row 'vector_top_ten_share_percent')
+  if (@($row.vector_top_paint_cost).Count -ne 10 -or
+      @($row.vector_complexity_buckets).Count -ne 4) {
+   throw 'Perfil anonimo de hotspots incompleto.'
+  }
+ }
+ Write-Host 'FASE 20b / DISTRIBUICAO DE CUSTOS (mesma coleta, percentuais de soma de duracoes)' -ForegroundColor Cyan
+ [pscustomobject]@{
+  Metrica='Chamadas medias por frame'
+  OFF=(Med $off 'vector_calls_mean_per_frame')
+  ON3=(Med $on 'vector_calls_mean_per_frame')
+ } | Format-Table -AutoSize
+ [pscustomobject]@{
+  Metrica='Parcela dos 10 contornos com maior soma de duracoes (%)'
+  OFF=(Med $off 'vector_top_ten_share_percent')
+  ON3=(Med $on 'vector_top_ten_share_percent')
+ } | Format-Table -AutoSize
+ $sample=$on | Sort-Object round -Descending | Select-Object -First 1
+ Write-Host ('Exemplo anonimizado da rodada ON3 #{0}: grupos de complexidade' -f $sample.round) -ForegroundColor Cyan
+ @($sample.vector_complexity_buckets) | Select-Object node_band,contours,paint_calls,total_ms | Format-Table -AutoSize
+ Write-Host 'Dez maiores custos acumulados (sem IDs, nomes ou coordenadas):' -ForegroundColor Cyan
+ @($sample.vector_top_paint_cost) | Select-Object rank,node_count,path_element_count,paint_calls,total_ms,mean_ms_per_call,max_single_call_ms | Format-Table -AutoSize
+ Write-Warning 'Ranking por soma de tempo da rodada, nao por identidade persistente. Valores tem overhead da sonda por item.'
+} else {
+ Write-Host 'O resumo anterior nao tem hotspots da Fase 20b. A proxima coleta automatica gerara esses campos.' -ForegroundColor Yellow
+}
 Write-Warning 'ON3 e OFF tem a mesma repintura para 575 contornos; diferencias entre rodadas nao demonstram aceleracao.'
 Write-Warning 'A subclasse de diagnostico e os cronometros perturbam o tempo. Quantis P95 de etapas NAO se somam ou representam porcentagens.'
-Write-Host 'Hipotese seguinte: separar numero de chamadas de paint de custo de cada chamada, sem modificar a geometria.' -ForegroundColor Yellow
+Write-Host 'Proximo gate: avaliar distribuicao de custo por faixa de nos e qualidade visual, antes de mudar a renderizacao.' -ForegroundColor Yellow
 Write-Host 'Somente leitura: sem Qt, sem laser, sem alteracoes de arquivo ou Git push.' -ForegroundColor Green
