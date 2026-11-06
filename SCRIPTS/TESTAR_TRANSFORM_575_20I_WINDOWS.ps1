@@ -112,9 +112,19 @@ try{
   }
   Save 'IN_PROGRESS' ("Par $n validado")
  }
- Save 'SYNTHETIC_PASS_MANUAL_PENDING' 'Cenarios 575 equivalentes; ganho causal ainda nao demonstrado'
  $rows|Format-Table pair,off_p95_ms,on_p95_ms,off_bbox_p95,on_bbox_p95,equal_pixels -AutoSize
- Write-Host 'PASS 20i: equivalencia sintetica. Nao homologado; medir DPI, mouse e projetos reais.' -ForegroundColor Green
+ # Do NOT call it a performance PASS just because pixels and undo match.
+ # This gate is conservative: if all paired P95s worsen, keep the flag OFF.
+ $worse=@($rows | Where-Object {
+   [double]$_.on_p95_ms -gt [double]$_.off_p95_ms
+ })
+ if($worse.Count -eq $rows.Count){
+  Save 'PERFORMANCE_REGRESSION' 'Todos os pares pioraram em P95; nao ativar ALENCAR_TRANSFORM_LOCAL_REPAINT_20H.'
+  Write-Warning 'Fase20i: equivalencia visual PASS, mas desempenho REPROVADO. Flag experimental deve permanecer OFF.'
+ }else{
+  Save 'SYNTHETIC_PASS_MANUAL_PENDING' 'Integridade aprovada; desempenho ainda inconclusivo, sem autorizacao de promocao.'
+  Write-Host 'Fase20i: equivalencia sintética aprovada; sem ganho causal homologado.' -ForegroundColor Yellow
+ }
  Write-Host "Resumo: $out" -ForegroundColor Cyan
 }catch{
  Save 'BLOCKED' $_.Exception.Message
