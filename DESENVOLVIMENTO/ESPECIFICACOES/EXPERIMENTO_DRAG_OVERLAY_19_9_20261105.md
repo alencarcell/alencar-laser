@@ -99,3 +99,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_SESSOES_
 ```
 
 Os dois editores podem permanecer fechados durante essa leitura. Não publicar com `-Publicar`: este formato não faz parte da allowlist atual da Central de Auditoria. Primeiro confirmar os números locais; depois registrar síntese técnica na Issue #18, mantendo P95 real e integridade de objetos como gates separados.
+
+
+## 06/11/2026 — Protocolo A/B automatizado com 575 contornos
+
+O A/B manual realizado em 05/11 foi inconclusivo: OFF paint P95 176,0124 ms (390 amostras), ON 233,938 ms (139 amostras); input-to-paint P95 OFF 38,0386 e ON 33,6162 ms. O desbalanceamento e os gestos/zoom diferentes invalidam conclusao causal.
+
+### Implementacao do novo gate
+
+O executavel Qt experimental passou a reconhecer `--controlled-drag-575-19-9-test <fixture_csv> <saida>`, usando **somente** a fixture fixa do projeto `DESENVOLVIMENTO/FONTE/fixtures/web_nodes_normalized.csv`, com 575 contornos e 13.415 nos. A cada execucao: janela 1180x680, zoom 1,2x, selecao dos 575, 144 eventos de mouse QTest em trajetoria deterministica, contagem de frames e verificacao do resultado canonico de cada no antes/depois, Undo e Redo. A medicao separa inicializacao/selecao dos eventos de arraste. Coleta P50/P95/P99 de paint, P95 input-to-paint, fração P95 do bounding rectangle da pintura, contadores do overlay e número de amostras. O modo ON somente e habilitado pela flag de processo `ALENCAR_LOCAL_DRAG_OVERLAY_19_9=1`; sem flag, OFF continua padrao.
+
+O orquestrador `SCRIPTS/COMPARAR_DRAG_CONTROLADO_575_19_9.ps1` recompila o binario Qt no build A/B isolado (reaproveita e exige o PASS do teste sintetico de 40 objetos), e executa **seis processos separados** na ordem OFF–ON–ON–OFF–OFF–ON. Todas as rodadas usam **o mesmo executavel** e SHA-256 de fixture, com verificacao de Qt/DPR/viewport e nenhuma conexao fisica. Calcula medianas das tres rodadas por modo e delta porcentual de P95/P99. Recusa hardware/metricas invalidas; marca `INCONCLUSIVE_SAMPLE_IMBALANCE` se a razao minimo/maximo de amostras de pintura for inferior a 0,70.
+
+### Comando (Windows PowerShell, laser desconectado)
+
+```powershell
+cd C:\ProjetoAlencarLaser
+git status --short
+git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao atualizar' }
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_DRAG_CONTROLADO_575_19_9.ps1"
+```
+
+Arquivos gerados somente localmente: `RELATORIOS/AUDITORIAS/GITHUB_19_8/DRAG_OVERLAY_19_9/CONTROLADO_575_*/RODADA_*` e `RESUMO_AB_CONTROLADO_575_19_9.json`. A pasta RELATORIOS e ignorada pelo Git. Nao usar `-Publicar` (esse esquema ainda nao faz parte da allowlist da Central de Auditoria). No PowerShell, a primeira compilacao pode exibir avisos nao fatais. Em caso de falha de compilacao/fixture, preservar o log; **nao declarar PASS**.
+
+### Interpretacao
+
+O novo A/B **foi implementado no GitHub, mas ainda nao executado no Windows**. Mesmo se seis rodadas passarem, o resultado comprova apenas o teste Qt controlado, nao a ausencia de artefatos visuais, compatibilidade de GPU, fluidez real do usuario ou exatidao de corte. O comportamento OFF permanece padrao; `main`, instalador e emissao do laser intocados. Comparacao de pixel e teste de zoom/pan/Tesoura com mouse real continuam gates de homologacao separados.
