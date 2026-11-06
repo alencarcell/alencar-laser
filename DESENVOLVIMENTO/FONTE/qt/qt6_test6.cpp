@@ -308,16 +308,27 @@ protected:
 
 // Phase 20: opt-in contour paint probe. The normal editor continues to use
 // stock QGraphicsPathItem through QGraphicsScene::addPath.
+struct ContourPaintStats20{
+ int nodeCount=0;
+ int pathElements=0;
+ quint64 calls=0;
+ double elapsedMs=0.;
+ double maxMs=0.;
+};
 struct ContourPaintProbe20{
  bool collect=false;
  double currentMs=0.;
  int currentCalls=0;
+ // Indexed only in memory; never export IDs, paths, or coordinates.
+ std::vector<ContourPaintStats20> itemStats;
 };
 class TimedContourPathItem20 final:public QGraphicsPathItem{
  ContourPaintProbe20* probe_;
+ std::size_t itemIndex_;
 public:
- TimedContourPathItem20(const QPainterPath& path,const QPen& pen,ContourPaintProbe20* probe)
-  :QGraphicsPathItem(path),probe_(probe){setPen(pen);}
+ TimedContourPathItem20(const QPainterPath& path,const QPen& pen,
+                        ContourPaintProbe20* probe,std::size_t index)
+  :QGraphicsPathItem(path),probe_(probe),itemIndex_(index){setPen(pen);}
  void paint(QPainter* painter,const QStyleOptionGraphicsItem* option,
             QWidget* widget=nullptr)override{
   if(!probe_||!probe_->collect){
@@ -325,8 +336,14 @@ public:
   }
   QElapsedTimer timer;timer.start();
   QGraphicsPathItem::paint(painter,option,widget);
-  probe_->currentMs+=timer.nsecsElapsed()/1e6;
+  const double elapsed=timer.nsecsElapsed()/1e6;
+  probe_->currentMs+=elapsed;
   ++probe_->currentCalls;
+  if(itemIndex_<probe_->itemStats.size()){
+   auto& stats=probe_->itemStats[itemIndex_];
+   ++stats.calls;stats.elapsedMs+=elapsed;
+   stats.maxMs=std::max(stats.maxMs,elapsed);
+  }
  }
 };
 
@@ -1800,6 +1817,7 @@ public:
   }
   clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
   clearPolyline();clearBezierDraft();clearMarquee();scene_.clear();rasterOverlay_=nullptr;rasterFrame_=nullptr;rasterHandle_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
+  contourProbe20_.itemStats.clear();
   // Composite closed Fill paths per layer with the same parity rule used
   // by the scan planner. One separate backdrop per layer, without selection.
   if(fillPreview_){
@@ -1831,7 +1849,13 @@ public:
     vectorPen.setCosmetic(true);
     QGraphicsPathItem* item=nullptr;
     if(contourPaintProbeOptIn20_){
-     auto* tracked=new TimedContourPathItem20(pathOf(c),vectorPen,&contourProbe20_);
+     QPainterPath path=pathOf(c);
+     const std::size_t index=contourProbe20_.itemStats.size();
+     ContourPaintStats20 stats;
+     stats.nodeCount=int(c.nodes.size());
+     stats.pathElements=path.elementCount();
+     contourProbe20_.itemStats.push_back(stats);
+     auto* tracked=new TimedContourPathItem20(path,vectorPen,&contourProbe20_,index);
      scene_.addItem(tracked);item=tracked;
     }else item=scene_.addPath(pathOf(c),vectorPen);
     item->setZValue(1);
@@ -9404,6 +9428,9 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
  v.pairedPhaseInvalid199=0;
  v.contourPaintFrameMs20_.clear();v.noncontourInclusiveMs20_.clear();
  v.contourPaintItemCalls20_.clear();v.contourProbeInvalid20_=0;
+ for(auto& stats:v.contourProbe20_.itemStats){
+  stats.calls=0;stats.elapsedMs=0.;stats.maxMs=0.;
+ }
  v.measurePairedPaintPhases199=true;
  QPoint finish=start;
  for(int i=1;i<=kFrames;++i){
@@ -9438,6 +9465,52 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
         "No vector contour paints collected in benchmark");
  }
  v.measurePairedPaintPhases199=false;
+ // Privacy: export only aggregate node bands and rank by cost. No IDs or paths.
+ QJsonArray contourBuckets20,contourTop20;
+ quint64 totalCalls20=0;
+ double totalVectorMs20=0.;
+ if(v.vectorPaintProbeEnabled20()){
+  struct Bucket20{int contours=0;quint64 calls=0;double ms=0.;};
+  std::array<Bucket20,4> bins{};
+  std::vector<std::size_t> ranked;
+  ranked.reserve(v.contourProbe20_.itemStats.size());
+  for(std::size_t i=0;i<v.contourProbe20_.itemStats.size();++i){
+   const auto& st=v.contourProbe20_.itemStats[i];
+   check(st.nodeCount>0&&st.pathElements>=0,
+         "Invalid contour paint complexity");
+   check(std::isfinite(st.elapsedMs)&&std::isfinite(st.maxMs)&&
+         st.elapsedMs>=0.&&st.maxMs>=0.,"Nonfinite contour paint time");
+   const int b=st.nodeCount<=8?0:st.nodeCount<=32?1:st.nodeCount<=128?2:3;
+   ++bins[b].contours;bins[b].calls+=st.calls;bins[b].ms+=st.elapsedMs;
+   totalCalls20+=st.calls;totalVectorMs20+=st.elapsedMs;
+   ranked.push_back(i);
+  }
+  check(ranked.size()==575,"Missing contour paint profile items");
+  const std::array<const char*,4> bands{{"1-8","9-32","33-128","129+"}};
+  for(std::size_t i=0;i<bins.size();++i){
+   const auto& b=bins[i];
+   contourBuckets20.append(QJsonObject{
+    {"node_band",bands[i]},{"contours",b.contours},
+    {"paint_calls",double(b.calls)},{"total_ms",b.ms}});
+  }
+  std::sort(ranked.begin(),ranked.end(),[&](std::size_t a,std::size_t b){
+   const auto& left=v.contourProbe20_.itemStats[a];
+   const auto& right=v.contourProbe20_.itemStats[b];
+   return left.elapsedMs==right.elapsedMs?a<b:left.elapsedMs>right.elapsedMs;
+  });
+  const int n=std::min(10,int(ranked.size()));
+  for(int rank=0;rank<n;++rank){
+   const auto& st=v.contourProbe20_.itemStats[ranked[std::size_t(rank)]];
+   contourTop20.append(QJsonObject{
+    {"rank",rank+1},{"node_count",st.nodeCount},
+    {"path_element_count",st.pathElements},{"paint_calls",double(st.calls)},
+    {"total_ms",st.elapsedMs},
+    {"mean_ms_per_call",st.calls?st.elapsedMs/double(st.calls):0.},
+    {"max_single_call_ms",st.maxMs}});
+  }
+  check(totalCalls20>=quint64(v.contourPaintFrameMs20_.size()),
+        "Insufficient profiled contour calls");
+ }
  const QJsonObject measured{
   {"frames",kFrames},{"paint_samples",paints},
   {"paint_p50_ms",percentile(v.paintMs,.50)},
@@ -9468,6 +9541,12 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
   {"noncontour_inclusive_p99_ms",v.vectorPaintProbeEnabled20()?
      percentile(v.noncontourInclusiveMs20_,.99):0.},
   {"vector_probe_invalid_frames",double(v.contourProbeInvalid20_)},
+  {"vector_total_paint_calls",double(totalCalls20)},
+  {"vector_total_paint_time_ms",totalVectorMs20},
+  {"vector_calls_mean_per_frame",v.vectorPaintProbeEnabled20()&&paints>0?
+    double(totalCalls20)/double(paints):0.},
+  {"vector_complexity_buckets",contourBuckets20},
+  {"vector_top_paint_cost",contourTop20},
   {"input_to_paint_samples",inputPaints},
   {"input_to_paint_p95_ms",percentile(v.inputToPaintMs,.95)},
   {"viewport_bbox_p95_fraction",percentile(v.viewportPaintBBoxFractions,.95)},
