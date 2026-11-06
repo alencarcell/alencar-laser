@@ -126,3 +126,25 @@ Arquivos gerados somente localmente: `RELATORIOS/AUDITORIAS/GITHUB_19_8/DRAG_OVE
 ### Interpretacao
 
 O novo A/B **foi implementado no GitHub, mas ainda nao executado no Windows**. Mesmo se seis rodadas passarem, o resultado comprova apenas o teste Qt controlado, nao a ausencia de artefatos visuais, compatibilidade de GPU, fluidez real do usuario ou exatidao de corte. O comportamento OFF permanece padrao; `main`, instalador e emissao do laser intocados. Comparacao de pixel e teste de zoom/pan/Tesoura com mouse real continuam gates de homologacao separados.
+
+
+## 06/11/2026 — Modo 2: frame cacheado durante arraste
+
+**Evidência Windows 06/11/2026**, teste controlado com 575 contornos, 13.415 nós, 144 movimentos por rodada, 3 pares OFF/ON. `ANALISAR_DRAG_CONTROLADO_575_19_9.ps1` confirmou: mediana pintura P95 OFF 29,784 ms, ON1 40,8599 ms (+37,19%); pintura P99 30,546 versus 44,891 ms (+46,96%); input→paint P95 35,1264 versus 47,1889 ms (+34,34%). Repintura bbox P95 **OFF 1,000 / ON1 0,299478...**, 432 atualizações locais no ON1, zero fallbacks, razão de amostras 1,000. O ON1 reduziu área repintada mas piorou os tempos; gate REGRESSION_OBSERVED_DO_NOT_PROMOTE registrado na Issue #18.
+
+**Candidato técnico (não causa comprovada):** durante o drag ON1, `selectionQuadScene()` é chamado antes/depois do movimento e no foreground. Sem frame orientado válido, chama `selectedBounds()`, que percorre todos os contornos e nós selecionados. Essa varredura pode ocorrer repetidamente em cada atualização de mouse/pintura. A regressão também pode envolver overhead Qt `QRegion`/clipping; somente o teste irá separá-los.
+
+**Implementação isolada (sem alterar default):** em `DESENVOLVIMENTO/FONTE/qt/qt6_test6.cpp`, `ALENCAR_LOCAL_DRAG_OVERLAY_19_9` passa a aceitar 0/ausente = OFF legado, 1 = ON1 QRegion com frame recalculado, **2 = ON2 QRegion com frame de seleção cacheado**. ON2 captura o quad uma única vez em `beginShapePreview()` antes de `shapeDragging_` e aplica `shapePreviewDelta_` durante os movimentos, inclusive `drawForeground`/alças; limpa o cache em `clearShapePreview()`. Muda somente a prévia em memória; geometria canônica, Undo/Redo e laser não são alterados. Os novos relatórios Qt incluem `overlay_cached_bounds_enabled`/`drag_overlay_cached_experiment_19_9`.
+
+O orquestrador `COMPARAR_DRAG_CONTROLADO_575_19_9.ps1` aceita `-ModoOtimizado 2`, mantendo modo 1 como default para reproduzir a versão original. Esse teste irá repetir as seis rodadas controladas e validar que OFF não habilitou o cache e ON2 habilitou. Os resultados são salvos em uma nova pasta `RELATORIOS/.../CONTROLADO_575_*`; nenhum dado bruto vai para o GitHub.
+
+### Próximo teste de segurança e desempenho no Windows
+
+```powershell
+cd C:\ProjetoAlencarLaser
+git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030
+if ($LASTEXITCODE -ne 0) { throw 'Falha na atualização' }
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_DRAG_CONTROLADO_575_19_9.ps1" -ModoOtimizado 2
+```
+
+**Ainda não compilado/executado:** não afirmar PASS nem melhoria. O novo teste deve validar seis rodadas, integridade de 575 contornos, Undo/Redo, cache ligado em ON2, P95/P99, equilíbrio de amostras e zero hardware. Mesmo que P95 melhore, homologação visual com ratros de moldura, zoom/Tesoura e GPU ainda fica pendente. Não utilizar `-Publicar` nem promover para `main`.
