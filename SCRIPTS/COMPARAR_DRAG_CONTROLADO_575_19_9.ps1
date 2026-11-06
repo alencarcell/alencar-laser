@@ -148,6 +148,37 @@ try {
        (ValidateNumerical $json.measured 'vector_paint_item_calls_p95') -lt 1) {
     throw "Metrica vetorial por frame invalida na rodada $($i+1)"
    }
+   # Fase 20b: 575 registros de complexidade agregados, sem IDs nem arte.
+   $bins=@($json.measured.vector_complexity_buckets)
+   $top=@($json.measured.vector_top_paint_cost)
+   $totalCalls=ValidateNumerical $json.measured 'vector_total_paint_calls'
+   $totalMs=ValidateNumerical $json.measured 'vector_total_paint_time_ms'
+   $meanCalls=ValidateNumerical $json.measured 'vector_calls_mean_per_frame'
+   $binCount=0
+   $binCalls=[double]0
+   $binMs=[double]0
+   foreach($bin in $bins){
+    $binCount += [int](ValidateNumerical $bin 'contours')
+    $binCalls += ValidateNumerical $bin 'paint_calls'
+    $binMs += ValidateNumerical $bin 'total_ms'
+   }
+   if($bins.Count -ne 4 -or $top.Count -ne 10 -or $binCount -ne 575 -or
+      $totalMs -le 0 -or $totalCalls -le 0 -or
+      [math]::Abs($binCalls-$totalCalls) -gt 0.5 -or
+      [math]::Abs($binMs-$totalMs) -gt 0.001 -or
+      [math]::Abs($meanCalls-($totalCalls/$paintSamples)) -gt 0.001) {
+    throw "Perfil por complexidade inconsistente na rodada $($i+1)"
+   }
+   $topMs=0.
+   foreach($ranked in $top){
+    $topMs += ValidateNumerical $ranked 'total_ms'
+    [void](ValidateNumerical $ranked 'node_count')
+    [void](ValidateNumerical $ranked 'paint_calls')
+    [void](ValidateNumerical $ranked 'mean_ms_per_call')
+   }
+   if($topMs -gt $totalMs + 0.001) {
+    throw "Hotspots excedem custo total na rodada $($i+1)"
+   }
   }
   $entry = [pscustomobject]@{
    mode = $mode
@@ -169,6 +200,10 @@ try {
    vector_paint_p95_ms = $(if($ColetarVetores){ValidateNumerical $json.measured 'vector_paint_p95_ms'}else{$null})
    vector_paint_p99_ms = $(if($ColetarVetores){ValidateNumerical $json.measured 'vector_paint_p99_ms'}else{$null})
    vector_paint_item_calls_p95 = $(if($ColetarVetores){ValidateNumerical $json.measured 'vector_paint_item_calls_p95'}else{$null})
+   vector_calls_mean_per_frame = $(if($ColetarVetores){$meanCalls}else{$null})
+   vector_top_ten_share_percent = $(if($ColetarVetores){[math]::Round(100*$topMs/$totalMs,2)}else{$null})
+   vector_complexity_buckets = $(if($ColetarVetores){@($bins)}else{$null})
+   vector_top_paint_cost = $(if($ColetarVetores){@($top)}else{$null})
    noncontour_inclusive_p95_ms = $(if($ColetarVetores){ValidateNumerical $json.measured 'noncontour_inclusive_p95_ms'}else{$null})
    input_samples = [int]$inputSamples
    input_to_paint_p95_ms = ValidateNumerical $json.measured 'input_to_paint_p95_ms'
@@ -251,6 +286,10 @@ try {
     other_inclusive_p95_on_ms=(Mediana @($b | ForEach-Object { $_.paired_other_inclusive_p95_ms }))
     other_inclusive_p99_off_ms=(Mediana @($a | ForEach-Object { $_.paired_other_inclusive_p99_ms }))
     other_inclusive_p99_on_ms=(Mediana @($b | ForEach-Object { $_.paired_other_inclusive_p99_ms }))
+    top_ten_share_off_percent=$(if($ColetarVetores){Mediana @($a | ForEach-Object { $_.vector_top_ten_share_percent })}else{$null})
+    top_ten_share_on_percent=$(if($ColetarVetores){Mediana @($b | ForEach-Object { $_.vector_top_ten_share_percent })}else{$null})
+    calls_per_frame_off=$(if($ColetarVetores){Mediana @($a | ForEach-Object { $_.vector_calls_mean_per_frame })}else{$null})
+    calls_per_frame_on=$(if($ColetarVetores){Mediana @($b | ForEach-Object { $_.vector_calls_mean_per_frame })}else{$null})
     input_to_paint_p95_off_ms=$offInput; input_to_paint_p95_on_ms=$onInput
     paint_p95_reduction_percent=(Reducao $off95 $on95)
     paint_p99_reduction_percent=(Reducao $off99 $on99)
@@ -268,7 +307,8 @@ try {
           'P95/P99 describe paint samples, not whole interaction throughput.',
           'Viewport bbox metric is paint event bounding rectangle, not exact QRegion pixels.',
           'No automated visual pixel equivalence proof; inspect for stale selection handles.',
-          'Phase20 optional per-contour subclass probe affects timing. Compare only Phase20 runs that used the same probe.')
+          'Phase20 optional per-contour subclass probe affects timing. Compare only Phase20 runs that used the same probe.',
+          'Phase20b top 10 share uses summed elapsed times of the same collection, not percentile division; contour IDs and coordinates are never exported.')
  }
  $output=Join-Path $groupDir 'RESUMO_AB_CONTROLADO_575_19_9.json'
  [IO.File]::WriteAllText($output,(($report|ConvertTo-Json -Depth 8)+[Environment]::NewLine),
@@ -285,6 +325,8 @@ try {
   Write-Host ('FASE20: pintura vetorial P95 OFF/ON: {0} / {1} ms' -f (Mediana @($a | ForEach-Object { $_.vector_paint_p95_ms })),(Mediana @($b | ForEach-Object { $_.vector_paint_p95_ms }))) -ForegroundColor Cyan
   Write-Host ('FASE20: pintura vetorial P99 OFF/ON: {0} / {1} ms' -f (Mediana @($a | ForEach-Object { $_.vector_paint_p99_ms })),(Mediana @($b | ForEach-Object { $_.vector_paint_p99_ms }))) -ForegroundColor Cyan
   Write-Host ('FASE20: restante nao-contorno inclusivo P95 OFF/ON: {0} / {1} ms' -f (Mediana @($a | ForEach-Object { $_.noncontour_inclusive_p95_ms })),(Mediana @($b | ForEach-Object { $_.noncontour_inclusive_p95_ms }))) -ForegroundColor Cyan
+  Write-Host ('FASE20b: chamadas por frame OFF/ON: {0} / {1}' -f (Mediana @($a | ForEach-Object { $_.vector_calls_mean_per_frame })),(Mediana @($b | ForEach-Object { $_.vector_calls_mean_per_frame }))) -ForegroundColor Cyan
+  Write-Host ('FASE20b: parcela de tempo acumulado dos 10 itens mais custosos OFF/ON: {0}% / {1}%' -f (Mediana @($a | ForEach-Object { $_.vector_top_ten_share_percent })),(Mediana @($b | ForEach-Object { $_.vector_top_ten_share_percent }))) -ForegroundColor Cyan
  }
  Write-Host ('P95 entrada-pintura OFF/ON: {0} / {1} ms, delta {2}%' -f $offInput,$onInput,(Reducao $offInput $onInput))
  Write-Host ('Repintura bbox P95 fracao OFF/ON: {0:N3} / {1:N3}' -f (Mediana @($a | ForEach-Object { $_.viewport_bbox_p95_fraction })),(Mediana @($b | ForEach-Object { $_.viewport_bbox_p95_fraction })))
