@@ -144,24 +144,12 @@ static Measurement round(int count,int n,const QString& artifactDir){
    QGraphicsScene coldCache;
    populate(coldCache,count,true);
    const QImage fresh=draw(coldCache,step);
-   int freshMax=0;
-   const quint64 freshDifferences=diffPixels(cacheFirst?b:a,fresh,freshMax);
-   int coldBaselineMax=0;
-   const quint64 coldVsBaseline=diffPixels(cacheFirst?b:a,fresh,coldBaselineMax);
-   // The reference image is always the scene without cache.
    const QImage& baselineImage=cacheFirst?b:a;
    const QImage& warmCacheImage=cacheFirst?a:b;
-   int coldMaxDiff=0;
-   const quint64 coldDiff=diffPixels(baselineImage,fresh,coldMaxDiff);
-   int warmVsColdMax=0;
-   const quint64 warmColdDiff=diffPixels(warmCacheImage,fresh,warmVsColdMax);
-   result.coldCachePixels=coldDiff;
-   result.warmColdPixels=warmColdDiff;
+   int coldMaxDiff=0,warmVsColdMax=0;
+   result.coldCachePixels=diffPixels(baselineImage,fresh,coldMaxDiff);
+   result.warmColdPixels=diffPixels(warmCacheImage,fresh,warmVsColdMax);
    result.coldCacheMaxDelta=quint64(coldMaxDiff);
-   (void)freshDifferences;
-   (void)freshMax;
-   (void)coldBaselineMax;
-   (void)coldVsBaseline;
    const QString dir=artifactDir;
    if(!dir.isEmpty())fresh.save(dir+"/DIFF_575_ETAPA_5_CACHE_FRESCO.png");
   }
