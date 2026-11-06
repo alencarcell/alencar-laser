@@ -169,3 +169,27 @@ if ($LASTEXITCODE -ne 0) { throw "Falha na atualizacao" }
 powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_DRAG_CONTROLADO_575_19_9.ps1" -ModoOtimizado 3
 ```
 O resultado fica somente em `RELATORIOS`, ignorado pelo Git; nao e preciso publicar nem conectar hardware. Mantem main, APLICATIVO, instalador e controle fisico intocados.
+
+
+## 06/11/2026 — ON3 confirmado no Windows e instrumentacao por fases de pintura
+
+Captura do operador após atualizar e rodar `ANALISAR_DRAG_CONTROLADO_575_19_9.ps1`: o analisador reconhece `Modo ON avaliado: 3` e classifica o teste como **`EQUIVALENT_REPAINT_POLICY_NO_SPEEDUP_CLAIM`**. Nas seis rodadas, OFF e ON3 tiveram bbox P95=1,0; ON3 apresentou 0 pedidos localizados e `dense_legacy_updates=144` em cada uma das três rodadas ON. O script confirmou `Balanceamento de amostras: 1,0000`. É **PASS do fallback de segurança**, não ganho de desempenho.
+
+Os dados anteriores (pintura P95 OFF=26,5319/ON3=16,2325 ms; P99 OFF=28,6906/ON3=19,6974 ms) permanecem observações de execuções equivalentes quanto à política de repaint; **não** podem ser atribuídos a uma otimização de pintura ON3 para 575 objetos.
+
+### Nova medição: fases internas Qt (sem mudança na estratégia de pintura)
+
+Na função `controlledDenseDrag199Test()`, os vetores `backgroundMs` e `foregroundMs`, que já são instrumentados por `PaintPhaseProbe199`, passaram a ser limpos junto com `paintMs` imediatamente antes do primeiro dos 144 movimentos. O JSON de cada rodada agora inclui `background_samples`, `background_p95_ms`, `background_p99_ms`, `foreground_samples`, `foreground_p95_ms` e `foreground_p99_ms` (commit `dd29d0e`). O orquestrador valida amostras das duas fases, guarda os números por rodada e exibe medianas P95 de fundo e foreground (commit `b95db50`). Não houve alteração de renderização, lógica geométrica ou comunicação laser.
+
+**ATENÇÃO:** P95 do fundo, foreground e pintura total são percentis de distribuições distintas; não se somam e não devem ser subtraídos para inferir custo residual, nem provam, sozinhos, qual fase causou regressões anteriores. Esse experimento testa a distribuição temporal com a política OFF equivalente ao ON3 em seleções grandes.
+
+Executar somente após atualizar a branch, com editor e laser desconectados:
+
+```powershell
+cd C:\ProjetoAlencarLaser
+git pull --ff-only origin fix/curvas-tesoura-preflight-19-8-20261030
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao atualizar' }
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\SCRIPTS\COMPARAR_DRAG_CONTROLADO_575_19_9.ps1" -ModoOtimizado 3
+```
+
+Essa execução recompila a cópia Qt A/B isolada, repete 3 pares com 575 contornos e salva o relatório local em nova pasta `CONTROLADO_575_*`. **Estado atual: código registrado no GitHub, ainda não compilado/testado no Windows.** A versão OFF continua padrão; ON1/ON2 não homologados; nada foi enviado para produção.
