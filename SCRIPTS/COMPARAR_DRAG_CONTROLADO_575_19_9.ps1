@@ -119,8 +119,11 @@ try {
   elseif ($environment -ne $reference) { throw "Ambiente/viewport variou na rodada $($i+1)" }
   $paintSamples=ValidateNumerical $json.measured 'paint_samples'
   $inputSamples=ValidateNumerical $json.measured 'input_to_paint_samples'
-  if ($paintSamples -lt 30 -or $inputSamples -lt 20) {
-   throw "Amostragem insuficiente na rodada $($i+1)"
+  $backgroundSamples=ValidateNumerical $json.measured 'background_samples'
+  $foregroundSamples=ValidateNumerical $json.measured 'foreground_samples'
+  if ($paintSamples -lt 30 -or $inputSamples -lt 20 -or
+      $backgroundSamples -lt 20 -or $foregroundSamples -lt 20) {
+   throw "Amostragem de fases ou pintura insuficiente na rodada $($i+1)"
   }
   $entry = [pscustomobject]@{
    mode = $mode
@@ -129,6 +132,12 @@ try {
    paint_p50_ms = ValidateNumerical $json.measured 'paint_p50_ms'
    paint_p95_ms = ValidateNumerical $json.measured 'paint_p95_ms'
    paint_p99_ms = ValidateNumerical $json.measured 'paint_p99_ms'
+   background_samples = [int]$backgroundSamples
+   background_p95_ms = ValidateNumerical $json.measured 'background_p95_ms'
+   background_p99_ms = ValidateNumerical $json.measured 'background_p99_ms'
+   foreground_samples = [int]$foregroundSamples
+   foreground_p95_ms = ValidateNumerical $json.measured 'foreground_p95_ms'
+   foreground_p99_ms = ValidateNumerical $json.measured 'foreground_p99_ms'
    input_samples = [int]$inputSamples
    input_to_paint_p95_ms = ValidateNumerical $json.measured 'input_to_paint_p95_ms'
    viewport_bbox_p95_fraction = ValidateNumerical $json.measured 'viewport_bbox_p95_fraction'
@@ -196,6 +205,14 @@ try {
     dense_legacy_updates_on=($b | Measure-Object -Property dense_legacy_updates -Sum).Sum
     paint_p95_off_ms=$off95; paint_p95_on_ms=$on95
     paint_p99_off_ms=$off99; paint_p99_on_ms=$on99
+    background_p95_off_ms=(Mediana @($a | ForEach-Object { $_.background_p95_ms }))
+    background_p95_on_ms=(Mediana @($b | ForEach-Object { $_.background_p95_ms }))
+    background_p99_off_ms=(Mediana @($a | ForEach-Object { $_.background_p99_ms }))
+    background_p99_on_ms=(Mediana @($b | ForEach-Object { $_.background_p99_ms }))
+    foreground_p95_off_ms=(Mediana @($a | ForEach-Object { $_.foreground_p95_ms }))
+    foreground_p95_on_ms=(Mediana @($b | ForEach-Object { $_.foreground_p95_ms }))
+    foreground_p99_off_ms=(Mediana @($a | ForEach-Object { $_.foreground_p99_ms }))
+    foreground_p99_on_ms=(Mediana @($b | ForEach-Object { $_.foreground_p99_ms }))
     input_to_paint_p95_off_ms=$offInput; input_to_paint_p95_on_ms=$onInput
     paint_p95_reduction_percent=(Reducao $off95 $on95)
     paint_p99_reduction_percent=(Reducao $off99 $on99)
@@ -208,6 +225,7 @@ try {
   hardware_commands_sent=$false
   notes=@('Synthetic Qt mouse events, not human gestures.',
           'Mode 3 for 575 contours reuses legacy full-viewport repaint in both OFF and ON; differences are run-to-run variation.',
+          'Phase P95/P99 metrics are separate distributions; do NOT add them or subtract them from total paint P95.',
           'P95/P99 describe paint samples, not whole interaction throughput.',
           'Viewport bbox metric is paint event bounding rectangle, not exact QRegion pixels.',
           'No automated visual pixel equivalence proof; inspect for stale selection handles.')
@@ -220,6 +238,8 @@ try {
  Write-Host ('Gate de desempenho: {0}' -f $performanceGate) -ForegroundColor Yellow
  Write-Host ('P95 pintura OFF/ON: {0} / {1} ms, delta {2}%' -f $off95,$on95,(Reducao $off95 $on95))
  Write-Host ('P99 pintura OFF/ON: {0} / {1} ms, delta {2}%' -f $off99,$on99,(Reducao $off99 $on99))
+ Write-Host ('P95 fundo OFF/ON: {0} / {1} ms' -f (Mediana @($a | ForEach-Object { $_.background_p95_ms })),(Mediana @($b | ForEach-Object { $_.background_p95_ms })))
+ Write-Host ('P95 overlay OFF/ON: {0} / {1} ms' -f (Mediana @($a | ForEach-Object { $_.foreground_p95_ms })),(Mediana @($b | ForEach-Object { $_.foreground_p95_ms })))
  Write-Host ('P95 entrada-pintura OFF/ON: {0} / {1} ms, delta {2}%' -f $offInput,$onInput,(Reducao $offInput $onInput))
  Write-Host ('Repintura bbox P95 fracao OFF/ON: {0:N3} / {1:N3}' -f (Mediana @($a | ForEach-Object { $_.viewport_bbox_p95_fraction })),(Mediana @($b | ForEach-Object { $_.viewport_bbox_p95_fraction })))
  Write-Host ('Requisicoes local ON: {0}, fallbacks full ON: {1}' -f (($b | Measure-Object -Property local_requests -Sum).Sum),(($b | Measure-Object -Property full_fallbacks -Sum).Sum))
