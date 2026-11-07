@@ -9795,6 +9795,34 @@ QJsonObject wheelZoomDense20kTest(){
  };
 }
 
+QJsonObject bulkDuplicateShortcut20mTest(){
+ LabWindow w(Document{});w.resize(1120,820);w.show();
+ QApplication::processEvents();
+ auto& v=w.view;
+ for(int i=0;i<575;++i)
+  v.editor.rectangle(Pt{30.+12.*(i%25),30.+12.*(i/25)},8.,8.);
+ v.rebuild();v.selectAllVisible();QApplication::processEvents();
+ check(v.selected.size()==575,"Ctrl+D precondition selection missing");
+ const auto original=stateText(v.editor.state());
+ const size_t n=v.editor.state().doc.contours.size();
+ const size_t originalNodes=countNodes(v.editor.state().doc);
+ const size_t previousUndo=v.editor.undoCount();
+ pressKey(w,Qt::Key_D,Qt::ControlModifier);QApplication::processEvents();
+ check(v.editor.state().doc.contours.size()==2*n,"Ctrl+D did not duplicate 575 objects");
+ check(countNodes(v.editor.state().doc)==2*originalNodes,"Ctrl+D lost nodes");
+ check(v.editor.undoCount()==previousUndo+1,"Ctrl+D must be one Undo transaction");
+ check(v.selected.size()==575,"Ctrl+D should select newly duplicated objects");
+ const auto after=stateText(v.editor.state());
+ check(after!=original,"Ctrl+D did not modify document");
+ pressKey(w,Qt::Key_Z,Qt::ControlModifier);QApplication::processEvents();
+ check(stateText(v.editor.state())==original,"Ctrl+D Undo did not restore original");
+ pressKey(w,Qt::Key_Y,Qt::ControlModifier);QApplication::processEvents();
+ check(stateText(v.editor.state())==after,"Ctrl+D Redo did not restore clones");
+ return QJsonObject{{"status","PASS"},{"objects_duplicated",575},
+  {"undo_redo_atomic",true},{"node_count_preserved",true},
+  {"hardware_commands_sent",false},{"production_homologated",false}};
+}
+
 QJsonObject groupedCenterTransform199Test(){
  LabWindow w(Document{});w.show();QApplication::processEvents();
  auto& v=w.view;
@@ -10242,6 +10270,17 @@ int main(int argc,char** argv){
    pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
   }
   QFile file(out+"/RESULTADO_ZOOM_575_20K.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--bulk-duplicate-shortcut-575-20m-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=bulkDuplicateShortcut20mTest();}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
+  }
+  QFile file(out+"/RESULTADO_CTRL_D_575_20M.json");
   if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
   return pass?0:1;
