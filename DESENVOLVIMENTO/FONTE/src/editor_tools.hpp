@@ -701,6 +701,90 @@ public:
    auto meta=s.objects.at(original);meta.group=0;s.objects[obj]=meta;
   });return obj;
  }
+ // Ctrl+D em lote: um UNICO snapshot e commit, nunca N chamadas a duplicate().
+ // Expande grupos e todos os membros de textos editaveis; preserva camadas,
+ // grupos independentes e a semantica textual, com IDs novos para objetos/nos.
+ // Uma falha de validacao em qualquer item nao altera o documento/historico.
+ std::vector<int> duplicateObjects(const std::vector<int>& input,Pt offset){
+  if(input.empty())throw std::runtime_error("Selecione ao menos um objeto para duplicar");
+  if(!std::isfinite(offset.x)||!std::isfinite(offset.y))
+   throw std::runtime_error("Deslocamento da duplicacao invalido");
+  std::vector<int> copies;
+  change([&](EditorState& s){
+   std::set<int> selected(input.begin(),input.end()),groupIds;
+   for(int id:selected){
+    const auto it=s.objects.find(id);
+    if(it==s.objects.end())throw std::runtime_error("Objeto selecionado nao existe");
+    if(it->second.group>0)groupIds.insert(it->second.group);
+   }
+   // Grupos existentes sao unidades indivisiveis.
+   for(const auto& [id,meta]:s.objects)
+    if(meta.group>0&&groupIds.count(meta.group))selected.insert(id);
+   // Nunca deixar uma copia parcial de texto editavel no arquivo v5.
+   for(const auto& [root,t]:s.editableTexts){
+    bool touched=false;
+    for(int id:t.members)if(selected.count(id)){touched=true;break;}
+    if(touched)selected.insert(t.members.begin(),t.members.end());
+   }
+   if(selected.size()>1000)
+    throw std::runtime_error("Duplicacao limitada a 1000 objetos por operacao");
+   for(int id:selected)
+    if(!editable(s,id))
+     throw std::runtime_error("Duplicacao cancelada: selecao contem camada bloqueada ou invisivel");
+   std::size_t nodeCount=0,contourCount=0;
+   for(const auto& c:s.doc.contours)if(selected.count(c.key.object)){
+    if(c.nodes.size()>150000-nodeCount)
+     throw std::runtime_error("Duplicacao excede o limite de 150000 nos");
+    nodeCount+=c.nodes.size();++contourCount;
+   }
+   if(!contourCount||!nodeCount)throw std::runtime_error("Nao foram encontrados contornos para duplicar");
+   const int first=nextObjectId(s.doc);
+   if(selected.size()>std::size_t(INT32_MAX-first)+1)
+    throw std::runtime_error("IDs de objetos esgotados para o lote");
+   if(nodeCount>std::size_t(std::numeric_limits<int64_t>::max()-s.doc.nextId))
+    throw std::runtime_error("IDs de nos esgotados para o lote");
+   std::map<int,int> remap;
+   int nextId=first;
+   for(int id:selected)remap[id]=nextId++;
+   std::map<int,int> groupRemap;
+   for(int id:selected){
+    const int group=s.objects.at(id).group;
+    if(group<=0||groupRemap.count(group))continue;
+    if(s.nextGroup>=INT32_MAX)throw std::runtime_error("IDs de grupos esgotados");
+    groupRemap[group]=s.nextGroup++;
+   }
+   std::vector<Contour> additions;additions.reserve(contourCount);
+   for(const auto& source:s.doc.contours){
+    const auto it=remap.find(source.key.object);
+    if(it==remap.end())continue;
+    Contour copy=source;copy.key.object=it->second;
+    for(auto& node:copy.nodes){
+     node.id=s.doc.nextId++;
+     node.p=node.p+offset;
+     if(!std::isfinite(node.p.x)||!std::isfinite(node.p.y))
+      throw std::runtime_error("Duplicacao produziu coordenada invalida");
+    }
+    additions.push_back(std::move(copy));
+   }
+   for(int id:selected){
+    Meta metadata=s.objects.at(id);
+    if(metadata.group>0)metadata.group=groupRemap.at(metadata.group);
+    s.objects[remap.at(id)]=metadata;
+    copies.push_back(remap.at(id));
+   }
+   for(const auto& [root,t]:s.editableTexts){
+    if(!selected.count(root))continue;
+    EditableText clone=t;
+    clone.anchor=clone.anchor+offset;
+    clone.sourceBoundsMin=clone.sourceBoundsMin+offset;
+    for(int& id:clone.members)id=remap.at(id);
+    s.editableTexts[remap.at(root)]=std::move(clone);
+   }
+   s.doc.contours.reserve(s.doc.contours.size()+additions.size());
+   for(auto& c:additions)s.doc.contours.push_back(std::move(c));
+  });
+  return copies;
+ }
  // Align in a single Undo step. Reference is the last selected object.
  // Modes: left=0, right=1, top=2, bottom=3, center-X=4,
  // center-Y=5, both centers=6. Groups are moved as an indivisible unit.
