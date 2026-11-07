@@ -17,7 +17,11 @@ static Document rectangles(int count){
  for(int i=1;i<=count;++i){
   Contour c;c.key={i,0};c.closed=true;
   const double x=double(i%25)*12.,y=double(i/25)*12.;
-  for(Pt p:std::vector<Pt>{{x,y},{x+8,y},{x+8,y+8},{x,y+8}}){
+  // 24 nodes per object: 575 objects = 13,800 nodes, near the
+  // 13,415-node workload observed in a real Windows diagnosis.
+  for(int k=0;k<24;++k){
+   const double a=6.283185307179586*double(k)/24.;
+   const Pt p{x+4.+4.*std::cos(a),y+4.+4.*std::sin(a)};
    c.nodes.push_back({nextNode++,p});
   }
   d.contours.push_back(std::move(c));
