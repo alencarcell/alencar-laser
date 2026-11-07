@@ -133,6 +133,11 @@ try{
   }
  }
  $rows|Format-Table -AutoSize
+ $offErrors=if($off.counts.command_error){[int]$off.counts.command_error}else{0}
+ $onErrors=if($on.counts.command_error){[int]$on.counts.command_error}else{0}
+ if($offErrors -gt 0 -or $onErrors -gt 0){
+  Write-Warning ("Erros de comando registrados: OFF={0}, ON={1}. O JSON nao informa a causa individual." -f $offErrors,$onErrors)
+ }
  $sameGeometry=([int]$off.project_summary.polyline_contours -eq [int]$on.project_summary.polyline_contours -and
                 [int]$off.project_summary.polyline_nodes -eq [int]$on.project_summary.polyline_nodes)
  $summary=[ordered]@{
@@ -142,6 +147,9 @@ try{
   on_contours=[int]$on.project_summary.polyline_contours
   off_nodes=[int]$off.project_summary.polyline_nodes
   on_nodes=[int]$on.project_summary.polyline_nodes
+  off_command_errors=$offErrors
+  on_command_errors=$onErrors
+  manual_functional_review_required=($offErrors -gt 0 -or $onErrors -gt 0)
   same_final_geometry_counts=$sameGeometry
   recorded_operations_not_identical=$true
   no_causal_speedup_claim=$true
