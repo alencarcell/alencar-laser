@@ -708,6 +708,22 @@ public:
   if(requested.empty())throw std::runtime_error("Duplicar: selecione ao menos um objeto.");
   if(!std::isfinite(offset.x)||!std::isfinite(offset.y))
    throw std::runtime_error("Duplicar: deslocamento invalido.");
+  // Preflight BEFORE Editor::change deep-copies the full document.
+  // Multiple successive Ctrl+D actions can create explosive scene growth.
+  // Conservative guard is not a limit on loading/editing existing projects.
+  constexpr size_t kMaxDuplicateResultContours=6000;
+  constexpr size_t kMaxDuplicateResultNodes=150000;
+  constexpr auto kLimitMessage=
+    "Duplicacao bloqueada por seguranca: ultrapassaria 6000 contornos ou 150000 nos. "
+    "Reduza a selecao; o projeto e o historico foram preservados.";
+  const size_t existingContours=current.doc.contours.size();
+  const size_t existingNodes=countNodes(current.doc);
+  const size_t uniqueRequested=std::set<int>(requested.begin(),requested.end()).size();
+  if(existingContours>=kMaxDuplicateResultContours||
+     existingNodes>=kMaxDuplicateResultNodes||
+     uniqueRequested>kMaxDuplicateResultContours-existingContours){
+    throw std::runtime_error(kLimitMessage);
+  }
   std::vector<int> created;
   change([&](EditorState& st){
    std::set<int> source(requested.begin(),requested.end());
@@ -731,6 +747,17 @@ public:
     }
    }
    if(source.size()>2000)throw std::runtime_error("Duplicar: selecao acima de 2000 objetos.");
+   // Full group/text expansion occurs here: recompute exact projected
+   // contours and nodes before allocating cloned objects or IDs.
+   size_t additionalContours=0,additionalNodes=0;
+   for(const auto& c:st.doc.contours)if(source.count(c.key.object)){
+    ++additionalContours;
+    additionalNodes+=c.nodes.size();
+   }
+   if(additionalContours==0||
+      additionalContours>kMaxDuplicateResultContours-existingContours||
+      additionalNodes>kMaxDuplicateResultNodes-existingNodes)
+    throw std::runtime_error(kLimitMessage);
    for(int id:source)if(!editable(st,id))
     throw std::runtime_error("Duplicar: selecao contem camada bloqueada ou oculta.");
    const int start=nextObjectId(st.doc);
