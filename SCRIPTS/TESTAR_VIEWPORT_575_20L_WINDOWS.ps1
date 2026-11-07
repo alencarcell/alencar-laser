@@ -63,7 +63,7 @@ function Run([int]$n,[string]$mode){
 }
 try{
  $branch=(& git -C $root branch --show-current)
- if($LASTEXITCODE -ne 0 -or $branch -ne 'exp/phase20l-zoom-repaint-20261107'){
+ if($LASTEXITCODE -ne 0 -or $branch -ne 'exp/phase20l-minimal-viewport-20261107'){
   throw "Branch diferente da experimental: $branch"
  }
  if(-not (Test-Path -LiteralPath $cmake -PathType Leaf)){throw 'CMake UCRT64 ausente'}
