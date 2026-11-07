@@ -368,3 +368,12 @@ if(Qt6_FOUND)
   target_compile_options(alencar_test19_9_lbrn2_native PRIVATE -O2 -Wall -Wextra -Wpedantic)
  endif()
 endif()
+
+# 20m - Ctrl+D batch duplicate, atomic Undo and metadata consistency, offline.
+add_executable(alencar_test20m_batch_duplicate tests/duplicate_batch_20m_standalone.cpp)
+target_include_directories(alencar_test20m_batch_duplicate PRIVATE src)
+if(MSVC)
+ target_compile_options(alencar_test20m_batch_duplicate PRIVATE /O2 /W4 /utf-8)
+else()
+ target_compile_options(alencar_test20m_batch_duplicate PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
