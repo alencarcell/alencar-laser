@@ -747,6 +747,14 @@ public:
    int nextId=first;
    for(int id:selected)remap[id]=nextId++;
    std::map<int,int> groupRemap;
+   int existingMaxGroup=0;
+   for(const auto& [id,meta]:s.objects)
+    existingMaxGroup=std::max(existingMaxGroup,meta.group);
+   if(s.nextGroup<=existingMaxGroup){
+    if(existingMaxGroup>=INT32_MAX)
+     throw std::runtime_error("IDs de grupos esgotados");
+    s.nextGroup=existingMaxGroup+1;
+   }
    for(int id:selected){
     const int group=s.objects.at(id).group;
     if(group<=0||groupRemap.count(group))continue;
