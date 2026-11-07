@@ -355,6 +355,10 @@ class QtEditorLab final:public QGraphicsView{
  // project data, files, device identifiers or UI behavior changes.
  const bool eventPaintTrace20j_=
    qEnvironmentVariable("ALENCAR_EVENT_PAINT_TRACE_20J")=="1";
+ // Fase20k: test whether the explicit post-wheel full-viewport repaint
+ // is redundant. OFF unless explicitly enabled, with instant opt-out.
+ const bool skipWheelFullUpdate20k_=
+   qEnvironmentVariable("ALENCAR_SKIP_WHEEL_FULL_UPDATE_20K")=="1";
  QString lastEventKind20j_="idle";
  qint64 lastEventNs20j_=-1;
  struct EventPaintGroup20j {
@@ -1832,6 +1836,7 @@ public:
   }
   styleApplyMs.push_back(profiler.nsecsElapsed()/1e6);
  }
+ bool skipWheelFullUpdate20k()const noexcept{return skipWheelFullUpdate20k_;}
  QJsonObject paintEventTrace20j()const{
   QJsonArray groups;
   auto percentile=[](std::vector<double> values,double p)->double{
@@ -2210,7 +2215,12 @@ protected:
    bezierCursor_=mapToScene(cursor);redrawBezierDraft();
   }
   tagInput20j("zoom");
-  reportZoom();viewport()->update();sample(wheelMs,wheelTimer.nsecsElapsed()/1e6);e->accept();
+  // scale()/scrollbar changes already invalidate the view. Test an opt-in
+  // omission of the otherwise unconditional extra viewport-wide update.
+  // No change to zoom arithmetic, canonical geometry or wheel handling.
+  reportZoom();
+  if(!skipWheelFullUpdate20k_)viewport()->update();
+  sample(wheelMs,wheelTimer.nsecsElapsed()/1e6);e->accept();
  }
  void paintEvent(QPaintEvent* e)override{
   const double viewportPixels=double(viewport()->width())*viewport()->height();
