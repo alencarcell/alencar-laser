@@ -3001,7 +3001,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   onlySide->setEnabled(editSide.has_value());
   onlyNode->setToolTip("Exclui apenas o nó sob o mouse; os nós vizinhos continuam conectados. Ctrl+Z desfaz.");
   onlySide->setToolTip("Remove apenas a aresta clicada e abre o contorno fechado, sem afetar outras formas. Ctrl+Z desfaz.");
-  duplicate->setEnabled(selected.size()==1);
+  duplicate->setEnabled(!selected.empty());
   group->setEnabled(selected.size()>=2);
   bool grouped=false;
   for(int id:selected){
@@ -3050,9 +3050,11 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    else if(picked==remove)deleteSelectedShapes();
    else if(picked==undo)history(false);
    else if(picked==redo)history(true);
-   else if(picked==duplicate&&selected.size()==1){
-    const int id=editor.duplicate(*selected.begin(),{3,3});
-    selected.clear();active_.reset();rebuild();activate({id,0});
+   else if(picked==duplicate&&!selected.empty()){
+    const auto ids=std::vector<int>(selected.begin(),selected.end());
+    const auto created=editor.duplicateObjects(ids,{3,3});
+    rebuild();selected={created.begin(),created.end()};applySelectionStyles();
+    if(!created.empty())activate({created.front(),0},false);
    }else if(picked==group&&selected.size()>=2){
     editor.group(std::vector<int>(selected.begin(),selected.end()));rebuild();
    }else if((picked==ungroup||picked==ungroupScissors)&&grouped){
@@ -4095,7 +4097,7 @@ public:
   selectionContextUngroup_=contextButton("selection_context_ungroup_19_8","Desagrupar",
     "Desagrupar a seleção com grupo (Ctrl+U)","ungroup");
   selectionContextDuplicate_=contextButton("selection_context_duplicate_19_8","Duplicar",
-    "Duplicar uma forma poligonal independente","duplicate_obj");
+    "Duplicar todas as formas selecionadas em um unico Undo (Ctrl+D)","duplicate_obj");
   selectionContextDelete_=contextButton("selection_context_delete_19_8","Excluir",
     "Excluir seleção. Para 25+ objetos, exige confirmação; Ctrl+Z restaura.","delete_shapes");
   selectionContextTextEdit_=new QPushButton("Editar texto",selectionContextBar_);
@@ -4570,9 +4572,11 @@ public:
 inspector->addSpacing(10);inspector->addWidget(titleLabel("TRANSFORMAÇÕES — POLILINHAS"));
 addVertical(inspector,"duplicate_obj","Duplicar (+3 mm)",[this]{
  if(bezierToolActive_)throw std::runtime_error("Duplicar: selecione antes a ferramenta Selecionar (polilinhas).");
- const auto ids=selection();check(ids.size()==1,"Duplicar: selecione um objeto por vez.");
- int newId=view.editor.duplicate(ids.front(),{3,3});
- view.selected.clear();view.rebuild();view.activate({newId,0});
+ const auto ids=selection();check(!ids.empty(),"Duplicar: selecione ao menos um objeto.");
+ const auto created=view.editor.duplicateObjects(ids,{3,3});
+ view.rebuild();view.selected={created.begin(),created.end()};
+ view.applySelectionStyles();
+ if(!created.empty())view.activate({created.front(),0},false);
 });
 addVertical(inspector,"mirror_horiz","Espelhar horizontal ↔",[this]{
  if(bezierToolActive_)throw std::runtime_error("Espelhar: somente polilinhas nesta beta.");
@@ -5708,7 +5712,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   selectionContextGroup_->setEnabled(editableSelection&&groupIds.size()>=2);
   selectionContextUngroup_->setEnabled(editableSelection&&groupedObject);
   selectionContextDuplicate_->setEnabled(editableSelection&&!textOnly&&
-          view.selected.size()==1&&!groupedObject);
+          !view.selected.empty());
   selectionContextDelete_->setEnabled(nativeSelected||editableSelection);
   if(selectionContextTextEdit_){
    selectionContextTextEdit_->setVisible(textOnly);
