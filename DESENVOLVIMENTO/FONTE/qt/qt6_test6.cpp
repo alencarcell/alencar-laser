@@ -3466,7 +3466,7 @@ public:
       {"history_active_node_bytes_lower_bound",double(historyFootprint.currentNodeBytes)},
       {"history_memory_metric","capacity_based_node_payload_only"},
       {"fast_dense_display",view.fastDenseDisplay()},
-      {"viewport_update_strategy","bounding_rect"},
+      {"viewport_update_strategy",view.minimalViewport20l()?"minimal":"bounding_rect"},
       {"paint_samples",int(view.paintMs.size())},
       {"event_paint_trace_20j",view.paintEventTrace20j()},
       {"paint_p50_ms",percentile(view.paintMs,.5)},
