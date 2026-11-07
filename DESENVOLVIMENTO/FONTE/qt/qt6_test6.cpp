@@ -351,6 +351,23 @@ class QtEditorLab final:public QGraphicsView{
  ContourPaintProbe20 contourProbe20_;
  const bool contourPaintProbeOptIn20_=
    qEnvironmentVariable("ALENCAR_VECTOR_PAINT_PROBE_20")=="1";
+ // Fase 20j: opt-in trace of paint following input events; no coordinates,
+ // project data, files, device identifiers or UI behavior changes.
+ const bool eventPaintTrace20j_=
+   qEnvironmentVariable("ALENCAR_EVENT_PAINT_TRACE_20J")=="1";
+ QString lastEventKind20j_="idle";
+ qint64 lastEventNs20j_=-1;
+ struct EventPaintGroup20j {
+  std::vector<double> ms;
+  std::vector<double> bbox;
+  quint64 dropped=0;
+ };
+ std::map<QString,EventPaintGroup20j> eventPaintGroups20j_;
+ void tagInput20j(const char* kind){
+  if(!eventPaintTrace20j_||!clock_.isValid())return;
+  lastEventKind20j_=QString::fromLatin1(kind);
+  lastEventNs20j_=clock_.nsecsElapsed();
+ }
  QGraphicsScene scene_;
  bool fastDenseDisplay_=false; // visual mode only; canonical vector data unchanged
  WorkspaceConfig workspace_{};
@@ -1815,6 +1832,31 @@ public:
   }
   styleApplyMs.push_back(profiler.nsecsElapsed()/1e6);
  }
+ QJsonObject paintEventTrace20j()const{
+  QJsonArray groups;
+  auto percentile=[](std::vector<double> values,double p)->double{
+   if(values.empty())return 0.;
+   std::sort(values.begin(),values.end());
+   return values[std::size_t((values.size()-1)*p)];
+  };
+  for(const auto& [name,group]:eventPaintGroups20j_){
+   groups.append(QJsonObject{
+    {"event",name},{"samples",int(group.ms.size())},
+    {"dropped",double(group.dropped)},
+    {"p50_ms",percentile(group.ms,.5)},
+    {"p95_ms",percentile(group.ms,.95)},
+    {"p99_ms",percentile(group.ms,.99)},
+    {"max_ms",group.ms.empty()?0:*std::max_element(group.ms.begin(),group.ms.end())},
+    {"bbox_fraction_p95",percentile(group.bbox,.95)}
+   });
+  }
+  return QJsonObject{
+   {"enabled",eventPaintTrace20j_},
+   {"method","last_input_event_within_250ms_best_effort_not_causal"},
+   {"sample_limit_per_group",4096},
+   {"groups",groups}
+  };
+ }
  qint64 styleSetterCalls()const{return styleSetterCalls_;}
  size_t indexBuilds()const{return picker_.rebuilds();}
  size_t indexedQueries()const{return picker_.indexedQueries();}
@@ -2167,6 +2209,7 @@ protected:
   if(tool==Tool::DrawBezier&&bezierDrawing_){
    bezierCursor_=mapToScene(cursor);redrawBezierDraft();
   }
+  tagInput20j("zoom");
   reportZoom();viewport()->update();sample(wheelMs,wheelTimer.nsecsElapsed()/1e6);e->accept();
  }
  void paintEvent(QPaintEvent* e)override{
@@ -2211,6 +2254,17 @@ protected:
    }else ++pairedPhaseInvalid199;
   }
   sample(paintMs,totalMs);
+  if(eventPaintTrace20j_&&clock_.isValid()){
+   const qint64 since=lastEventNs20j_>=0?clock_.nsecsElapsed()-lastEventNs20j_:-1;
+   const QString key=(since>=0&&since<=250000000LL)?lastEventKind20j_:QStringLiteral("idle");
+   auto& group=eventPaintGroups20j_[key];
+   if(group.ms.size()<4096){
+    group.ms.push_back(totalMs);
+    const double pixels=double(viewport()->width())*viewport()->height();
+    const QRect bounds=e->rect().intersected(viewport()->rect());
+    group.bbox.push_back(pixels>0?double(bounds.width())*bounds.height()/pixels:0.);
+   }else ++group.dropped;
+  }
   if(pendingInput_>=0){sample(inputToPaintMs,(clock_.nsecsElapsed()-pendingInput_)/1e6);pendingInput_=-1;}
  }
  void drawForeground(QPainter* p,const QRectF& exposed)override{
@@ -2341,6 +2395,7 @@ void mouseDoubleClickEvent(QMouseEvent* e)override{
  QGraphicsView::mouseDoubleClickEvent(e);
 }
 void mousePressEvent(QMouseEvent* e)override{
+ tagInput20j("mouse_press");
  if(e->button()==Qt::MiddleButton){
   if(!busy()){
    middlePanning_=true;middlePanLast_=e->position();
@@ -2611,6 +2666,16 @@ void mousePressEvent(QMouseEvent* e)override{
   return visible.toAlignedRect().intersected(viewport()->rect());
  }
 void mouseMoveEvent(QMouseEvent* e)override{
+ if(eventPaintTrace20j_){
+  const char* category=middlePanning_?"pan":
+   transformDragging_?"transform":
+   shapeDragging_?"shape_drag":
+   marqueeActive_?"marquee":
+   (nativePressing_||nativeContourPressing_)?"native_edit":
+   (rasterDragging_||rasterResizing_)?"raster_move":
+   tool==Tool::Scissors?"scissors_hover":"mouse_move";
+  tagInput20j(category);
+ }
  if(rasterDragging_||rasterResizing_){
   updateRasterDrag(e->position());e->accept();return;
  }
@@ -2728,6 +2793,7 @@ void mouseMoveEvent(QMouseEvent* e)override{
   QGraphicsView::mouseMoveEvent(e);
  }
 void mouseReleaseEvent(QMouseEvent* e)override{
+ tagInput20j("mouse_release");
  if(e->button()==Qt::LeftButton&&(rasterDragging_||rasterResizing_)){
   updateRasterDrag(e->position());finishRasterDrag();e->accept();return;
  }
@@ -3384,6 +3450,7 @@ public:
       {"fast_dense_display",view.fastDenseDisplay()},
       {"viewport_update_strategy","bounding_rect"},
       {"paint_samples",int(view.paintMs.size())},
+      {"event_paint_trace_20j",view.paintEventTrace20j()},
       {"paint_p50_ms",percentile(view.paintMs,.5)},
       {"paint_p95_ms",percentile(view.paintMs,.95)},
       {"paint_p99_ms",percentile(view.paintMs,.99)},
