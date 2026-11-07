@@ -739,7 +739,7 @@ public:
    }
    if(!contourCount||!nodeCount)throw std::runtime_error("Nao foram encontrados contornos para duplicar");
    const int first=nextObjectId(s.doc);
-   if(selected.size()>std::size_t(INT32_MAX-first)+1)
+   if(selected.size()>std::size_t(INT32_MAX-first))
     throw std::runtime_error("IDs de objetos esgotados para o lote");
    if(nodeCount>std::size_t(std::numeric_limits<int64_t>::max()-s.doc.nextId))
     throw std::runtime_error("IDs de nos esgotados para o lote");
@@ -772,14 +772,17 @@ public:
     s.objects[remap.at(id)]=metadata;
     copies.push_back(remap.at(id));
    }
+   std::vector<std::pair<int,EditableText>> copiedTexts;
    for(const auto& [root,t]:s.editableTexts){
     if(!selected.count(root))continue;
     EditableText clone=t;
     clone.anchor=clone.anchor+offset;
     clone.sourceBoundsMin=clone.sourceBoundsMin+offset;
     for(int& id:clone.members)id=remap.at(id);
-    s.editableTexts[remap.at(root)]=std::move(clone);
+    copiedTexts.emplace_back(remap.at(root),std::move(clone));
    }
+   for(auto& [root,clone]:copiedTexts)
+    s.editableTexts.emplace(root,std::move(clone));
    s.doc.contours.reserve(s.doc.contours.size()+additions.size());
    for(auto& c:additions)s.doc.contours.push_back(std::move(c));
   });
