@@ -701,6 +701,85 @@ public:
    auto meta=s.objects.at(original);meta.group=0;s.objects[obj]=meta;
   });return obj;
  }
+ // Duplicate a multi-object selection in ONE atomic history transaction.
+ // Expand complete groups and editable-text roots, preserving their identities
+ // through NEW group IDs/text roots. Never mutate original geometry on failure.
+ std::vector<int> duplicateObjects(std::vector<int> requested,Pt offset){
+  if(requested.empty())throw std::runtime_error("Duplicar: selecione ao menos um objeto.");
+  if(!std::isfinite(offset.x)||!std::isfinite(offset.y))
+   throw std::runtime_error("Duplicar: deslocamento invalido.");
+  std::vector<int> created;
+  change([&](EditorState& st){
+   std::set<int> source(requested.begin(),requested.end());
+   // Group and text selections always clone complete logical objects.
+   bool expanded=true;
+   while(expanded){
+    expanded=false;
+    std::set<int> selectedGroups;
+    for(int id:source){
+     auto it=st.objects.find(id);
+     if(it==st.objects.end())throw std::runtime_error("Duplicar: objeto inexistente.");
+     if(it->second.group>0)selectedGroups.insert(it->second.group);
+    }
+    for(const auto& [id,meta]:st.objects)
+     if(meta.group>0&&selectedGroups.count(meta.group))
+      expanded|=source.insert(id).second;
+    for(const auto& [root,text]:st.editableTexts){
+     bool intersects=false;
+     for(int member:text.members)if(source.count(member)){intersects=true;break;}
+     if(intersects)for(int member:text.members)expanded|=source.insert(member).second;
+    }
+   }
+   if(source.size()>2000)throw std::runtime_error("Duplicar: selecao acima de 2000 objetos.");
+   for(int id:source)if(!editable(st,id))
+    throw std::runtime_error("Duplicar: selecao contem camada bloqueada ou oculta.");
+   const int start=nextObjectId(st.doc);
+   if(source.size()>size_t(INT32_MAX-start)+1)
+    throw std::runtime_error("Duplicar: limite de identificadores atingido.");
+   std::map<int,int> mapping;
+   int cursor=start;
+   for(int id:source){mapping[id]=cursor++;created.push_back(mapping[id]);}
+   std::map<int,int> groupMapping;
+   for(int id:source){
+    const int originalGroup=st.objects.at(id).group;
+    if(originalGroup>0&&!groupMapping.count(originalGroup)){
+     if(st.nextGroup==INT32_MAX)throw std::runtime_error("Duplicar: limite de grupos.");
+     groupMapping[originalGroup]=st.nextGroup++;
+    }
+   }
+   std::vector<Contour> additions;
+   for(const auto& c:st.doc.contours){
+    const auto found=mapping.find(c.key.object);
+    if(found==mapping.end())continue;
+    Contour copy=c;
+    copy.key.object=found->second;
+    for(auto& node:copy.nodes){
+     if(st.doc.nextId==INT64_MAX)throw std::runtime_error("Duplicar: limite de nos.");
+     node.id=st.doc.nextId++;
+     node.p=node.p+offset;
+    }
+    additions.push_back(std::move(copy));
+   }
+   if(additions.empty())throw std::runtime_error("Duplicar: nenhum contorno encontrado.");
+   for(int id:source){
+    Meta meta=st.objects.at(id);
+    meta.group=meta.group>0?groupMapping.at(meta.group):0;
+    st.objects[mapping.at(id)]=meta;
+   }
+   std::vector<std::pair<int,EditableText>> textCopies;
+   for(const auto& [root,original]:st.editableTexts){
+    if(original.members.empty()||!source.count(original.members.front()))continue;
+    EditableText copy=original;
+    for(int& id:copy.members)id=mapping.at(id);
+    copy.anchor=copy.anchor+offset;
+    copy.sourceBoundsMin=copy.sourceBoundsMin+offset;
+    textCopies.emplace_back(mapping.at(root),std::move(copy));
+   }
+   for(auto& c:additions)st.doc.contours.push_back(std::move(c));
+   for(auto& item:textCopies)st.editableTexts[item.first]=std::move(item.second);
+  });
+  return created;
+ }
  // Align in a single Undo step. Reference is the last selected object.
  // Modes: left=0, right=1, top=2, bottom=3, center-X=4,
  // center-Y=5, both centers=6. Groups are moved as an indivisible unit.
