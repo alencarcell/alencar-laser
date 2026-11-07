@@ -368,3 +368,12 @@ if(Qt6_FOUND)
   target_compile_options(alencar_test19_9_lbrn2_native PRIVATE -O2 -Wall -Wextra -Wpedantic)
  endif()
 endif()
+
+# Phase20m: atomic selection duplication, pure C++ (no physical laser).
+add_executable(alencar_test_bulk_duplicate_20m src/test_bulk_duplicate_20m.cpp)
+target_include_directories(alencar_test_bulk_duplicate_20m PRIVATE src)
+if(MSVC)
+ target_compile_options(alencar_test_bulk_duplicate_20m PRIVATE /O2 /W4 /utf-8)
+else()
+ target_compile_options(alencar_test_bulk_duplicate_20m PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
