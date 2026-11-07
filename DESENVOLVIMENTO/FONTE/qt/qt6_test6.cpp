@@ -9730,6 +9730,58 @@ QJsonObject controlledDenseDrag199Test(const QString& csv){
  };
 }
 
+QJsonObject wheelZoomDense20kTest(){
+ LabWindow w(Document{});w.resize(1120,820);w.show();
+ QApplication::processEvents();
+ auto& v=w.view;
+ for(int i=0;i<575;++i)
+  v.editor.rectangle(Pt{30.+12.*(i%25),30.+12.*(i/25)},8.,8.);
+ v.rebuild();
+ v.setTransform(QTransform::fromScale(1.4,1.4));
+ v.centerOn(QPointF(178.,166.));
+ QApplication::processEvents();
+ const auto baseline=stateText(v.editor.state());
+ const auto baselineUndo=v.editor.undoCount();
+ const QPoint cursor=v.viewport()->rect().center();
+ const double zoomBefore=v.currentZoom();
+ QCryptographicHash imageHashes(QCryptographicHash::Sha256);
+ v.paintMs.clear();v.viewportPaintBBoxFractions.clear();
+ int wheelEvents=0;
+ for(int i=0;i<12;++i){
+  const int direction=i%2==0?120:-120;
+  QWheelEvent wheel(QPointF(cursor),
+     QPointF(v.viewport()->mapToGlobal(cursor)),
+     QPoint(0,0),QPoint(0,direction),Qt::NoButton,
+     Qt::NoModifier,Qt::NoScrollPhase,false);
+  QApplication::sendEvent(v.viewport(),&wheel);
+  check(wheel.isAccepted(),"Dense zoom wheel was not accepted");
+  QApplication::processEvents();
+  const QImage frame=v.viewport()->grab().toImage().convertToFormat(QImage::Format_ARGB32);
+  check(!frame.isNull(),"Dense zoom frame capture failed");
+  imageHashes.addData(reinterpret_cast<const char*>(frame.constBits()),
+                      qsizetype(frame.sizeInBytes()));
+  ++wheelEvents;
+ }
+ check(std::abs(v.currentZoom()-zoomBefore)<.02,"Dense zoom did not restore zoom scale");
+ check(stateText(v.editor.state())==baseline,
+       "Wheel zoom modified canonical geometry");
+ check(v.editor.undoCount()==baselineUndo,"Wheel zoom changed Undo history");
+ check(v.paintMs.size()>=6,"Dense zoom paint samples missing");
+ return QJsonObject{
+  {"status","PASS"},
+  {"objects",575},{"wheel_events",wheelEvents},
+  {"skip_full_update_20k",v.skipWheelFullUpdate20k()},
+  {"viewport_sha256",QString::fromLatin1(imageHashes.result().toHex())},
+  {"paint_samples",int(v.paintMs.size())},
+  {"paint_p95_ms",percentile(v.paintMs,.95)},
+  {"paint_p99_ms",percentile(v.paintMs,.99)},
+  {"viewport_bbox_p95_fraction",percentile(v.viewportPaintBBoxFractions,.95)},
+  {"geometry_unchanged",true},{"undo_unchanged",true},
+  {"hardware_commands_sent",false},
+  {"production_homologated",false}
+ };
+}
+
 QJsonObject groupedCenterTransform199Test(){
  LabWindow w(Document{});w.show();QApplication::processEvents();
  auto& v=w.view;
@@ -10166,6 +10218,17 @@ int main(int argc,char** argv){
   try{report=groupedCenterTransformDense20iTest();}
   catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
   QFile file(out+"/RESULTADO_TRANSFORMACAO_CENTRAL_575_20I.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--wheel-zoom-dense-575-20k-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=wheelZoomDense20kTest();}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
+  }
+  QFile file(out+"/RESULTADO_ZOOM_575_20K.json");
   if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
   return pass?0:1;
