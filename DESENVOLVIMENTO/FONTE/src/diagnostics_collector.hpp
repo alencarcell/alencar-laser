@@ -42,7 +42,7 @@ public:
   if(!active_)return false;
   // Only known action names; avoid logging arbitrary text or sensitive content.
   static const std::vector<std::string> allow={
-   "shapes_moved","shapes_deleted","shape_created","bezier_contour_moved",
+   "shapes_moved","shapes_deleted","shape_created","shapes_duplicated","bezier_contour_moved",
    "bezier_contour_deleted","bezier_node_deleted","bezier_node_moved",
    "undo","redo","project_saved","project_opened","command_error",
    "grbl_connected","grbl_disconnected","grbl_probe","grbl_received",
