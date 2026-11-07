@@ -70,7 +70,38 @@ int main(int argc,char**argv){
   const auto info=text.findEditableText(textClones[0]);
   require(info.has_value()&&info->second.members.size()==2,"editable text metadata missing");
   require(std::abs(info->second.anchor.x-7.)<1e-8,"text anchor incorrect");
-  std::cout<<"PASS BULK_DUPLICATE_20M: 575 objects, atomic Undo/Redo, geometry, group, locked layer, editable text\n";
+  // Stress regression: repeated practical batches must be rejected BEFORE
+  // a copy of an already huge EditorState, and without changing history.
+  Editor stress(original);
+  auto firstBatch=stress.duplicateObjects(all,{3,3});
+  require(firstBatch.size()==575,"stress first duplication failed");
+  std::vector<int> selected1150;
+  for(const auto& [id,meta]:stress.state().objects)selected1150.push_back(id);
+  require(selected1150.size()==1150,"unexpected first stress total");
+  stress.duplicateObjects(selected1150,{3,3});
+  require(stress.state().doc.contours.size()==2300,"unexpected second stress total");
+  std::vector<int> selected2000;
+  for(const auto& [id,meta]:stress.state().objects){
+   if(selected2000.size()==2000)break;
+   selected2000.push_back(id);
+  }
+  stress.duplicateObjects(selected2000,{3,3});
+  require(stress.state().doc.contours.size()==4300,"unexpected third stress total");
+  std::vector<int> selected1800(selected2000.begin(),selected2000.begin()+1800);
+  const auto stableHistory=stress.undoCount();
+  const auto stableContours=stress.state().doc.contours.size();
+  const auto stableNodes=countNodes(stress.state().doc);
+  bool blockedByGuard=false;
+  try{stress.duplicateObjects(selected1800,{3,3});}
+  catch(const std::exception& exc){
+   blockedByGuard=std::string(exc.what()).find("bloqueada por seguranca")!=std::string::npos;
+  }
+  require(blockedByGuard,"excessive Ctrl+D must fail with safety message");
+  require(stress.undoCount()==stableHistory&&
+          stress.state().doc.contours.size()==stableContours&&
+          countNodes(stress.state().doc)==stableNodes,
+          "rejected bulk duplication changed state/history");
+  std::cout<<"PASS BULK_DUPLICATE_20M: 575 objects, atomic Undo/Redo, geometry, group, locked layer, editable text; extreme load blocked safely\n";
   return 0;
  }catch(const std::exception&err){
   std::cerr<<"FAIL BULK_DUPLICATE_20M: "<<err.what()<<"\n";return 1;
