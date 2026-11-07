@@ -9810,7 +9810,14 @@ QJsonObject bulkDuplicateShortcut20mTest(){
  pressKey(w,Qt::Key_D,Qt::ControlModifier);QApplication::processEvents();
  check(v.editor.state().doc.contours.size()==2*n,"Ctrl+D did not duplicate 575 objects");
  check(countNodes(v.editor.state().doc)==2*originalNodes,"Ctrl+D lost nodes");
- check(v.editor.undoCount()==previousUndo+1,"Ctrl+D must be one Undo transaction");
+ // The fixture created 575 objects, so the bounded history (40 states)
+ // may already be saturated. One atomic change replaces the oldest slot,
+ // rather than increasing undoCount beyond its capacity.
+ const size_t expectedUndo=std::min(previousUndo+1,size_t(40));
+ check(v.editor.undoCount()==expectedUndo,
+       "Ctrl+D history count mismatch (bounded history)");
+ // A single Ctrl+Z/Redo below verifies transaction atomicity regardless
+ // of whether the history was already at capacity.
  check(v.selected.size()==575,"Ctrl+D should select newly duplicated objects");
  const auto after=stateText(v.editor.state());
  check(after!=original,"Ctrl+D did not modify document");
