@@ -9799,6 +9799,52 @@ QJsonObject wheelZoomDense20kTest(){
  };
 }
 
+QJsonObject duplicateBatchGui20mTest(){
+ // Fixture created before opening the Qt editor: do not create 575 history
+ // snapshots just to test one Ctrl+D action.
+ Document d;
+ std::int64_t nextNode=1;
+ for(int i=1;i<=575;++i){
+  Contour c;c.key={i,0};c.closed=true;
+  const double x=double((i-1)%25)*12.,y=double((i-1)/25)*12.;
+  for(Pt p:std::vector<Pt>{{x,y},{x+8,y},{x+8,y+8},{x,y+8}})
+   c.nodes.push_back({nextNode++,p});
+  d.contours.push_back(std::move(c));
+ }
+ d.nextId=nextNode;
+ LabWindow w(std::move(d));w.resize(1120,820);w.show();
+ QApplication::processEvents();
+ auto& v=w.view;
+ v.selectAllVisible();QApplication::processEvents();
+ check(v.selected.size()==575,"Ctrl+D fixture did not select 575 objects");
+ const auto before=stateText(v.editor.state());
+ const auto undoBefore=v.editor.undoCount();
+ const auto nodesBefore=countNodes(v.editor.state().doc);
+ pressKey(w,Qt::Key_D,Qt::ControlModifier);
+ check(v.editor.state().doc.contours.size()==1150,
+       "Ctrl+D did not duplicate all 575 selected objects");
+ check(v.selected.size()==575,
+       "Ctrl+D did not select the newly created 575 objects");
+ check(v.editor.undoCount()==undoBefore+1,
+       "Ctrl+D created more than one Undo step");
+ check(countNodes(v.editor.state().doc)==nodesBefore*2,
+       "Ctrl+D lost original or copied vector nodes");
+ checkRendered(w);
+ const auto duplicated=stateText(v.editor.state());
+ pressKey(w,Qt::Key_Z,Qt::ControlModifier);
+ check(stateText(v.editor.state())==before,"Ctrl+D Undo did not restore scene");
+ pressKey(w,Qt::Key_Y,Qt::ControlModifier);
+ check(stateText(v.editor.state())==duplicated,"Ctrl+D Redo lost duplicate shapes");
+ checkRendered(w);
+ return QJsonObject{
+  {"status","PASS"},{"original_objects",575},{"duplicated_objects",575},
+  {"final_contours",1150},{"source_nodes",double(nodesBefore)},
+  {"final_nodes",double(nodesBefore*2)},
+  {"undo_atomic",true},{"redo_exact",true},
+  {"pixels_geometry_match",true},{"hardware_commands_sent",false}
+ };
+}
+
 QJsonObject groupedCenterTransform199Test(){
  LabWindow w(Document{});w.show();QApplication::processEvents();
  auto& v=w.view;
@@ -10246,6 +10292,18 @@ int main(int argc,char** argv){
    pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
   }
   QFile file(out+"/RESULTADO_ZOOM_575_20K.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--duplicate-batch-575-20m-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=duplicateBatchGui20mTest();}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())},
+                      {"hardware_commands_sent",false}};
+  }
+  QFile file(out+"/RESULTADO_DUPLICACAO_575_20M.json");
   if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
   return pass?0:1;
