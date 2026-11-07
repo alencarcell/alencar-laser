@@ -359,6 +359,11 @@ class QtEditorLab final:public QGraphicsView{
  // is redundant. OFF unless explicitly enabled, with instant opt-out.
  const bool skipWheelFullUpdate20k_=
    qEnvironmentVariable("ALENCAR_SKIP_WHEEL_FULL_UPDATE_20K")=="1";
+ // Fase20l: Qt's MinimalViewportUpdate preserves separate dirty regions,
+ // instead of coalescing distant rectangles into their bounding rectangle.
+ // Experimental only. Existing BoundingRect remains the default.
+ const bool minimalViewport20l_=
+   qEnvironmentVariable("ALENCAR_MINIMAL_VIEWPORT_20L")=="1";
  QString lastEventKind20j_="idle";
  qint64 lastEventNs20j_=-1;
  struct EventPaintGroup20j {
@@ -1786,7 +1791,9 @@ public:
   setRenderHints(QPainter::Antialiasing|QPainter::SmoothPixmapTransform);
   // Preferir invalidacao localizada: selecionar centenas de contornos nao deve
   // unir todo o canvas em uma unica regiao de repintura gigantesca.
-  setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
+  setViewportUpdateMode(minimalViewport20l_
+    ?QGraphicsView::MinimalViewportUpdate
+    :QGraphicsView::BoundingRectViewportUpdate);
   setOptimizationFlag(QGraphicsView::DontSavePainterState,false);
   setTransformationAnchor(QGraphicsView::NoAnchor);
   // QAbstractScrollArea entrega os movimentos atraves do QWidget viewport.
@@ -1837,6 +1844,7 @@ public:
   styleApplyMs.push_back(profiler.nsecsElapsed()/1e6);
  }
  bool skipWheelFullUpdate20k()const noexcept{return skipWheelFullUpdate20k_;}
+ bool minimalViewport20l()const noexcept{return minimalViewport20l_;}
  QJsonObject paintEventTrace20j()const{
   QJsonArray groups;
   auto percentile=[](std::vector<double> values,double p)->double{
@@ -9771,6 +9779,7 @@ QJsonObject wheelZoomDense20kTest(){
   {"status","PASS"},
   {"objects",575},{"wheel_events",wheelEvents},
   {"skip_full_update_20k",v.skipWheelFullUpdate20k()},
+  {"minimal_viewport_20l",v.minimalViewport20l()},
   {"viewport_sha256",QString::fromLatin1(imageHashes.result().toHex())},
   {"paint_samples",int(v.paintMs.size())},
   {"paint_p95_ms",percentile(v.paintMs,.95)},
