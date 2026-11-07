@@ -38,7 +38,7 @@ try{
   Write-Host ("ABRINDO EDITOR $mode : selecione tudo, mova, use zoom, pan e Tesoura (se seguro), depois exporte JSON e feche.") -ForegroundColor Cyan
   Write-Host ("Salve o diagnostico pelo painel como: "+(Join-Path $destination 'diagnostico.json')) -ForegroundColor Yellow
   & $exe --interactive $fixture $destination
-  if($LASTEXITCODE -ne 0){throw "Editor terminou com erro no modo $mode: $LASTEXITCODE"}
+  if($LASTEXITCODE -ne 0){throw ("Editor terminou com erro no modo {0}: {1}" -f $mode, $LASTEXITCODE)}
   $json=Join-Path $destination 'diagnostico.json'
   if(-not (Test-Path -LiteralPath $json -PathType Leaf)){
    throw "Diagnostico $mode ausente: $json. Exportacao e manual."
