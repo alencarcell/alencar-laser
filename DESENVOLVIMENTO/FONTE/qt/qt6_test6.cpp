@@ -3057,10 +3057,15 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    else if(picked==undo)history(false);
    else if(picked==redo)history(true);
    else if(picked==duplicate&&!selected.empty()){
-    const auto newIds=editor.duplicateObjects(
-     std::vector<int>(selected.begin(),selected.end()),{3,3});
-    rebuild();selectDuplicatedObjects(newIds);
-    if(diagnosticEvent)diagnosticEvent("shapes_duplicated",int(newIds.size()));
+    try{
+     const auto newIds=editor.duplicateObjects(
+      std::vector<int>(selected.begin(),selected.end()),{3,3});
+     rebuild();selectDuplicatedObjects(newIds);
+     if(diagnosticEvent)diagnosticEvent("shapes_duplicated",int(newIds.size()));
+    }catch(const std::exception&){
+     if(diagnosticEvent)diagnosticEvent("shapes_duplicate_failed",int(selected.size()));
+     throw;
+    }
    }else if(picked==group&&selected.size()>=2){
     editor.group(std::vector<int>(selected.begin(),selected.end()));rebuild();
    }else if((picked==ungroup||picked==ungroupScissors)&&grouped){
@@ -4103,7 +4108,7 @@ public:
   selectionContextUngroup_=contextButton("selection_context_ungroup_19_8","Desagrupar",
     "Desagrupar a seleção com grupo (Ctrl+U)","ungroup");
   selectionContextDuplicate_=contextButton("selection_context_duplicate_19_8","Duplicar",
-    "Duplicar uma forma poligonal independente","duplicate_obj");
+    "Duplicar uma ou várias formas vetoriais em um só Undo","duplicate_obj");
   selectionContextDelete_=contextButton("selection_context_delete_19_8","Excluir",
     "Excluir seleção. Para 25+ objetos, exige confirmação; Ctrl+Z restaura.","delete_shapes");
   selectionContextTextEdit_=new QPushButton("Editar texto",selectionContextBar_);
@@ -4577,11 +4582,16 @@ public:
   });
 inspector->addSpacing(10);inspector->addWidget(titleLabel("TRANSFORMAÇÕES — POLILINHAS"));
 addVertical(inspector,"duplicate_obj","Duplicar seleção (+3 mm)",[this]{
- if(bezierToolActive_)throw std::runtime_error("Duplicar: selecione antes a ferramenta Selecionar (polilinhas).");
- const auto ids=selection();check(!ids.empty(),"Duplicar: selecione um ou mais objetos.");
- const auto copied=view.editor.duplicateObjects(ids,{3,3});
- view.rebuild();view.selectDuplicatedObjects(copied);
- captureEvent("shapes_duplicated",int(copied.size()));
+ try{
+  if(bezierToolActive_)throw std::runtime_error("Duplicar: selecione antes a ferramenta Selecionar (polilinhas).");
+  const auto ids=selection();check(!ids.empty(),"Duplicar: selecione um ou mais objetos.");
+  const auto copied=view.editor.duplicateObjects(ids,{3,3});
+  view.rebuild();view.selectDuplicatedObjects(copied);
+  captureEvent("shapes_duplicated",int(copied.size()));
+ }catch(const std::exception&){
+  captureEvent("shapes_duplicate_failed",int(selection().size()));
+  throw;
+ }
 });
 addVertical(inspector,"mirror_horiz","Espelhar horizontal ↔",[this]{
  if(bezierToolActive_)throw std::runtime_error("Espelhar: somente polilinhas nesta beta.");
