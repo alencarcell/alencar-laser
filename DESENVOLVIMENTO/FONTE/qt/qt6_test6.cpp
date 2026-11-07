@@ -3053,7 +3053,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    else if(picked==duplicate&&!selected.empty()){
     const auto ids=std::vector<int>(selected.begin(),selected.end());
     const auto created=editor.duplicateObjects(ids,{3,3});
-    rebuild();selected={created.begin(),created.end()};applySelectionStyles();
+    rebuild();selected=std::set<int>(created.begin(),created.end());applySelectionStyles();
     if(!created.empty())activate({created.front(),0},false);
    }else if(picked==group&&selected.size()>=2){
     editor.group(std::vector<int>(selected.begin(),selected.end()));rebuild();
@@ -4574,7 +4574,7 @@ addVertical(inspector,"duplicate_obj","Duplicar (+3 mm)",[this]{
  if(bezierToolActive_)throw std::runtime_error("Duplicar: selecione antes a ferramenta Selecionar (polilinhas).");
  const auto ids=selection();check(!ids.empty(),"Duplicar: selecione ao menos um objeto.");
  const auto created=view.editor.duplicateObjects(ids,{3,3});
- view.rebuild();view.selected={created.begin(),created.end()};
+ view.rebuild();view.selected=std::set<int>(created.begin(),created.end());
  view.applySelectionStyles();
  if(!created.empty())view.activate({created.front(),0},false);
 });
