@@ -108,7 +108,7 @@ try{
 }
 $testResult=Join-Path $reports 'RESULTADO_TRANSFORMACAO_CENTRAL_19_9.json'
 if($exitCode -ne 0){
- $hex=('{0:X8}' -f ([uint32]([int64]$exitCode -band 0xffffffffL)))
+ $hex=('{0:X8}' -f [BitConverter]::ToUInt32([BitConverter]::GetBytes([int]$exitCode),0))
  throw ("Smoke test falhou. Exit {0}, NTSTATUS 0x{1}. Falta DLL/plugin ou outro erro de inicializacao." -f $exitCode,$hex)
 }
 if(-not (Test-Path -LiteralPath $testResult -PathType Leaf)){
