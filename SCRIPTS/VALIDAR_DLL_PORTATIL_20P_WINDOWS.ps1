@@ -18,12 +18,14 @@ $objdumpCandidates=@((Join-Path $qtBin 'objdump.exe'),'C:\msys64\usr\bin\objdump
 $objdump=@($objdumpCandidates|Where-Object {Test-Path -LiteralPath $_ -PathType Leaf}|Select-Object -First 1)
 if($objdump.Count -ne 1){throw 'objdump nao encontrado em MSYS2. Instale binutils UCRT64 antes de empacotar.'}
 $objdumpExe=[string]$objdump[0]
+# objdump itself may depend on MSYS2 runtime libraries.
+$env:PATH=$qtBin+';'+$env:PATH
 if(-not (Test-Path -LiteralPath $exe -PathType Leaf)){throw 'Executavel nao encontrado'}
 if(-not $exe.StartsWith($stage+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Executavel fora da pasta do pacote'}
 $system32=Join-Path $env:SystemRoot 'System32'
 $systemWow=Join-Path $env:SystemRoot 'SysWOW64'
 $copied=New-Object System.Collections.ArrayList
-$scanned=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+$scanned=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 function ImportedDlls([string]$file){
  $lines=@(& $objdumpExe '-p' $file 2>&1)
  if($LASTEXITCODE -ne 0){throw "objdump falhou em $file"}
