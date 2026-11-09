@@ -20,7 +20,7 @@ function IsInside([string]$child,[string]$parent){
  $c=[IO.Path]::GetFullPath($child).TrimEnd('\')+'\'
  return $c.StartsWith($p,[StringComparison]::OrdinalIgnoreCase)
 }
-Ensure ((& git -C $repo branch --show-current) -eq 'release/20p-portable-homologation-20261109') 'Branch incorreta; troque para release/20p-portable-homologation-20261109'
+Ensure ((& git -C $repo branch --show-current) -eq 'fix/20p-portable-dll-smoke-20261109') 'Branch incorreta; troque para fix/20p-portable-dll-smoke-20261109'
 Ensure ($LASTEXITCODE -eq 0) 'Falha Git'
 $baseRev=(& git -C $repo rev-parse candidate/offline-20o-20261107).Trim()
 Ensure ($LASTEXITCODE -eq 0 -and $baseRev -match '^[a-f0-9]{40}$') 'Nao encontrei a branch candidata 20o'
@@ -74,6 +74,12 @@ try{
   }
  }
  Ensure (Test-Path -LiteralPath (Join-Path $stage 'platforms\qwindows.dll') -PathType Leaf) 'Qt platforms/qwindows.dll ausente; dependencia incompleta'
+ # Repair native MSYS2 UCRT64 dependency closure and confirm actual Qt startup
+ # WITHOUT the MSYS2 development toolchain PATH. ZIP only if smoke passes.
+ $validator=Join-Path $PSScriptRoot 'VALIDAR_DLL_PORTATIL_20P_WINDOWS.ps1'
+ Ensure (Test-Path -LiteralPath $validator -PathType Leaf) 'Validador de DLLs ausente'
+ & powershell.exe '-NoProfile' '-ExecutionPolicy' 'Bypass' '-File' $validator '-Pasta' $stage '-Executavel' $program
+ Ensure ($LASTEXITCODE -eq 0) 'Smoke test do portatil falhou. ZIP bloqueado.'
  # Copy the launcher supplied with the release branch.
  $launcher=Join-Path $PSScriptRoot 'EXECUTAR_PORTATIL_20P_MODELO.ps1'
  Ensure (Test-Path -LiteralPath $launcher -PathType Leaf) 'Modelo do launcher nao encontrado'
@@ -107,7 +113,7 @@ try{
  Compress-Archive -LiteralPath $stage -DestinationPath $zip -CompressionLevel Optimal -ErrorAction Stop
  Ensure (Test-Path -LiteralPath $zip -PathType Leaf) 'ZIP nao criado'
  $zipHash=(Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
- Write-Host 'PACOTE PORTATIL 20p CRIADO. HOMOLOGACAO MANUAL AINDA NECESSARIA.' -ForegroundColor Green
+ Write-Host 'PACOTE PORTATIL 20p CRIADO APOS SMOKE ISOLADO. HOMOLOGACAO MANUAL AINDA NECESSARIA.' -ForegroundColor Green
  Write-Host ('Pasta: '+$stage)
  Write-Host ('ZIP: '+$zip)
  Write-Host ('ZIP SHA256: '+$zipHash)
