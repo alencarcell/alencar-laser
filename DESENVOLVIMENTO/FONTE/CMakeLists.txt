@@ -386,3 +386,12 @@ if(MSVC)
 else()
  target_compile_options(alencar_test_gear_angular_20q PRIVATE -O2 -Wall -Wextra -Wpedantic)
 endif()
+
+# Phase20r: measured internal tip angles; pure C++ geometry regression.
+add_executable(alencar_test_gear_measured_20r src/test_gear_measured_20r.cpp)
+target_include_directories(alencar_test_gear_measured_20r PRIVATE src)
+if(MSVC)
+ target_compile_options(alencar_test_gear_measured_20r PRIVATE /O2 /W4 /utf-8)
+else()
+ target_compile_options(alencar_test_gear_measured_20r PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
