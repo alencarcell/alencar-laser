@@ -3612,9 +3612,11 @@ public:
   view.activate({inserted.front(),0});recoveryPolicy_.edited();
   captureEvent("gear_generator_created",int(inserted.size()));
   refresh();
-  status->setText(QString("Engrenagem de %1 dentes criada (%2 contornos, um Undo). "
-    "Confira espessura do material, folga e kerf antes de cortar.")
-    .arg(spec.teeth).arg(inserted.size()));
+  const QString profileNote=spec.profile==alaser::gear::ToothProfile::Involute
+    ?"Confira espessura, folga e kerf antes de cortar."
+    :"Perfil angular/serrilhado decorativo: engrenamento mecânico NÃO validado.";
+  status->setText(QString("Engrenagem de %1 dentes criada (%2 contornos, um Undo). %3")
+    .arg(spec.teeth).arg(inserted.size()).arg(profileNote));
  }
 
  // Creates nominal editable outlines only. No output/G-code/hardware.
