@@ -9139,6 +9139,95 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
          {"dpi_2x",true},{"normal_active_disabled_states",true},
          {"hardware_commands_sent",false}};
 }
+static QJsonObject gearMeasured20rTest(){
+ // Focused Qt regression: measured angular teeth + interactive preview.
+ alaser::gear::GearDialog dialog(400.,400.);
+ auto* profile=dialog.findChild<QComboBox*>("gear_profile_20q");
+ auto* definition=dialog.findChild<QComboBox*>("gear_definition_20r");
+ auto* angle=dialog.findChild<QDoubleSpinBox*>("gear_included_angle_20r");
+ auto* base=dialog.findChild<QDoubleSpinBox*>("gear_angular_base_20q");
+ auto* tip=dialog.findChild<QDoubleSpinBox*>("gear_angular_tip_20q");
+ auto* previewWidget=dialog.findChild<QWidget*>("gear_preview_19_9");
+ auto* fit=dialog.findChild<QPushButton*>("gear_zoom_fit_20r");
+ auto* zoomIn=dialog.findChild<QPushButton*>("gear_zoom_in_20r");
+ auto* zoomOut=dialog.findChild<QPushButton*>("gear_zoom_out_20r");
+ auto* zoomLabel=dialog.findChild<QLabel*>("gear_zoom_label_20r");
+ check(profile&&definition&&angle&&base&&tip&&previewWidget&&
+       fit&&zoomIn&&zoomOut&&zoomLabel,"Controles de angulo/zoom 20r ausentes");
+ auto* preview=static_cast<alaser::gear::GearPreview*>(previewWidget);
+ dialog.show();QApplication::processEvents();
+ check(profile->currentIndex()==0&&definition->currentIndex()==0&&
+       !angle->isEnabled(),"Involuta padrao regressou");
+ profile->setCurrentIndex(1);
+ definition->setCurrentIndex(1);
+ QApplication::processEvents();
+ check(angle->isEnabled()&&base->isEnabled(),
+       "Modo por angulo interno nao ativado");
+ QImage image90,image120;
+ for(double desired:{90.,95.,96.,120.}){
+  angle->setValue(desired);QApplication::processEvents();
+  const auto generated=alaser::gear::generate(dialog.parameters());
+  check(generated.outer.size()==96,"Geometria por angulo ficou excessivamente complexa");
+  const double actual=alaser::gear::includedAngleAtTipDeg(
+   generated.outer[0],generated.outer[1],generated.outer[2]);
+  check(std::abs(actual-desired)<1e-6,"Angulo de ponta real incorreto");
+  if(desired==90.)image90=preview->grab().toImage();
+  if(desired==120.)image120=preview->grab().toImage();
+ }
+ check(!image90.isNull()&&!image120.isNull()&&image90!=image120,
+       "Previa nao diferencia angulos medidos");
+ profile->setCurrentIndex(2);angle->setValue(96.);
+ QApplication::processEvents();
+ check(tip->isEnabled()&&angle->isEnabled()&&std::abs(tip->value()-80.)<1e-6,
+       "Angulo do perfil inclinado nao ativou corretamente");
+ const auto saw=alaser::gear::generate(dialog.parameters());
+ check(std::abs(alaser::gear::includedAngleAtTipDeg(saw.outer[0],saw.outer[1],saw.outer[2])-96.)<1e-6,
+       "Perfil serrilhado nao corresponde ao angulo escolhido");
+ const QPoint cursor=preview->rect().center();
+ const double before=preview->zoomFactor();
+ QWheelEvent wheel(QPointF(cursor),QPointF(preview->mapToGlobal(cursor)),
+    QPoint(0,0),QPoint(0,120),Qt::NoButton,
+    Qt::NoModifier,Qt::NoScrollPhase,false);
+ QApplication::sendEvent(preview,&wheel);
+ QApplication::processEvents();
+ check(wheel.isAccepted()&&preview->zoomFactor()>before,
+       "Roda do mouse nao amplia a previa");
+ const QPoint panStart=preview->rect().center();
+ const QPointF beforePan=preview->panOffset();
+ QTest::mousePress(preview,Qt::LeftButton,Qt::NoModifier,panStart);
+ QTest::mouseMove(preview,panStart+QPoint(23,13));
+ QTest::mouseRelease(preview,Qt::LeftButton,Qt::NoModifier,panStart+QPoint(23,13));
+ QApplication::processEvents();
+ check(QLineF(beforePan,preview->panOffset()).length()>3.,
+       "Arraste nao deslocou a previa");
+ zoomIn->click();QApplication::processEvents();
+ check(preview->zoomFactor()>1.2,"Botao zoom + nao funciona");
+ zoomOut->click();QApplication::processEvents();
+ fit->click();QApplication::processEvents();
+ check(std::abs(preview->zoomFactor()-1.)<1e-10&&
+       QLineF(QPointF(0,0),preview->panOffset()).length()<1e-10&&
+       zoomLabel->text()=="100%",
+       "Botao Ajustar nao restaurou zoom/pan");
+ LabWindow w(Document{});w.resize(1000,740);w.show();
+ QApplication::processEvents();
+ const auto beforeDoc=w.view.editor.state().doc;
+ const auto undoBefore=w.view.editor.undoCount();
+ w.insertGeneratedGear(dialog.parameters(),{200.,200.});
+ check(w.view.editor.state().doc.contours.size()==2&&
+       w.view.editor.undoCount()==undoBefore+1,
+       "Insercao de ponta medida nao foi atomica");
+ check(w.view.editor.undo()&&sameDoc(beforeDoc,w.view.editor.state().doc),
+       "Undo nao restaurou geometria anterior");
+ check(w.view.editor.redo()&&w.view.editor.state().doc.contours.size()==2,
+       "Redo nao restaurou perfil angular");
+ return {{"status","PASS"},{"profiles",3},{"definition","measured_included_tip_angle"},
+  {"angles_checked","90,95,96,120"},{"sawtooth_angle_deg",96.},
+  {"outer_nodes_per_24_teeth",96},
+  {"wheel_zoom",true},{"drag_pan",true},{"fit_restored",true},
+  {"atomic_undo_redo",true},{"hardware_commands_sent",false},
+  {"production_homologated",false}};
+}
+
 static QJsonObject gearAngular20qTest(){
  // Validates real UI switching, rendered previews, vector insertion and Undo.
  // No physical device, G-code, connection or laser operations.
@@ -10412,6 +10501,17 @@ int main(int argc,char** argv){
   QFile file(out+"/RESULTADO_ICONES_19_9.json");
   if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
+ if(mode=="--gear-measured-20r-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=gearMeasured20rTest();}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
+  }
+  QFile file(out+"/RESULTADO_ENGRENAGEM_ANGULO_ZOOM_20R.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
  }
  if(mode=="--gear-angular-20q-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
