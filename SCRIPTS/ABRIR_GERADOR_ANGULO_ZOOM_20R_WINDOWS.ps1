@@ -1,6 +1,6 @@
 #requires -Version 5.1
 <#
-Abrir somente a build de LABORATORIO validada por 4 gates da fase 20r.
+Abrir somente a build de LABORATORIO validada por 6 gates da fase 20r.
 Sem instalacao, sem alteracao de projetos originais, sem laser conectado.
 #>
 [CmdletBinding()]
