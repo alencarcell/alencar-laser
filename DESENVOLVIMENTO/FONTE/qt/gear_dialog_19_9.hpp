@@ -6,6 +6,7 @@
 #include <QHBoxLayout>
 #include <QFormLayout>
 #include <QSpinBox>
+#include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QSignalBlocker>
 #include <QCheckBox>
@@ -28,8 +29,8 @@ class GearPreview final:public QWidget{
  bool valid_=false;
 public:
  explicit GearPreview(QWidget* p=nullptr):QWidget(p){
-  setMinimumHeight(220);setObjectName("gear_preview_19_9");
-  setToolTip("Prévia de engrenagem evolvente aproximada, não é simulação de corte.");
+  setMinimumHeight(175);setObjectName("gear_preview_19_9");
+  setToolTip("Prévia vetorial nominal. Perfis angulares decorativos não garantem engrenamento mecânico.");
  }
  void setGear(const Parameters& params){
   current_=params;valid_=false;
@@ -66,17 +67,27 @@ protected:
 
 class GearDialog final:public QDialog{
  QSpinBox* teeth_=nullptr;
+ QComboBox* profile_=nullptr;
  QDoubleSpinBox *module_=nullptr,*circularPitch_=nullptr,*pressure_=nullptr,*bore_=nullptr,*centerX_=nullptr,*centerY_=nullptr;
+ QDoubleSpinBox *baseWidth_=nullptr,*tipPosition_=nullptr;
  QCheckBox* previewEnabled_=nullptr;
  QLabel* info_=nullptr;
  GearPreview* preview_=nullptr;
  Parameters current()const{
   Parameters p;
   p.teeth=teeth_->value();p.moduleMm=module_->value();
-  p.pressureDeg=pressure_->value();p.boreMm=bore_->value();return p;
+  p.pressureDeg=pressure_->value();p.boreMm=bore_->value();
+  p.profile=static_cast<ToothProfile>(profile_->currentIndex());
+  p.angularBasePercent=baseWidth_->value();
+  p.tipPositionPercent=tipPosition_->value();
+  return p;
  }
  void refresh(){
   const auto p=current();
+  const bool angular=p.profile!=ToothProfile::Involute;
+  pressure_->setEnabled(!angular);
+  baseWidth_->setEnabled(angular);
+  tipPosition_->setEnabled(p.profile==ToothProfile::Sawtooth);
   preview_->setGear(p);
   try{
    const auto shape=generate(p);
@@ -86,7 +97,9 @@ class GearDialog final:public QDialog{
      .arg(p.moduleMm,0,'f',4).arg(circularPitchFromModule(p.moduleMm),0,'f',4)
      .arg(2*shape.outerRadius,0,'f',2).arg(2*shape.pitchRadius,0,'f',2)
      .arg(2*shape.rootRadius,0,'f',2).arg(shape.outer.size()).arg(shape.bore.size());
-   if(shape.undercutWarning)message+="\nAviso: poucas dentes podem gerar interferência/undercut.";
+   if(shape.undercutWarning)message+="\nAviso: poucos dentes podem gerar interferência/undercut.";
+   if(angular)
+    message+="\nPERFIL ANGULAR DE DESENHO: não garante engrenamento, sentido de catraca ou resistência mecânica.";
    if(centerX_->value()-shape.outerRadius<0||centerY_->value()-shape.outerRadius<0||
       centerX_->value()+shape.outerRadius>bedW_||
       centerY_->value()+shape.outerRadius>bedH_)message+="\nAtenção: desenho ultrapassa a área configurada.";
@@ -100,14 +113,21 @@ public:
   bedW_(bedW),bedH_(bedH){
   setObjectName("gear_generator_dialog_19_9");
   setWindowTitle("Gerador de Engrenagens — Alencar Laser");
-  setMinimumSize(540,630);resize(590,690);
-  auto* column=new QVBoxLayout(this);
+  setMinimumSize(540,610);resize(610,720);
+  auto* column=new QVBoxLayout(this);column->setSpacing(6);
   auto* hint=new QLabel("GERAÇÃO VETORIAL OFFLINE • sem motor, movimento ou emissão de laser.",this);
   hint->setWordWrap(true);column->addWidget(hint);
-  auto* form=new QFormLayout;
+  auto* form=new QFormLayout;form->setVerticalSpacing(5);
   teeth_=new QSpinBox(this);teeth_->setObjectName("gear_teeth_19_9");
   teeth_->setRange(12,120);teeth_->setValue(24);
   form->addRow("Quantidade de dentes:",teeth_);
+  profile_=new QComboBox(this);
+  profile_->setObjectName("gear_profile_20q");
+  profile_->addItem("Mecânico padrão (involuta)");
+  profile_->addItem("Ponta angular (simétrica)");
+  profile_->addItem("Serrilhado (ponta inclinada)");
+  profile_->setToolTip("Ponta angular e serrilhado são perfis vetoriais ilustrativos. Não são perfis de engrenamento certificados.");
+  form->addRow("Perfil do dente:",profile_);
   auto metric=[&](const char* key,double min,double max,double value,int decimals,const QString& suffix){
    auto* f=new QDoubleSpinBox(this);f->setObjectName(key);f->setDecimals(decimals);
    f->setRange(min,max);f->setSingleStep(.5);f->setValue(value);f->setSuffix(suffix);return f;
@@ -122,6 +142,14 @@ public:
   pressure_=metric("gear_pressure_19_9",14.,30.,20.,1,"°");
   pressure_->setToolTip("Ângulo de pressão do perfil evolvente aproximado.");
   form->addRow("Ângulo de pressão:",pressure_);
+  baseWidth_=metric("gear_angular_base_20q",45.,90.,75.,1," %");
+  baseWidth_->setSingleStep(5.);
+  baseWidth_->setToolTip("Largura da base do dente como porcentagem do passo angular. Maior = ponta com base mais larga.");
+  form->addRow("Base do dente angular:",baseWidth_);
+  tipPosition_=metric("gear_angular_tip_20q",15.,85.,50.,1," %");
+  tipPosition_->setSingleStep(5.);
+  tipPosition_->setToolTip("Somente serrilhado: 50% = ponta central; 80% = ponta inclinada para a direita.");
+  form->addRow("Posição da ponta:",tipPosition_);
   bore_=metric("gear_bore_19_9",0.,2000.,6.,2," mm");
   form->addRow("Furo central (0 = sem furo):",bore_);
   centerX_=metric("gear_center_x_19_9",0.,10000.,bedW/2.,1," mm");
@@ -143,6 +171,11 @@ public:
   connect(buttons,&QDialogButtonBox::accepted,this,&GearDialog::accept);
   connect(buttons,&QDialogButtonBox::rejected,this,&GearDialog::reject);
   connect(teeth_,QOverload<int>::of(&QSpinBox::valueChanged),this,[this](int){refresh();});
+  connect(profile_,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](int idx){
+   const QSignalBlocker guard(tipPosition_);
+   tipPosition_->setValue(idx==2?80.:50.);
+   refresh();
+  });
   connect(module_,QOverload<double>::of(&QDoubleSpinBox::valueChanged),this,
           [this](double m){
             const QSignalBlocker guard(circularPitch_);
@@ -155,7 +188,7 @@ public:
             module_->setValue(moduleFromCircularPitch(pitch));
             refresh();
           });
-  for(auto* f:{pressure_,bore_,centerX_,centerY_})
+  for(auto* f:{pressure_,bore_,centerX_,centerY_,baseWidth_,tipPosition_})
    connect(f,QOverload<double>::of(&QDoubleSpinBox::valueChanged),this,
            [this](double){refresh();});
   refresh();
