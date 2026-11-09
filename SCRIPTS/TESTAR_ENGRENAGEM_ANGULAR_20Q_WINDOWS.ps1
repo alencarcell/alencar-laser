@@ -20,6 +20,7 @@ $session=Join-Path $dir ((Get-Date -Format 'yyyyMMdd_HHmmss')+'_'+[guid]::NewGui
 [void](New-Item -ItemType Directory -Path $session -Force)
 $summary=Join-Path $session 'RESULTADO_GEAR_20Q.json'
 $steps=@()
+$revision='unknown'
 $oldPath=$env:PATH
 $keys=@('QT_QPA_PLATFORM','ALENCAR_MINIMAL_VIEWPORT_20L',
         'ALENCAR_SKIP_WHEEL_FULL_UPDATE_20K','ALENCAR_TRANSFORM_LOCAL_REPAINT_20H')
@@ -30,6 +31,9 @@ function Save([string]$status,[string]$message){
   schema='alencar-laser-gear20q-1'
   status=$status;message=$message
   branch='feat/20q-angular-gear-20261109'
+  source_revision=$script:revision
+  executable_path=$exe
+  executable_sha256=$(if(Test-Path -LiteralPath $exe -PathType Leaf){(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash}else{$null})
   gates=@($steps)
   production_homologated=$false
   physical_laser_tested=$false
@@ -65,6 +69,8 @@ try{
  if($LASTEXITCODE -ne 0 -or $branch -ne 'feat/20q-angular-gear-20261109'){
   throw ("Branch incorreta: "+$branch+"; nao use force/reset/clean.")
  }
+ $revision=(& git -C $root rev-parse HEAD)
+ if($LASTEXITCODE -ne 0){throw 'Git HEAD indisponivel'}
  if(-not (Test-Path -LiteralPath $cmake -PathType Leaf)){throw 'CMake UCRT64 ausente'}
  $env:PATH='C:\msys64\ucrt64\bin;'+$oldPath
  $env:QT_QPA_PLATFORM='offscreen'
