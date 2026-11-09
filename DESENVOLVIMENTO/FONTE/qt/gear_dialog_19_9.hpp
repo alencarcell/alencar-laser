@@ -26,6 +26,7 @@
 #include <QMouseEvent>
 #include <QPointF>
 #include <functional>
+#include <utility>
 #include <algorithm>
 #include <cmath>
 
@@ -174,7 +175,7 @@ class GearDialog final:public QDialog{
     message+=QString("\nÂngulo INTERNO medido na ponta: %1°  ·  Altura radial: %2 mm")
        .arg(actual,0,'f',2).arg(shape.outerRadius-shape.rootRadius,0,'f',2);
     message+="\nNão confundir com ângulo da face na raiz nem com bloqueio/impulso da âncora.";
-    message+="\nPerfil visual: encaixe, kerf e resistência NÃO validados.";
+    message+="\nPERFIL ANGULAR DE DESENHO: encaixe, kerf e resistência NÃO validados.";
    }
    if(centerX_->value()-shape.outerRadius<0||centerY_->value()-shape.outerRadius<0||
       centerX_->value()+shape.outerRadius>bedW_||
@@ -230,7 +231,7 @@ public:
   baseWidth_->setSingleStep(5.);
   baseWidth_->setToolTip("Largura da base do dente como porcentagem do passo angular. Maior = ponta com base mais larga.");
   form->addRow("Base do dente angular:",baseWidth_);
-  includedAngle_=metric("gear_included_angle_20r",30.,160.,90.,1,"°");
+  includedAngle_=metric("gear_included_angle_20r",30.,160.,90.,2,"°");
   includedAngle_->setSingleStep(1.);
   includedAngle_->setToolTip("Ângulo interno real na PONTA entre as duas faces. O programa ajusta a altura da ponta, sem ultrapassar o raio máximo nominal.");
   form->addRow("Ângulo interno na ponta:",includedAngle_);
