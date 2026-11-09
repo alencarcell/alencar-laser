@@ -9137,6 +9137,66 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
          {"dpi_2x",true},{"normal_active_disabled_states",true},
          {"hardware_commands_sent",false}};
 }
+static QJsonObject gearAngular20qTest(){
+ // Validates real UI switching, rendered previews, vector insertion and Undo.
+ // No physical device, G-code, connection or laser operations.
+ alaser::gear::GearDialog dialog(400.,400.);
+ auto* profile=dialog.findChild<QComboBox*>("gear_profile_20q");
+ auto* base=dialog.findChild<QDoubleSpinBox*>("gear_angular_base_20q");
+ auto* tip=dialog.findChild<QDoubleSpinBox*>("gear_angular_tip_20q");
+ auto* pressure=dialog.findChild<QDoubleSpinBox*>("gear_pressure_19_9");
+ auto* preview=dialog.findChild<QWidget*>("gear_preview_19_9");
+ auto* summary=dialog.findChild<QLabel*>("gear_summary_19_9");
+ check(profile&&base&&tip&&pressure&&preview&&summary,
+       "Controles de ponta angular ausentes");
+ dialog.show();QApplication::processEvents();
+ check(profile->count()==3&&profile->currentIndex()==0,
+       "Involuta padrao foi substituida");
+ const auto previous=alaser::gear::generate(dialog.parameters());
+ check(previous.outer.size()>500&&tip->isEnabled()==false&&base->isEnabled()==false,
+       "Perfil involuta padrao regressou");
+ profile->setCurrentIndex(1);QApplication::processEvents();
+ check(base->isEnabled()&&!tip->isEnabled()&&!pressure->isEnabled(),
+       "Controles da ponta simetrica incorretos");
+ const auto symmetric=alaser::gear::generate(dialog.parameters());
+ check(symmetric.outer.size()==96&&symmetric.bore.size()==96,
+       "Contorno angular simetrico nao foi criado");
+ const auto symmetricImage=preview->grab().toImage().convertToFormat(QImage::Format_ARGB32);
+ check(!symmetricImage.isNull(),"Previa angular simetrica nao renderizou");
+ profile->setCurrentIndex(2);QApplication::processEvents();
+ check(base->isEnabled()&&tip->isEnabled()&&!pressure->isEnabled()&&
+       std::abs(tip->value()-80.)<1e-7,
+       "Controle de ponta inclinada incorreto");
+ const auto saw=alaser::gear::generate(dialog.parameters());
+ check(saw.outer.size()==96&&saw.bore.size()==96,
+       "Perfil serrilhado nao produziu contornos");
+ const auto sawImage=preview->grab().toImage().convertToFormat(QImage::Format_ARGB32);
+ check(!sawImage.isNull()&&sawImage!=symmetricImage,
+       "Previa nao mudou entre perfis");
+ check(summary->text().contains("ANGULAR"),
+       "Faltou aviso sobre perfil angular nao mecanico");
+ LabWindow w(Document{});w.resize(1100,750);w.show();QApplication::processEvents();
+ const auto prior=w.view.editor.state().doc;
+ const auto oldUndo=w.view.editor.undoCount();
+ w.insertGeneratedGear(dialog.parameters(),{200.,200.});
+ check(w.view.editor.state().doc.contours.size()==2&&
+       w.view.editor.undoCount()==oldUndo+1,
+       "Gear serrilhado nao foi inserido em um unico Undo");
+ for(const auto& c:w.view.editor.state().doc.contours)
+  check(c.closed&&c.nodes.size()>=3,
+        "Gear serrilhado criou contorno aberto");
+ check(w.view.editor.undo()&&sameDoc(prior,w.view.editor.state().doc),
+       "Undo nao restaurou documento anterior");
+ check(w.view.editor.redo()&&w.view.editor.state().doc.contours.size()==2,
+       "Redo nao restaurou dente serrilhado");
+ return {{"status","PASS"},{"profiles",3},{"teeth",24},
+  {"angular_outer_nodes",int(symmetric.outer.size())},
+  {"sawtooth_outer_nodes",int(saw.outer.size())},
+  {"preview_changed",true},{"editor_single_undo",true},
+  {"undo_redo_preserved",true},{"hardware_commands_sent",false},
+  {"production_homologated",false}};
+}
+
 static QJsonObject gearGenerator199Test(){
  // No device, connection, G-code or physical action is involved.
  alaser::gear::GearDialog dialog(400.,400.);
@@ -10350,6 +10410,17 @@ int main(int argc,char** argv){
   QFile file(out+"/RESULTADO_ICONES_19_9.json");
   if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
+ if(mode=="--gear-angular-20q-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=gearAngular20qTest();}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
+  }
+  QFile file(out+"/RESULTADO_ENGRENAGEM_ANGULAR_20Q.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
  }
  if(mode=="--gear-generator-19-9-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
