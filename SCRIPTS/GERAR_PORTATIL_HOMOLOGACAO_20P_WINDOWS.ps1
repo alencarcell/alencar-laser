@@ -43,8 +43,10 @@ foreach($file in @(Get-ChildItem -LiteralPath $reports -Recurse -File -Filter 'R
 }
 Ensure ($null -ne $approved) 'Sem 20o com 14 gates PASS da revisao exata, ou SHA-256 do exe mudou. Reexecute homologacao 20o; nao empacote a versao nao verificada.'
 $destinationFull=[IO.Path]::GetFullPath($Destino)
-Ensure (-not (IsInside $destinationFull (Join-Path $repo 'APLICATIVO'))) 'Destino aponta para APLICATIVO de producao'
-Ensure (-not (IsInside $destinationFull (Join-Path $repo 'DESENVOLVIMENTO\FONTE'))) 'Destino dentro do codigo-fonte bloqueado'
+$appRoot=[IO.Path]::GetFullPath((Join-Path $repo 'APLICATIVO'))
+Ensure ($destinationFull -ne $appRoot -and -not (IsInside $destinationFull $appRoot)) 'Destino aponta para APLICATIVO de producao'
+$sourceRoot=[IO.Path]::GetFullPath((Join-Path $repo 'DESENVOLVIMENTO\FONTE'))
+Ensure ($destinationFull -ne $sourceRoot -and -not (IsInside $destinationFull $sourceRoot)) 'Destino dentro do codigo-fonte bloqueado'
 Ensure (-not ($destinationFull -eq [IO.Path]::GetFullPath($repo))) 'Destino nao pode ser raiz do repositorio'
 [void](New-Item -ItemType Directory -Path $destinationFull -Force)
 $tag=(Get-Date -Format 'yyyyMMdd_HHmmss')+'_'+[guid]::NewGuid().ToString('N').Substring(0,8)
