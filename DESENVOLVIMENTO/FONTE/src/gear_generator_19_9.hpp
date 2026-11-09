@@ -8,12 +8,18 @@
 #include <vector>
 namespace alaser::gear {
 struct Point {double x=0,y=0;};
+// The angular outlines below are editorial/laser cut shapes, NOT a certified
+// gear-meshing profile. Keep Involute as the backwards-compatible default.
+enum class ToothProfile { Involute=0, Angular=1, Sawtooth=2 };
 struct Parameters {
  int teeth=24;
  double moduleMm=3.;
  double pressureDeg=20.;
  double boreMm=6.;
  int flankSamples=12;
+ ToothProfile profile=ToothProfile::Involute;
+ double angularBasePercent=75.; // percentage of a single tooth pitch
+ double tipPositionPercent=80.; // sawtooth apex location from leading root
 };
 struct Result {
  std::vector<Point> outer, bore;
@@ -35,12 +41,60 @@ inline void append(std::vector<Point>& points,Point value){
  if(points.empty()||std::hypot(points.back().x-value.x,points.back().y-value.y)>1e-10)
   points.push_back(value);
 }
+// A pointed/serrated wheel as in the hand sketch: each tooth has straight
+// sides and a single sharp apex. Contour is CCW and closed by the editor;
+// no redundant final point. One root midpoint bridges adjacent teeth.
+inline Result generateAngularOutline(const Parameters& p){
+ if(p.profile!=ToothProfile::Angular && p.profile!=ToothProfile::Sawtooth)
+  throw std::invalid_argument("perfil angular desconhecido");
+ if(!std::isfinite(p.angularBasePercent)||
+    p.angularBasePercent<45.||p.angularBasePercent>90.||
+    !std::isfinite(p.tipPositionPercent)||
+    p.tipPositionPercent<15.||p.tipPositionPercent>85.)
+  throw std::invalid_argument("largura da base ou inclinacao fora dos limites");
+ const double pi=std::numbers::pi;
+ const double rp=p.teeth*p.moduleMm/2.;
+ const double ra=rp+p.moduleMm,rf=rp-1.25*p.moduleMm;
+ if(rf<=0.||p.boreMm>=2.*(rf-0.5*p.moduleMm))
+  throw std::invalid_argument("furo central excede o nucleo estrutural da engrenagem");
+ Result out;
+ out.pitchRadius=rp;out.outerRadius=ra;out.rootRadius=rf;
+ out.baseRadius=rp*std::cos(p.pressureDeg*pi/180.);
+ out.undercutWarning=false; // not an involute tooth
+ const double step=2.*pi/double(p.teeth);
+ const double half=step*p.angularBasePercent/200.;
+ const double apexFraction=(p.profile==ToothProfile::Angular)
+                            ?0.5:p.tipPositionPercent/100.;
+ const double gap=step-2.*half;
+ out.outer.reserve(size_t(p.teeth)*4);
+ for(int i=0;i<p.teeth;++i){
+  const double center=(i+0.25)*step;
+  const double left=center-half,right=center+half;
+  const double apex=left+(right-left)*apexFraction;
+  append(out.outer,polar(rf,left));
+  append(out.outer,polar(ra,apex));
+  append(out.outer,polar(rf,right));
+  append(out.outer,polar(rf,right+gap/2.));
+  // The next tooth starts at this last angular position. The closed
+  // polygon supplies the final segment without duplicating the first node.
+ }
+ if(p.boreMm>0.){
+  out.bore.reserve(96);
+  for(int i=95;i>=0;--i)
+   out.bore.push_back(polar(p.boreMm/2.,2.*pi*i/96.));
+ }
+ return out;
+}
 inline Result generate(const Parameters& p){
  if(p.teeth<12||p.teeth>120||!std::isfinite(p.moduleMm)||
     p.moduleMm<0.5||p.moduleMm>20.||
     !std::isfinite(p.pressureDeg)||p.pressureDeg<14.||p.pressureDeg>30.||
     !std::isfinite(p.boreMm)||p.boreMm<0.||p.flankSamples<6||p.flankSamples>20)
   throw std::invalid_argument("parametros de engrenagem fora dos limites");
+ if(p.profile==ToothProfile::Angular||p.profile==ToothProfile::Sawtooth)
+  return generateAngularOutline(p);
+ if(p.profile!=ToothProfile::Involute)
+  throw std::invalid_argument("perfil de dente desconhecido");
  const double pi=std::numbers::pi;
  const double phi=p.pressureDeg*pi/180.;
  const double rp=p.teeth*p.moduleMm/2.,rb=rp*std::cos(phi);
