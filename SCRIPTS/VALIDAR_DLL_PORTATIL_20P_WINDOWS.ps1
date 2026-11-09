@@ -17,6 +17,7 @@ $qtBin='C:\msys64\ucrt64\bin'
 $objdumpCandidates=@((Join-Path $qtBin 'objdump.exe'),'C:\msys64\usr\bin\objdump.exe')
 $objdump=@($objdumpCandidates|Where-Object {Test-Path -LiteralPath $_ -PathType Leaf}|Select-Object -First 1)
 if($objdump.Count -ne 1){throw 'objdump nao encontrado em MSYS2. Instale binutils UCRT64 antes de empacotar.'}
+$objdumpExe=[string]$objdump[0]
 if(-not (Test-Path -LiteralPath $exe -PathType Leaf)){throw 'Executavel nao encontrado'}
 if(-not $exe.StartsWith($stage+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Executavel fora da pasta do pacote'}
 $system32=Join-Path $env:SystemRoot 'System32'
@@ -24,7 +25,7 @@ $systemWow=Join-Path $env:SystemRoot 'SysWOW64'
 $copied=New-Object System.Collections.ArrayList
 $scanned=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
 function ImportedDlls([string]$file){
- $lines=@(& $objdump[0] '-p' $file 2>&1)
+ $lines=@(& $objdumpExe '-p' $file 2>&1)
  if($LASTEXITCODE -ne 0){throw "objdump falhou em $file"}
  $names=New-Object System.Collections.ArrayList
  foreach($line in $lines){
@@ -36,6 +37,18 @@ function ImportedDlls([string]$file){
 }
 # DLLs installed in Qt plugin subfolders must be scanned too, because
 # their imported modules may differ from the executable's imports.
+# Some platform plugins load Qt libraries via dynamic LoadLibrary and do
+# not show in the static import table. Include offscreen plugin for smoke.
+$offscreen=Join-Path $stage 'platforms\qoffscreen.dll'
+$qtOffscreen='C:\msys64\ucrt64\share\qt6\plugins\platforms\qoffscreen.dll'
+$altOffscreen='C:\msys64\ucrt64\lib\qt6\plugins\platforms\qoffscreen.dll'
+foreach($candidate in @($qtOffscreen,$altOffscreen)){
+ if(-not (Test-Path -LiteralPath $offscreen -PathType Leaf) -and
+    (Test-Path -LiteralPath $candidate -PathType Leaf)){
+  Copy-Item -LiteralPath $candidate -Destination $offscreen
+ }
+}
+
 $queue=New-Object 'System.Collections.Generic.Queue[string]'
 foreach($f in @(Get-ChildItem -LiteralPath $stage -Recurse -File | Where-Object {
  $_.Extension -ieq '.dll' -or $_.Extension -ieq '.exe'
@@ -65,17 +78,6 @@ while($queue.Count -gt 0){
   Copy-Item -LiteralPath $origin -Destination $appDir -ErrorAction Stop
   [void]$copied.Add($name)
   $queue.Enqueue($appDir)
- }
-}
-# Some platform plugins load Qt libraries via dynamic LoadLibrary and do
-# not show in the static import table. Include offscreen plugin for smoke.
-$offscreen=Join-Path $stage 'platforms\qoffscreen.dll'
-$qtOffscreen='C:\msys64\ucrt64\share\qt6\plugins\platforms\qoffscreen.dll'
-$altOffscreen='C:\msys64\ucrt64\lib\qt6\plugins\platforms\qoffscreen.dll'
-foreach($candidate in @($qtOffscreen,$altOffscreen)){
- if(-not (Test-Path -LiteralPath $offscreen -PathType Leaf) -and
-    (Test-Path -LiteralPath $candidate -PathType Leaf)){
-  Copy-Item -LiteralPath $candidate -Destination $offscreen
  }
 }
 $reports=Join-Path $stage '_SMOKE_20P'
