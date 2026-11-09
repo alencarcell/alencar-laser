@@ -11,6 +11,7 @@ struct Point {double x=0,y=0;};
 // The angular outlines below are editorial/laser cut shapes, NOT a certified
 // gear-meshing profile. Keep Involute as the backwards-compatible default.
 enum class ToothProfile { Involute=0, Angular=1, Sawtooth=2 };
+enum class AngularDefinition { ByBaseWidth=0, ByIncludedTipAngle=1 };
 struct Parameters {
  int teeth=24;
  double moduleMm=3.;
@@ -20,6 +21,8 @@ struct Parameters {
  ToothProfile profile=ToothProfile::Involute;
  double angularBasePercent=75.; // percentage of a single tooth pitch
  double tipPositionPercent=80.; // sawtooth apex location from leading root
+ AngularDefinition angularDefinition=AngularDefinition::ByBaseWidth;
+ double includedTipAngleDeg=90.; // true internal angle between the straight flanks
 };
 struct Result {
  std::vector<Point> outer, bore;
@@ -41,6 +44,15 @@ inline void append(std::vector<Point>& points,Point value){
  if(points.empty()||std::hypot(points.back().x-value.x,points.back().y-value.y)>1e-10)
   points.push_back(value);
 }
+// Interior angle measured at the physical tip, between both straight flanks.
+// It is NOT the angle of a flank relative to the tangent at the tooth root,
+// and is NOT the locking/impulse angle of a Graham escapement.
+inline double includedAngleAtTipDeg(Point left,Point tip,Point right){
+ const Point a{left.x-tip.x,left.y-tip.y},b{right.x-tip.x,right.y-tip.y};
+ const double cross=std::abs(a.x*b.y-a.y*b.x);
+ const double dot=a.x*b.x+a.y*b.y;
+ return std::atan2(cross,dot)*180./std::numbers::pi;
+}
 // A pointed/serrated wheel as in the hand sketch: each tooth has straight
 // sides and a single sharp apex. Contour is CCW and closed by the editor;
 // no redundant final point. One root midpoint bridges adjacent teeth.
@@ -52,19 +64,54 @@ inline Result generateAngularOutline(const Parameters& p){
     !std::isfinite(p.tipPositionPercent)||
     p.tipPositionPercent<15.||p.tipPositionPercent>85.)
   throw std::invalid_argument("largura da base ou inclinacao fora dos limites");
+ if(p.angularDefinition!=AngularDefinition::ByBaseWidth&&
+    p.angularDefinition!=AngularDefinition::ByIncludedTipAngle)
+  throw std::invalid_argument("modo de definicao angular desconhecido");
+ if(p.angularDefinition==AngularDefinition::ByIncludedTipAngle&&
+    (!std::isfinite(p.includedTipAngleDeg)||
+     p.includedTipAngleDeg<30.||p.includedTipAngleDeg>160.))
+  throw std::invalid_argument("angulo interno na ponta deve estar entre 30 e 160 graus");
  const double pi=std::numbers::pi;
  const double rp=p.teeth*p.moduleMm/2.;
- const double ra=rp+p.moduleMm,rf=rp-1.25*p.moduleMm;
+ const double nominalRa=rp+p.moduleMm,rf=rp-1.25*p.moduleMm;
  if(rf<=0.||p.boreMm>=2.*(rf-0.5*p.moduleMm))
   throw std::invalid_argument("furo central excede o nucleo estrutural da engrenagem");
- Result out;
- out.pitchRadius=rp;out.outerRadius=ra;out.rootRadius=rf;
- out.baseRadius=rp*std::cos(p.pressureDeg*pi/180.);
- out.undercutWarning=false; // not an involute tooth
  const double step=2.*pi/double(p.teeth);
  const double half=step*p.angularBasePercent/200.;
  const double apexFraction=(p.profile==ToothProfile::Angular)
                             ?0.5:p.tipPositionPercent/100.;
+ double ra=nominalRa;
+ if(p.angularDefinition==AngularDefinition::ByIncludedTipAngle){
+  // At fixed root radius and root-to-root angular width, solve only the
+  // radial tip position. The outer diameter is allowed to change. This
+  // avoids falsely labeling an approximate angle as an exact measurement.
+  const Point left=polar(rf,-half),right=polar(rf,half);
+  const double tipTheta=-half+2.*half*apexFraction;
+  const auto measured=[&](double r){
+   return includedAngleAtTipDeg(left,polar(r,tipTheta),right);
+  };
+  const double atLimit=measured(nominalRa),atRoot=measured(rf);
+  if(p.includedTipAngleDeg<atLimit-1e-7||
+     p.includedTipAngleDeg>atRoot+1e-7)
+   throw std::invalid_argument(
+    "angulo nao realizavel com esta base e altura radial; ajuste largura da base, modulo ou numero de dentes");
+  double low=rf,high=nominalRa;
+  for(int i=0;i<75;++i){
+   const double mid=(low+high)/2.;
+   if(measured(mid)>p.includedTipAngleDeg)low=mid;
+   else high=mid;
+  }
+  ra=(low+high)/2.;
+  if(ra-rf<0.15*p.moduleMm)
+   throw std::invalid_argument(
+    "ponta rasa demais para a geometria escolhida; diminua o angulo ou altere a base");
+  if(std::abs(measured(ra)-p.includedTipAngleDeg)>1e-6)
+   throw std::invalid_argument("tolerancia do angulo interno nao atingida");
+ }
+ Result out;
+ out.pitchRadius=rp;out.outerRadius=ra;out.rootRadius=rf;
+ out.baseRadius=rp*std::cos(p.pressureDeg*pi/180.);
+ out.undercutWarning=false; // not an involute tooth
  const double gap=step-2.*half;
  out.outer.reserve(size_t(p.teeth)*4);
  for(int i=0;i<p.teeth;++i){
