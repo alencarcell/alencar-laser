@@ -132,6 +132,9 @@ protected:
 class GearDialog final:public QDialog{
  QSpinBox* teeth_=nullptr;
  QComboBox* profile_=nullptr;
+ QComboBox* definition_=nullptr;
+ QLabel* zoomLabel_=nullptr;
+ QDoubleSpinBox* includedAngle_=nullptr;
  QDoubleSpinBox *module_=nullptr,*circularPitch_=nullptr,*pressure_=nullptr,*bore_=nullptr,*centerX_=nullptr,*centerY_=nullptr;
  QDoubleSpinBox *baseWidth_=nullptr,*tipPosition_=nullptr;
  QCheckBox* previewEnabled_=nullptr;
@@ -144,6 +147,8 @@ class GearDialog final:public QDialog{
   p.profile=static_cast<ToothProfile>(profile_->currentIndex());
   p.angularBasePercent=baseWidth_->value();
   p.tipPositionPercent=tipPosition_->value();
+  p.angularDefinition=static_cast<AngularDefinition>(definition_->currentIndex());
+  p.includedTipAngleDeg=includedAngle_->value();
   return p;
  }
  void refresh(){
@@ -152,6 +157,8 @@ class GearDialog final:public QDialog{
   pressure_->setEnabled(!angular);
   baseWidth_->setEnabled(angular);
   tipPosition_->setEnabled(p.profile==ToothProfile::Sawtooth);
+  definition_->setEnabled(angular);
+  includedAngle_->setEnabled(angular&&p.angularDefinition==AngularDefinition::ByIncludedTipAngle);
   preview_->setGear(p);
   try{
    const auto shape=generate(p);
@@ -162,8 +169,13 @@ class GearDialog final:public QDialog{
      .arg(2*shape.outerRadius,0,'f',2).arg(2*shape.pitchRadius,0,'f',2)
      .arg(2*shape.rootRadius,0,'f',2).arg(shape.outer.size()).arg(shape.bore.size());
    if(shape.undercutWarning)message+="\nAviso: poucos dentes podem gerar interferência/undercut.";
-   if(angular)
-    message+="\nPERFIL ANGULAR DE DESENHO: não garante engrenamento, sentido de catraca ou resistência mecânica.";
+   if(angular){
+    const double actual=includedAngleAtTipDeg(shape.outer.at(0),shape.outer.at(1),shape.outer.at(2));
+    message+=QString("\nÂngulo INTERNO medido na ponta: %1°  ·  Altura radial: %2 mm")
+       .arg(actual,0,'f',2).arg(shape.outerRadius-shape.rootRadius,0,'f',2);
+    message+="\nNão confundir com ângulo da face na raiz nem com bloqueio/impulso da âncora.";
+    message+="\nPerfil visual: encaixe, kerf e resistência NÃO validados.";
+   }
    if(centerX_->value()-shape.outerRadius<0||centerY_->value()-shape.outerRadius<0||
       centerX_->value()+shape.outerRadius>bedW_||
       centerY_->value()+shape.outerRadius>bedH_)message+="\nAtenção: desenho ultrapassa a área configurada.";
@@ -177,11 +189,13 @@ public:
   bedW_(bedW),bedH_(bedH){
   setObjectName("gear_generator_dialog_19_9");
   setWindowTitle("Gerador de Engrenagens — Alencar Laser");
-  setMinimumSize(540,610);resize(610,720);
-  auto* column=new QVBoxLayout(this);column->setSpacing(6);
+  setMinimumSize(540,610);resize(625,720);
+  auto* column=new QVBoxLayout(this);column->setSpacing(5);
   auto* hint=new QLabel("GERAÇÃO VETORIAL OFFLINE • sem motor, movimento ou emissão de laser.",this);
   hint->setWordWrap(true);column->addWidget(hint);
-  auto* form=new QFormLayout;form->setVerticalSpacing(5);
+  auto* formHost=new QWidget(this);
+  auto* form=new QFormLayout(formHost);form->setVerticalSpacing(4);
+  form->setContentsMargins(4,2,4,2);
   teeth_=new QSpinBox(this);teeth_->setObjectName("gear_teeth_19_9");
   teeth_->setRange(12,120);teeth_->setValue(24);
   form->addRow("Quantidade de dentes:",teeth_);
@@ -192,6 +206,12 @@ public:
   profile_->addItem("Serrilhado (ponta inclinada)");
   profile_->setToolTip("Ponta angular e serrilhado são perfis vetoriais ilustrativos. Não são perfis de engrenamento certificados.");
   form->addRow("Perfil do dente:",profile_);
+  definition_=new QComboBox(this);
+  definition_->setObjectName("gear_definition_20r");
+  definition_->addItem("Por largura da base (%)");
+  definition_->addItem("Por ângulo INTERNO na ponta (°)");
+  definition_->setToolTip("O ângulo interno é medido entre as duas faces retas na ponta. Não é o ângulo de pressão nem o de contato com a âncora.");
+  form->addRow("Definição angular:",definition_);
   auto metric=[&](const char* key,double min,double max,double value,int decimals,const QString& suffix){
    auto* f=new QDoubleSpinBox(this);f->setObjectName(key);f->setDecimals(decimals);
    f->setRange(min,max);f->setSingleStep(.5);f->setValue(value);f->setSuffix(suffix);return f;
@@ -210,6 +230,10 @@ public:
   baseWidth_->setSingleStep(5.);
   baseWidth_->setToolTip("Largura da base do dente como porcentagem do passo angular. Maior = ponta com base mais larga.");
   form->addRow("Base do dente angular:",baseWidth_);
+  includedAngle_=metric("gear_included_angle_20r",30.,160.,90.,1,"°");
+  includedAngle_->setSingleStep(1.);
+  includedAngle_->setToolTip("Ângulo interno real na PONTA entre as duas faces. O programa ajusta a altura da ponta, sem ultrapassar o raio máximo nominal.");
+  form->addRow("Ângulo interno na ponta:",includedAngle_);
   tipPosition_=metric("gear_angular_tip_20q",15.,85.,50.,1," %");
   tipPosition_->setSingleStep(5.);
   tipPosition_->setToolTip("Somente serrilhado: 50% = ponta central; 80% = ponta inclinada para a direita.");
@@ -219,12 +243,39 @@ public:
   centerX_=metric("gear_center_x_19_9",0.,10000.,bedW/2.,1," mm");
   centerY_=metric("gear_center_y_19_9",0.,10000.,bedH/2.,1," mm");
   form->addRow("Centro X:",centerX_);form->addRow("Centro Y:",centerY_);
-  column->addLayout(form);
+  auto* formScroll=new QScrollArea(this);
+  formScroll->setObjectName("gear_form_scroll_20r");
+  formScroll->setFrameShape(QFrame::NoFrame);
+  formScroll->setWidgetResizable(true);
+  formScroll->setWidget(formHost);
+  formScroll->setMinimumHeight(185);
+  formScroll->setMaximumHeight(345);
+  column->addWidget(formScroll,1);
   previewEnabled_=new QCheckBox("Pré-visualizar",this);
   previewEnabled_->setObjectName("gear_preview_enabled_19_9");
   previewEnabled_->setChecked(true);
   column->addWidget(previewEnabled_);
-  preview_=new GearPreview(this);column->addWidget(preview_);
+  auto* tools=new QHBoxLayout;
+  auto* zoomOut=new QPushButton("−",this);zoomOut->setObjectName("gear_zoom_out_20r");
+  auto* zoomIn=new QPushButton("+",this);zoomIn->setObjectName("gear_zoom_in_20r");
+  auto* fit=new QPushButton("Ajustar",this);fit->setObjectName("gear_zoom_fit_20r");
+  zoomLabel_=new QLabel("100%",this);zoomLabel_->setObjectName("gear_zoom_label_20r");
+  for(auto* btn:{zoomOut,zoomIn})btn->setFixedWidth(33);
+  tools->addStretch();tools->addWidget(new QLabel("Zoom:",this));
+  tools->addWidget(zoomOut);tools->addWidget(zoomLabel_);
+  tools->addWidget(zoomIn);tools->addWidget(fit);
+  column->addLayout(tools);
+  preview_=new GearPreview(this);column->addWidget(preview_,2);
+  preview_->onZoomChanged([this](double factor){
+   zoomLabel_->setText(QString::number(int(std::round(factor*100.)))+"%");
+  });
+  connect(zoomOut,&QPushButton::clicked,this,[this]{
+   preview_->zoomBy(1./1.25,QPointF(preview_->width()/2.,preview_->height()/2.));
+  });
+  connect(zoomIn,&QPushButton::clicked,this,[this]{
+   preview_->zoomBy(1.25,QPointF(preview_->width()/2.,preview_->height()/2.));
+  });
+  connect(fit,&QPushButton::clicked,preview_,&GearPreview::fitView);
   connect(previewEnabled_,&QCheckBox::toggled,preview_,&QWidget::setVisible);
   info_=new QLabel(this);info_->setObjectName("gear_summary_19_9");
   info_->setWordWrap(true);info_->setMinimumHeight(95);column->addWidget(info_);
@@ -240,6 +291,8 @@ public:
    tipPosition_->setValue(idx==2?80.:50.);
    refresh();
   });
+  connect(definition_,QOverload<int>::of(&QComboBox::currentIndexChanged),this,
+          [this](int){refresh();});
   connect(module_,QOverload<double>::of(&QDoubleSpinBox::valueChanged),this,
           [this](double m){
             const QSignalBlocker guard(circularPitch_);
@@ -252,7 +305,7 @@ public:
             module_->setValue(moduleFromCircularPitch(pitch));
             refresh();
           });
-  for(auto* f:{pressure_,bore_,centerX_,centerY_,baseWidth_,tipPosition_})
+  for(auto* f:{pressure_,bore_,centerX_,centerY_,baseWidth_,tipPosition_,includedAngle_})
    connect(f,QOverload<double>::of(&QDoubleSpinBox::valueChanged),this,
            [this](double){refresh();});
   refresh();
