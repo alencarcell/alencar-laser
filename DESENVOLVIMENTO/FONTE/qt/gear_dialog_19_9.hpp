@@ -20,6 +20,13 @@
 #include <QPolygonF>
 #include <QPushButton>
 #include <QPen>
+#include <QScrollArea>
+#include <QFrame>
+#include <QWheelEvent>
+#include <QMouseEvent>
+#include <QPointF>
+#include <functional>
+#include <algorithm>
 #include <cmath>
 
 namespace alaser::gear {
@@ -27,10 +34,40 @@ class GearPreview final:public QWidget{
  Parameters current_{};
  Result generated_{};
  bool valid_=false;
+ double zoom_=1.;
+ QPointF pan_{0.,0.},lastDrag_{0.,0.};
+ bool dragging_=false;
+ std::function<void(double)> zoomChanged_{};
+ double baseScale()const{
+  if(!valid_||generated_.outerRadius<=0.)return 1.;
+  return .45*double(std::min(width(),height()))/generated_.outerRadius;
+ }
+ void notifyZoom(){
+  if(zoomChanged_)zoomChanged_(zoom_);
+ }
 public:
  explicit GearPreview(QWidget* p=nullptr):QWidget(p){
   setMinimumHeight(175);setObjectName("gear_preview_19_9");
-  setToolTip("Prévia vetorial nominal. Perfis angulares decorativos não garantem engrenamento mecânico.");
+  setCursor(Qt::OpenHandCursor);
+  setToolTip("Roda do mouse: zoom na posição do cursor. Arrastar com botão esquerdo ou central: deslocar. Ajustar: restaurar.");
+ }
+ void onZoomChanged(std::function<void(double)> callback){
+  zoomChanged_=std::move(callback);notifyZoom();
+ }
+ double zoomFactor()const noexcept{return zoom_;}
+ QPointF panOffset()const noexcept{return pan_;}
+ void zoomBy(double factor,QPointF anchor){
+  if(!valid_||!std::isfinite(factor)||factor<=0.)return;
+  const double next=std::clamp(zoom_*factor,0.5,20.);
+  if(std::abs(next-zoom_)<1e-10)return;
+  const QPointF center=QPointF(width()/2.,height()/2.);
+  // Preserve the point underneath the cursor for stable, predictable zoom.
+  pan_=anchor-center-(anchor-center-pan_)*(next/zoom_);
+  zoom_=next;
+  notifyZoom();update();
+ }
+ void fitView(){
+  zoom_=1.;pan_={0.,0.};notifyZoom();update();
  }
  void setGear(const Parameters& params){
   current_=params;valid_=false;
@@ -38,14 +75,41 @@ public:
   update();
  }
 protected:
+ void wheelEvent(QWheelEvent* e)override{
+  const double steps=double(e->angleDelta().y())/120.;
+  if(std::abs(steps)>1e-8){
+   zoomBy(std::pow(1.2,steps),e->position());
+  }
+  e->accept();
+ }
+ void mousePressEvent(QMouseEvent* e)override{
+  if(valid_&&(e->button()==Qt::LeftButton||e->button()==Qt::MiddleButton)){
+   dragging_=true;lastDrag_=e->position();setCursor(Qt::ClosedHandCursor);
+   e->accept();return;
+  }
+  QWidget::mousePressEvent(e);
+ }
+ void mouseMoveEvent(QMouseEvent* e)override{
+  if(dragging_){
+   pan_+=e->position()-lastDrag_;lastDrag_=e->position();
+   update();e->accept();return;
+  }
+  QWidget::mouseMoveEvent(e);
+ }
+ void mouseReleaseEvent(QMouseEvent* e)override{
+  if(dragging_&&(e->button()==Qt::LeftButton||e->button()==Qt::MiddleButton)){
+   dragging_=false;setCursor(Qt::OpenHandCursor);e->accept();return;
+  }
+  QWidget::mouseReleaseEvent(e);
+ }
  void paintEvent(QPaintEvent*)override{
   QPainter p(this);p.setRenderHint(QPainter::Antialiasing,true);
   p.fillRect(rect(),QColor("#1B252E"));
   p.setPen(QPen(QColor("#44596A"),1));
   p.drawRect(rect().adjusted(1,1,-2,-2));
   if(!valid_)return;
-  const QPointF center=rect().center();
-  const double scale=.45*std::min(width(),height())/generated_.outerRadius;
+  const QPointF center=QPointF(width()/2.,height()/2.)+pan_;
+  const double scale=baseScale()*zoom_;
   auto shape=[&](const std::vector<Point>& poly)->QPolygonF{
    QPolygonF q;q.reserve(int(poly.size()));
    for(const auto& v:poly)q<<QPointF(center.x()+scale*v.x,center.y()-scale*v.y);
