@@ -5,7 +5,7 @@ Build isolado, teste de nucleo + regressao antiga + Qt GUI.
 Nao instala, nao modifica APLICATIVO, nao envia comandos ao laser.
 #>
 [CmdletBinding()]
-param()
+param([switch]$Abrir)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $root=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -96,6 +96,12 @@ try{
  Save 'AUTOMATED_PASS_MANUAL_PENDING' '4 testes aprovados, perfis angulares e involuta, criacao GUI Undo/Redo.'
  Write-Host 'PASS 20q: 4 gates aprovados; pronto para teste visual manual em candidata isolada.' -ForegroundColor Green
  Write-Host ("Relatorio: "+$summary) -ForegroundColor Cyan
+ if($Abrir){
+  $launcher=Join-Path $PSScriptRoot 'ABRIR_GERADOR_ANGULAR_20Q_WINDOWS.ps1'
+  if(-not (Test-Path -LiteralPath $launcher -PathType Leaf)){throw 'Launcher manual 20q ausente'}
+  & powershell.exe '-NoProfile' '-ExecutionPolicy' 'Bypass' '-File' $launcher
+  if($LASTEXITCODE -ne 0){throw 'Validacao visual manual retornou erro'}
+ }
 }catch{
  Save 'BLOCKED' $_.Exception.Message
  Write-Host ("FALHA 20q: "+$_.Exception.Message) -ForegroundColor Red
