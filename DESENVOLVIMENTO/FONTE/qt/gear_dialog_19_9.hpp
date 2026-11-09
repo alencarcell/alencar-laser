@@ -49,6 +49,7 @@ class GearPreview final:public QWidget{
 public:
  explicit GearPreview(QWidget* p=nullptr):QWidget(p){
   setMinimumHeight(175);setObjectName("gear_preview_19_9");
+  setMouseTracking(true);
   setCursor(Qt::OpenHandCursor);
   setToolTip("Roda do mouse: zoom na posição do cursor. Arrastar com botão esquerdo ou central: deslocar. Ajustar: restaurar.");
  }
