@@ -2474,7 +2474,7 @@ void mousePressEvent(QMouseEvent* e)override{
       else if(kind=="boundary_proximity")
        reason="Tesoura: cursor muito proximo do cruzamento. Clique no meio do trecho.";
       else reason="Tesoura: intervalo inseguro ou indefinido; contorno preservado.";
-      if(scissorDetail)scissorDetail(kind=="none"?"ambiguous":kind,
+      if(scissorDetail)scissorDetail(QString::fromStdString(kind=="none"?std::string("ambiguous"):kind),
                                     hits.front().key.object,hits.front().segment);
      }
      if(grouped||locked||hidden)
