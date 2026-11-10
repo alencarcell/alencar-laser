@@ -68,6 +68,7 @@ class ScissorSpanPlanner {
   std::vector<const char*> unsafeKinds;
  };
  std::vector<Segment> segments_;
+ std::map<Key,Contour> contourLookup_;
  std::unique_ptr<SegmentBVH> index_;
  std::map<Key,Boundaries> cache_;
  std::string lastRejection_="none";
@@ -75,6 +76,34 @@ class ScissorSpanPlanner {
   Boundaries out;
   if(!index_||c.nodes.size()<2)return out;
   const int edges=int(c.nodes.size())-(c.closed?0:1);
+  // A genuine transverse crossing at an INTERNAL vertex of another path
+  // is safe: its two incident sides must lie strictly on opposite sides of
+  // the target line. A tangency (same side), T endpoint or degenerate corner
+  // is still ambiguous. No synthetic snapping or coordinate modification.
+  auto transverseForeignVertex=[&](const Segment& s,double y,Pt a,Pt r,double rr){
+   auto it=contourLookup_.find(s.key);
+   if(it==contourLookup_.end())return false;
+   const auto& other=it->second;
+   const int count=int(other.nodes.size());
+   if(count<3)return false;
+   const bool atStart=y<1e-7,atEnd=y>1.-1e-7;
+   if(!atStart&&!atEnd)return false;
+   const int vertex=s.idx+(atEnd?1:0);
+   const int v=other.closed?vertex%count:vertex;
+   if(v<0||v>=count||(!other.closed&&(v==0||v==count-1)))
+    return false;
+   const Pt point=other.nodes[size_t(v)].p;
+   const Pt before=other.nodes[size_t((v-1+count)%count)].p;
+   const Pt after=other.nodes[size_t((v+1)%count)].p;
+   const Pt left=before-point,right=after-point;
+   const double lenA=norm2(left),lenB=norm2(right);
+   if(lenA<=1e-18||lenB<=1e-18)return false;
+   const double ca=cross2(r,left),cb=cross2(r,right);
+   const double epsA=1e-9*std::sqrt(rr*lenA);
+   const double epsB=1e-9*std::sqrt(rr*lenB);
+   if(std::abs(ca)<=epsA||std::abs(cb)<=epsB)return false;
+   return (ca<0&&cb>0)||(ca>0&&cb<0);
+  };
   for(int i=0;i<edges;i++){
    Pt a=c.nodes[size_t(i)].p,b=c.nodes[size_t(i+1)%c.nodes.size()].p;
    Pt r=b-a;const double rr=norm2(r);
@@ -128,8 +157,13 @@ class ScissorSpanPlanner {
      }
      if(otherInterior&&targetOpenTip)continue;
     }
-    // Intersecoes exatamente em vertices podem ser tangencias; recusamos
-    // estes casos ate haver classificacao topologica de ambos os lados.
+    // The target vertex remains unsafe. A *foreign* inner vertex is
+    // allowed only with a strict sign-changing (transverse) crossing.
+    if(s.key!=c.key&&x>1e-7&&x<1.-1e-7&&
+       (y<1e-7||y>1.-1e-7)&&
+       transverseForeignVertex(s,y,a,r,rr)){
+     out.crossings.push_back(double(i)+x);continue;
+    }
     if(x<1e-7||x>1.-1e-7||y<1e-7||y>1.-1e-7){
      const double p=double(i)+std::clamp(x,0.,1.);
      out.unsafe.push_back({p-1e-6,p+1e-6});
@@ -147,6 +181,8 @@ public:
  const std::string& lastRejectionReason()const noexcept{return lastRejection_;}
  void reset(const Document& d,const std::function<bool(Key)>& isVisible={}){
   segments_=alaser::segments(d);
+  contourLookup_.clear();
+  for(const auto& c:d.contours)contourLookup_.emplace(c.key,scissorLogicalContour(c));
   if(isVisible)segments_.erase(std::remove_if(segments_.begin(),segments_.end(),
     [&](const Segment& s){return !isVisible(s.key);}),segments_.end());
   index_=std::make_unique<SegmentBVH>(segments_);
