@@ -13,6 +13,7 @@
 #include <QDoubleSpinBox>
 #include <QSpinBox>
 #include <QComboBox>
+#include <QSignalBlocker>
 #include <QLabel>
 #include <QPushButton>
 #include <QDialogButtonBox>
@@ -231,7 +232,17 @@ public:
   connect(buttons,&QDialogButtonBox::accepted,this,&QDialog::accept);
   connect(buttons,&QDialogButtonBox::rejected,this,&QDialog::reject);
   layout->addWidget(buttons);
-  connect(teeth_,QOverload<int>::of(&QSpinBox::valueChanged),this,[this](int){refresh();});
+  // Changing tooth count adjusts the initial face offsets to the new
+  // pitch. The operator may refine each value manually afterwards.
+  connect(teeth_,QOverload<int>::of(&QSpinBox::valueChanged),this,[this](int z){
+   const double pitch=360./z;
+   const QSignalBlocker a(trailing_),b(leading_),c(tip_),d(span_);
+   trailing_->setValue(pitch*.35);
+   leading_->setValue(pitch*.217);
+   tip_->setValue(pitch*.05);
+   span_->setValue(std::clamp(std::round(z*.5)/2.,2.5,15.));
+   refresh();
+  });
   connect(rotation_,QOverload<int>::of(&QComboBox::currentIndexChanged),this,[this](int){refresh();});
   for(auto* v:{diameter_,root_,bore_,tip_,trailing_,leading_,span_,x_,y_})
    connect(v,QOverload<double>::of(&QDoubleSpinBox::valueChanged),this,[this](double){refresh();});
