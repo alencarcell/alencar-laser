@@ -1860,7 +1860,7 @@ public:
    setRenderHint(QPainter::Antialiasing,!fast);
    setRenderHint(QPainter::SmoothPixmapTransform,!fast);
   }
-  clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
+  clearScissorHover();clearEdgeTrimHover20z();clearShapePreview();cancelSelectionTransform();endChunkPreview();
   clearPolyline();clearBezierDraft();clearMarquee();scene_.clear();rasterOverlay_=nullptr;rasterFrame_=nullptr;rasterHandle_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   contourProbe20_.itemStats.clear();
   // Composite closed Fill paths per layer with the same parity rule used
