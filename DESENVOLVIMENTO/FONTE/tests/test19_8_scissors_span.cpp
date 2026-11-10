@@ -163,6 +163,33 @@ int main(){
           planner.lastRejectionReason()=="vertex_or_tangent",
           "ponta externa em T foi promovida a intersecao transversal");
 
+  // 20x: the CUT PATH crosses a straight foreign line exactly at its
+  // own interior vertices. This is a true transverse crossing, not a touch.
+  Editor targetVertex(Document{});
+  const int zig=targetVertex.addContour({{0,-3},{5,0},{6,2},{8,0},{10,-3}},false);
+  const int guide=targetVertex.line({0,0},{10,0});
+  const Document targetVertexBefore=targetVertex.state().doc;
+  planner.reset(targetVertex.state().doc);
+  auto zigSpan=planner.candidate(targetVertex.state().doc,
+                       {{zig,0},2,0,{7,1}});
+  require(bool(zigSpan),"20x: alvo atravessando reta no proprio vertice recusado");
+  close(zigSpan->from,1);close(zigSpan->to,3);
+  close(zigSpan->preview.front().x,5);
+  close(zigSpan->preview.back().x,8);
+  targetVertex.removeScissorSpan(*zigSpan);
+  require(get(targetVertex.state().doc,{guide,0})!=nullptr,
+          "20x: guia transversal foi removida indevidamente");
+  require(targetVertex.undo()&&sameDoc(targetVertexBefore,targetVertex.state().doc),
+          "20x: Undo nao restaurou geometria do alvo");
+  Editor targetTangent(Document{});
+  const int apex=targetTangent.addContour({{0,3},{5,0},{10,3}},false);
+  targetTangent.line({0,0},{10,0});
+  planner.reset(targetTangent.state().doc);
+  auto illegal=planner.candidate(targetTangent.state().doc,
+                        {{apex,0},0,0,{3,1.8}});
+  require(!illegal&&planner.lastRejectionReason()=="vertex_or_tangent",
+          "20x: tangencia no vertice do proprio alvo foi cortada");
+
   // 20v atomic weld contract. This artificially specified valid interval
   // isolates the *post-cut join* from the planner's separate T-junction gate.
   Editor weld(Document{});
