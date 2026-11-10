@@ -487,6 +487,7 @@ class QtEditorLab final:public QGraphicsView{
  std::optional<QPoint> edgeTrimPosition20z_;
  QGraphicsPathItem* edgeTrimPreview20z_=nullptr;
  uint64_t edgeTrimGeneration20z_=std::numeric_limits<uint64_t>::max();
+ QTransform edgeTrimViewportTransform20z_;
  // TESTE_12: caminho continuo e o modo seguro padrao.
  // Blocos sao EXCLUSIVAMENTE experimentais (ALENCAR_LAB_CHUNKS_EXPERIMENTAL=1).
  bool continuousPreview_=false;
@@ -2005,6 +2006,7 @@ public:
  void clearEdgeTrimHover20z(){
   edgeTrimHover20z_.reset();edgeTrimPosition20z_.reset();
   edgeTrimGeneration20z_=std::numeric_limits<uint64_t>::max();
+  edgeTrimViewportTransform20z_=QTransform();
   if(edgeTrimPreview20z_){
    scene_.removeItem(edgeTrimPreview20z_);
    delete edgeTrimPreview20z_;edgeTrimPreview20z_=nullptr;
@@ -2014,6 +2016,7 @@ public:
   return tool==Tool::EdgeTrim&&!nativeMode_&&!busy()&&
          edgeTrimHover20z_.has_value()&&edgeTrimPreview20z_!=nullptr&&
          edgeTrimGeneration20z_==editor.generation&&
+         edgeTrimViewportTransform20z_==viewportTransform()&&
          edgeTrimPosition20z_&&
          (*edgeTrimPosition20z_-at).manhattanLength()<=1;
  }
@@ -2046,6 +2049,7 @@ public:
   edgeTrimPreview20z_->setAcceptedMouseButtons(Qt::NoButton);
   edgeTrimHover20z_=*chosen;edgeTrimPosition20z_=at;
   edgeTrimGeneration20z_=editor.generation;
+  edgeTrimViewportTransform20z_=viewportTransform();
   viewport()->setToolTip("Entre nós: a aresta CIANO entre 2 nós será removida. Ctrl+Z desfaz.");
   viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
  }
