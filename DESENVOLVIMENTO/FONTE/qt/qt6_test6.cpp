@@ -7028,9 +7028,59 @@ static QJsonObject editTools197Test(const QString& directory){
  clickScene(shapes,{154,90});
  check(sv.editor.state().doc.contours.empty()&&sv.editor.state().objects.count(rectId)==0,
        "Retangulo isolado nao excluido");
+ // 20z GUI: independent single edge cutter, no intersections needed,
+ // cyan preview, one Undo, and contextual Objects inspector.
+ LabWindow edgeWindow(Document{});
+ edgeWindow.show();QApplication::processEvents();
+ auto& ev=edgeWindow.view;
+ ev.setTransform(QTransform::fromScale(8.,8.));
+ const int edgeObject=ev.editor.addContour(
+    {{100,100},{120,100},{140,100},{160,100}},false);
+ ev.rebuild();ev.centerOn(QPointF(130,100));QApplication::processEvents();
+ auto* panelSummary=edgeWindow.findChild<QLabel*>("objects_selection_summary_20z");
+ auto* panelCut=edgeWindow.findChild<QPushButton*>("objects_edge_trim_20z");
+ auto* panelAlign=edgeWindow.findChild<QGroupBox*>("objects_alignment_group_20z");
+ check(panelSummary&&panelCut&&panelAlign,"20z: contextual Objects inspector absent");
+ check(!panelAlign->isVisible(),"20z: alignment shown with no selection");
+ panelCut->click();
+ check(ev.tool==QtEditorLab::Tool::EdgeTrim,
+       "20z: Objects panel did not activate between-nodes cutter");
+ const QPoint edgePoint=ev.mapFromScene({130,100});
+ QTest::mouseMove(ev.viewport(),edgePoint);QApplication::processEvents();
+ if(!ev.edgeTrimPreviewVisible20z()){
+  const QPointF local(edgePoint),global(ev.viewport()->mapToGlobal(edgePoint));
+  QMouseEvent move(QEvent::MouseMove,local,global,
+                   Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+  QApplication::sendEvent(ev.viewport(),&move);QApplication::processEvents();
+ }
+ check(ev.edgeTrimPreviewVisible20z()&&ev.edgeTrimCurrent20z(edgePoint),
+       "20z: hover did not highlight the exact edge");
+ const Document edgeOriginal=ev.editor.state().doc;
+ const size_t edgeUndo=ev.editor.undoCount();
+ QTest::mouseClick(ev.viewport(),Qt::LeftButton,Qt::NoModifier,edgePoint);
+ QApplication::processEvents();
+ check(ev.editor.state().doc.contours.size()==2&&
+       ev.editor.undoCount()==edgeUndo+1,
+       "20z: mouse cut did not split one edge in one Undo");
+ const Contour* edgeLeft=get(ev.editor.state().doc,{edgeObject,0});
+ check(edgeLeft&&edgeLeft->nodes.size()==2,
+       "20z: wrong side was removed by mouse");
+ edgeWindow.refresh();
+ check(panelSummary->text().contains("Objeto #"),
+       "20z: Objects summary did not follow the active selection");
+ check(!panelAlign->isVisible(),
+       "20z: one selected object incorrectly enabled alignment");
+ ev.selected.clear();
+ for(const auto& [id,meta]:ev.editor.state().objects)ev.selected.insert(id);
+ edgeWindow.refresh();
+ check(panelAlign->isVisible(),
+       "20z: alignment not available after selecting two objects");
+ pressKey(edgeWindow,Qt::Key_Z,Qt::ControlModifier);
+ check(sameDoc(edgeOriginal,ev.editor.state().doc),
+       "20z: Ctrl+Z did not restore exact contour in GUI");
  w.grab().save(directory+"/TESTE_19_7_FERRAMENTAS.png");
  return {{"status","PASS"},{"selection_esc",true},{"selection_v",true},
-   {"scissors_k",true},{"scissors_mouse",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"scissors_isolated_circle",true},{"scissors_isolated_rectangle",true},{"undo_scissors",true},
+   {"scissors_k",true},{"scissors_mouse",true},{"edge_between_nodes_20z",true},{"objects_inspector_context_20z",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"scissors_isolated_circle",true},{"scissors_isolated_rectangle",true},{"undo_scissors",true},
    {"hover_delivery",usedViewportEventFallback?"viewport_synthetic_mouse_move":"qtest_mouse_move"},
    {"hardware_hover_verified",false},
    {"ctrl_r_rectangle",true},{"ctrl_e_ellipse",true},{"shift_square_circle",true},{"create_layer_by_palette",true},
