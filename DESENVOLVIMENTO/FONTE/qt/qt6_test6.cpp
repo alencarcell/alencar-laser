@@ -1944,6 +1944,13 @@ public:
  bool scissorHoverReceivedAt(QPoint expected)const{
   return scissorLastHoverPosition_&&*scissorLastHoverPosition_==expected;
  }
+ // 20y: preserve independent contours on normal cuts. Joining requires
+ // an explicit Alt+click; Ctrl overrides it. Shift remains available for
+ // a future keep-removed-segment mode without conflicting with joining.
+ static bool scissorJoinRequested20y(Qt::KeyboardModifiers modifiers){
+  return modifiers.testFlag(Qt::AltModifier)&&
+         !modifiers.testFlag(Qt::ControlModifier);
+ }
  // 20w: commit the exact safe interval that was visibly highlighted
  // when the pointer has not moved. Never accept stale scene geometry.
  bool scissorDisplayedSpanIsCurrentAt(QPoint at)const{
@@ -2014,7 +2021,7 @@ public:
      scissorPreview_=scene_.addPath(preview,pen);
      scissorPreview_->setZValue(45);
      scissorPreview_->setAcceptedMouseButtons(Qt::NoButton);
-     viewport()->setToolTip("Tesoura: PREVIA CIANO indica aresta Bezier removivel; laranja indica somente selecao. Ctrl+Z desfaz.");
+     viewport()->setToolTip("Tesoura: CIANO indica aresta Bezier removivel. LARANJA e selecao; caminhos independentes permanecem separados.");
      viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
      return;
     }
@@ -2050,7 +2057,7 @@ public:
      std::abs(scissorHover_->to-next->to)<1e-8)return;
   clearScissorHover();
   scissorHover_=std::move(next);
-  viewport()->setToolTip("Tesoura: PREVIA CIANO indica o trecho removivel; laranja e apenas selecao. Ctrl+clique desativa uniao; Ctrl+Z desfaz.");
+  viewport()->setToolTip("Tesoura: CIANO e o trecho cortavel; LARANJA e selecao. Clique corta sem unir; Alt+clique solicita uniao; Ctrl+Z desfaz.");
   QPainterPath colored;
   colored.moveTo(toQt(scissorHover_->preview.front()));
   for(size_t i=1;i<scissorHover_->preview.size();i++)
@@ -2508,9 +2515,10 @@ void mousePressEvent(QMouseEvent* e)override{
    try{
     const ScissorSpan cutting=*scissorHover_;
     clearScissorHover();
-    // LightBurn-style modifier: Ctrl suppresses automatic endpoint joining.
-    // Geometry joining is conservative and disabled for native Bezier mode.
-    const bool joinAllowed=!e->modifiers().testFlag(Qt::ControlModifier);
+    // 20y: normal click only trims the selected contour. No implicit
+    // welding with independently drawn objects; Alt explicitly requests
+    // the 20v conservative join, while Ctrl suppresses it.
+    const bool joinAllowed=scissorJoinRequested20y(e->modifiers());
     const int obj=editor.removeScissorSpan(cutting,joinAllowed);
     selected.clear();rebuild();if(obj>0)activate({obj,0});
     if(diagnosticEvent)diagnosticEvent("scissor_continuous_span_removed",1);
@@ -6777,6 +6785,11 @@ static QJsonObject editTools197Test(const QString& directory){
  check(v.viewport()->cursor().shape()!=Qt::ArrowCursor,"cursor nao mudou sobre trecho valido");
  check(v.scissorPreviewColor20x()==QColor("#22D3EE"),
        "20x: preview de corte deve ser ciano, nunca laranja de selecao");
+ check(!v.scissorJoinRequested20y(Qt::NoModifier)&&
+       !v.scissorJoinRequested20y(Qt::ControlModifier)&&
+       !v.scissorJoinRequested20y(Qt::AltModifier|Qt::ControlModifier)&&
+       v.scissorJoinRequested20y(Qt::AltModifier),
+       "20y: uniao deve exigir Alt explicito, Ctrl impede uniao");
 
  check(v.scissorDisplayedSpanIsCurrentAt(hoverPoint),
        "20w: destaque laranja nao reutilizavel no mesmo ponto");

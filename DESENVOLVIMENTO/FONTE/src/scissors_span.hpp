@@ -178,6 +178,38 @@ class ScissorSpanPlanner {
      }
      if(otherInterior&&targetOpenTip)continue;
     }
+    // 20y: After trimming, surviving OPEN paths have endpoints at their
+    // previous intersections. That endpoint is a legitimate boundary for
+    // trimming a DIFFERENT path, even though the two paths now form a T.
+    // The point must be an actual terminal node, not an interior vertex,
+    // a near miss, or an overlapping/collinear edge (handled above).
+    const bool targetOpenEnd=!c.closed&&
+      ((i==0&&x<1e-7)||(i==edges-1&&x>1.-1e-7));
+    if(s.key!=c.key&&targetOpenEnd){
+     // This target already ends at that contact; its start/end is
+     // implicitly a cutting boundary in candidate(). Do not create
+     // an artificial unsafe interval extending inside the remaining path.
+     continue;
+    }
+    if(s.key!=c.key&&x>1e-7&&x<1.-1e-7&&
+       (y<1e-7||y>1.-1e-7)){
+     const auto it=contourLookup_.find(s.key);
+     if(it!=contourLookup_.end()){
+      const auto& foreign=it->second;
+      const int foreignEdges=int(foreign.nodes.size())-(foreign.closed?0:1);
+      const bool terminal=!foreign.closed&&
+       ((s.idx==0&&y<1e-7)||
+        (s.idx==foreignEdges-1&&y>1.-1e-7));
+      const Pt terminalPoint=y<1e-7?s.a:s.b;
+      const Pt onTarget=a+r*std::clamp(x,0.,1.);
+      if(terminal&&dist(terminalPoint,onTarget)<=1e-8){
+       // A free endpoint touching the interior of the target is a
+       // topological limit, not a tangent that blocks the entire span.
+       out.crossings.push_back(double(i)+x);
+       continue;
+      }
+     }
+    }
     // The target vertex remains unsafe. A *foreign* inner vertex is
     // allowed only with a strict sign-changing (transverse) crossing.
     if(s.key!=c.key&&x>1e-7&&x<1.-1e-7&&
