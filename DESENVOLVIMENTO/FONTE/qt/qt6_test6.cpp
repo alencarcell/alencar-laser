@@ -9120,7 +9120,26 @@ static QJsonObject duplicateBatch20cRegression(){
        "Undo nao restaurou geometria");
  check(editor.redo()&&editor.state().doc.contours.size()==initial+3,
        "Redo nao restaurou copias");
- return {{"status","PASS"},{"multi_duplicate",true},
+ // Exact size observed in the 10 Nov user diagnostic. Build once, not
+ // 2300 individual Undo snapshots. Both original and duplicate stay intact.
+ Document bulk;bulk.nextId=1;
+ std::vector<int> all;all.reserve(2300);bulk.contours.reserve(2300);
+ for(int id=1;id<=2300;++id){
+  Contour c;c.key={id,0};c.closed=true;
+  const double x=double(id%100)*5.,y=double(id/100)*5.;
+  for(Pt p:std::vector<Pt>{{x,y},{x+3.,y},{x+3.,y+3.},{x,y+3.}})
+   c.nodes.push_back({bulk.nextId++,p});
+  bulk.contours.push_back(std::move(c));all.push_back(id);
+ }
+ Editor large(std::move(bulk));
+ const auto bigCopies=large.duplicateSelection(all,{3,3});
+ check(bigCopies.size()==2300&&large.state().doc.contours.size()==4600,
+       "Duplicacao de 2300 objetos falhou");
+ check(large.undo()&&large.state().doc.contours.size()==2300,
+       "Undo de 2300 objetos falhou");
+ check(large.redo()&&large.state().doc.contours.size()==4600,
+       "Redo de 2300 objetos falhou");
+ return {{"status","PASS"},{"multi_duplicate",true},{"large_batch_2300",true},
          {"undo_redo",true},{"machine_commands_sent",false}};
 }
 static QJsonObject gearGenerator199Test(){
