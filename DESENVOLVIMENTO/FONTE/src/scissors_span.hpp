@@ -107,12 +107,12 @@ class ScissorSpanPlanner {
   // 20x: a corner on the TARGET may also be a true crossing, provided
   // the two incident target edges lie strictly on opposite sides of the
   // foreign edge's supporting line. A tangent/touch never qualifies.
-  auto transverseTargetVertex=[&](int i,double x,const Segment& other,Pt a,Pt b){
+  auto transverseTargetVertex=[&](int i,double x,const Segment& other){
    if(x>1e-7&&x<1.-1e-7)return false;
    const int n=int(c.nodes.size());
    int at=(x<1e-7?i:i+1);
    if(c.closed)at%=n;
-   if(at<=0&&!c.closed||at>=n-1&&!c.closed)return false;
+   if(!c.closed&&(at<=0||at>=n-1))return false;
    if(at<0||at>=n)return false;
    const Pt p=c.nodes[size_t(at)].p;
    const Pt prev=c.nodes[size_t((at-1+n)%n)].p;
@@ -187,7 +187,7 @@ class ScissorSpanPlanner {
     }
     if(s.key!=c.key&&(x<1e-7||x>1.-1e-7)&&
        y>1e-7&&y<1.-1e-7&&
-       transverseTargetVertex(i,x,s,a,b)){
+       transverseTargetVertex(i,x,s)){
      out.crossings.push_back(double(i)+std::clamp(x,0.,1.));
      continue;
     }
