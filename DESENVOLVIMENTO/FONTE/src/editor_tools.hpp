@@ -701,6 +701,64 @@ public:
    auto meta=s.objects.at(original);meta.group=0;s.objects[obj]=meta;
   });return obj;
  }
+ // Atomic group-aware duplication. Source is never modified.
+ std::vector<int> duplicateSelection(std::vector<int> requested,Pt delta){
+  if(requested.empty()||!std::isfinite(delta.x)||!std::isfinite(delta.y))
+   throw std::runtime_error("invalid duplicate selection");
+  std::set<int> ids(requested.begin(),requested.end()),groups;
+  for(int id:ids){
+   if(!editable(current,id))throw std::runtime_error("duplicate source missing or locked");
+   const int g=current.objects.at(id).group;if(g>0)groups.insert(g);
+  }
+  for(const auto& [id,meta]:current.objects)
+   if(meta.group>0&&groups.count(meta.group))ids.insert(id);
+  for(const auto& [root,text]:current.editableTexts){
+   bool touched=false;for(int id:text.members)if(ids.count(id))touched=true;
+   if(touched)ids.insert(text.members.begin(),text.members.end());
+  }
+  if(ids.size()>5000)throw std::runtime_error("too many objects to duplicate (5000 max)");
+  size_t nodes=0,contours=0;
+  for(const auto& c:current.doc.contours)if(ids.count(c.key.object)){
+   nodes+=c.nodes.size();++contours;
+   if(nodes>200000||contours>4000)throw std::runtime_error("duplicate geometry limit");
+  }
+  if(!contours)throw std::runtime_error("empty duplicate source");
+  const int first=nextObjectId(current.doc);
+  if(ids.size()>size_t(INT32_MAX-int64_t(first)+1))
+   throw std::runtime_error("object IDs exhausted");
+  std::vector<int> output;
+  change([&](EditorState& st){
+   std::map<int,int> remap,groupMap;
+   int next=first;
+   for(int id:ids){
+    if(!editable(st,id))throw std::runtime_error("locked duplicate member");
+    remap[id]=next++;output.push_back(remap[id]);
+    int g=st.objects.at(id).group;
+    if(g>0&&!groupMap.count(g))groupMap[g]=st.nextGroup++;
+   }
+   std::vector<Contour> copies;copies.reserve(contours);
+   for(const auto& c:st.doc.contours)if(remap.count(c.key.object)){
+    Contour copy=c;copy.key.object=remap.at(c.key.object);
+    for(auto& n:copy.nodes){n.id=st.doc.nextId++;n.p=n.p+delta;}
+    copies.push_back(std::move(copy));
+   }
+   for(int id:ids){
+    Meta m=st.objects.at(id);
+    if(m.group>0)m.group=groupMap.at(m.group);
+    st.objects[remap.at(id)]=m;
+   }
+   for(const auto& [root,text]:current.editableTexts)if(remap.count(root)){
+    EditableText copy=text;copy.members.clear();
+    for(int id:text.members)copy.members.push_back(remap.at(id));
+    copy.anchor=copy.anchor+delta;
+    copy.sourceBoundsMin=copy.sourceBoundsMin+delta;
+    st.editableTexts[remap.at(root)]=std::move(copy);
+   }
+   st.doc.contours.insert(st.doc.contours.end(),
+     std::make_move_iterator(copies.begin()),std::make_move_iterator(copies.end()));
+  });
+  return output;
+ }
  // Align in a single Undo step. Reference is the last selected object.
  // Modes: left=0, right=1, top=2, bottom=3, center-X=4,
  // center-Y=5, both centers=6. Groups are moved as an indivisible unit.

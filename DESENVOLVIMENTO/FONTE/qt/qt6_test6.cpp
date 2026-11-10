@@ -25,6 +25,7 @@
 #include "render_chunks.hpp"
 #include "rotary_dialog_19_9.hpp"
 #include "gear_dialog_19_9.hpp"
+#include "escapement_study_dialog_20s.hpp"
 #include "gear_compound_dialog_19_9.hpp"
 #include "mechanism_studio_dialog_19_9.hpp"
 #include <QApplication>
@@ -2920,7 +2921,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   onlySide->setEnabled(editSide.has_value());
   onlyNode->setToolTip("Exclui apenas o nó sob o mouse; os nós vizinhos continuam conectados. Ctrl+Z desfaz.");
   onlySide->setToolTip("Remove apenas a aresta clicada e abre o contorno fechado, sem afetar outras formas. Ctrl+Z desfaz.");
-  duplicate->setEnabled(selected.size()==1);
+  duplicate->setEnabled(!selected.empty());
   group->setEnabled(selected.size()>=2);
   bool grouped=false;
   for(int id:selected){
@@ -2969,9 +2970,10 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    else if(picked==remove)deleteSelectedShapes();
    else if(picked==undo)history(false);
    else if(picked==redo)history(true);
-   else if(picked==duplicate&&selected.size()==1){
-    const int id=editor.duplicate(*selected.begin(),{3,3});
-    selected.clear();active_.reset();rebuild();activate({id,0});
+   else if(picked==duplicate&&!selected.empty()){
+    const auto copies=editor.duplicateSelection({selected.begin(),selected.end()},{3,3});
+    selected=std::set<int>(copies.begin(),copies.end());active_.reset();rebuild();
+    if(!copies.empty())activate({copies.front(),0},false);
    }else if(picked==group&&selected.size()>=2){
     editor.group(std::vector<int>(selected.begin(),selected.end()));rebuild();
    }else if((picked==ungroup||picked==ungroupScissors)&&grouped){
@@ -3528,9 +3530,40 @@ public:
   view.activate({inserted.front(),0});recoveryPolicy_.edited();
   captureEvent("gear_generator_created",int(inserted.size()));
   refresh();
-  status->setText(QString("Engrenagem de %1 dentes criada (%2 contornos, um Undo). "
-    "Confira espessura do material, folga e kerf antes de cortar.")
-    .arg(spec.teeth).arg(inserted.size()));
+  const QString profileNote=spec.profile==alaser::gear::ToothProfile::Involute
+    ?"Confira espessura, folga e kerf antes de cortar."
+    :"Perfil angular/serrilhado decorativo: engrenamento mecânico NÃO validado.";
+  status->setText(QString("Engrenagem de %1 dentes criada (%2 contornos, um Undo). %3")
+    .arg(spec.teeth).arg(inserted.size()).arg(profileNote));
+ }
+
+ // Create only cutting wheel contours; guide arm, pivot and pallet arc
+ // are displayed in the preview, NEVER included in document/export.
+ void insertEscapeWheelStudy(const alaser::escape20s::Settings& spec,
+                             alaser::escape20s::Pt center){
+  check(!view.busy(),"Conclua o gesto antes de gerar roda de escape.");
+  check(std::isfinite(center.x)&&std::isfinite(center.y),"Centro invalido.");
+  const auto model=alaser::escape20s::generate(spec);
+  const int layerId=layers->currentData().toInt();
+  const auto& layer=view.editor.state().layers.at(layerId);
+  check(layer.visible&&!layer.locked,"Camada deve estar visivel e desbloqueada");
+  auto toEditor=[&](const std::vector<alaser::escape20s::Pt>& source){
+   std::vector<Pt> result;result.reserve(source.size());
+   for(const auto& p:source)result.push_back({center.x+p.x,center.y-p.y});
+   return result;
+  };
+  std::vector<std::vector<Pt>> contours;
+  contours.push_back(toEditor(model.wheel));
+  if(!model.axleHole.empty())contours.push_back(toEditor(model.axleHole));
+  const auto ids=view.editor.addContours(std::move(contours),true,layerId,true);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  view.activate({ids.front(),0});recoveryPolicy_.edited();
+  captureEvent("escape_wheel_study_created",int(ids.size()));
+  refresh();
+  status->setText(QString(
+   "Roda de escape %1 dentes (%2 contornos, um Undo). "
+   "Pivo e guias NAO exportados. Contato e escapamento NAO homologados.")
+   .arg(spec.teeth).arg(ids.size()));
  }
 
  // Creates nominal editable outlines only. No output/G-code/hardware.
@@ -4488,9 +4521,10 @@ public:
 inspector->addSpacing(10);inspector->addWidget(titleLabel("TRANSFORMAÇÕES — POLILINHAS"));
 addVertical(inspector,"duplicate_obj","Duplicar (+3 mm)",[this]{
  if(bezierToolActive_)throw std::runtime_error("Duplicar: selecione antes a ferramenta Selecionar (polilinhas).");
- const auto ids=selection();check(ids.size()==1,"Duplicar: selecione um objeto por vez.");
- int newId=view.editor.duplicate(ids.front(),{3,3});
- view.selected.clear();view.rebuild();view.activate({newId,0});
+ const auto ids=selection();check(!ids.empty(),"Duplicar: selecione formas.");
+ const auto copies=view.editor.duplicateSelection(ids,{3,3});
+ view.selected=std::set<int>(copies.begin(),copies.end());view.rebuild();
+ if(!copies.empty())view.activate({copies.front(),0},false);
 });
 addVertical(inspector,"mirror_horiz","Espelhar horizontal ↔",[this]{
  if(bezierToolActive_)throw std::runtime_error("Espelhar: somente polilinhas nesta beta.");
@@ -5116,6 +5150,21 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    view.setFocus();
   });
 
+  auto* escapeAction=gearsMenu->addAction("Roda de escape — estudo geométrico (OFFLINE)...");
+  escapeAction->setObjectName("generate_escape_wheel_study_20s");
+  escapeAction->setIcon(alaser::toolGlyph("gear_simple"));
+  escapeAction->setToolTip("Roda especial de referência para escapamento: SOMENTE roda e furo no projeto. Pivo e palhetas exibidos como guias.");
+  connect(escapeAction,&QAction::triggered,this,[this]{
+   if(view.busy()){status->setText("Conclua o gesto antes de gerar a roda de escape.");return;}
+   alaser::escape20s::Dialog dlg(workspaceCfg_.drawingWidth,
+                                  workspaceCfg_.drawingHeight,this);
+   if(dlg.exec()!=QDialog::Accepted){view.setFocus();return;}
+   const auto params=dlg.parameters();
+   const auto center=dlg.centerMm();
+   run([this,params,center]{insertEscapeWheelStudy(params,center);});
+   view.setFocus();
+  });
+
   auto* pairAction=gearsMenu->addAction("Par de engrenagens (nominal / offline)...");
   pairAction->setObjectName("generate_gear_pair_offline_19_9");
   pairAction->setIcon(alaser::toolGlyph("gear_pair"));
@@ -5227,10 +5276,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     layerPalette_.push_back(b);swatches->addWidget(b);
   }
   swatches->addStretch();palScroll->setWidget(palBody);paletteOuter->addWidget(palScroll,1);
-  auto* sendToLayer=new QPushButton("→ Enviar seleção");sendToLayer->setObjectName("quick_move_layer");
-  sendToLayer->setToolTip("Selecionar uma ou mais formas, clicar na camada e enviar (Ctrl+L)");
-  sendToLayer->setFocusPolicy(Qt::NoFocus);paletteOuter->addWidget(sendToLayer);
-  connect(sendToLayer,&QPushButton::clicked,this,[this]{buttons.at("move_layer")->click();});
+  // A paleta ja transfere a selecao no clique (e ativa a camada quando
+  // vazia); nao duplicar a acao com um botao que falha sem selecao.
+  // Manter comando interno move_layer/Ctrl+L para compatibilidade com testes
+  // antigos e transferencia de curvas Bezier nativas.
   layout->insertWidget(layout->count()-1,paletteFrame);
   connect(layers,&QComboBox::currentIndexChanged,this,[this]{
     if(refreshing)return;
@@ -5625,8 +5674,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }else selectionContextSummary_->setText(prefix+" · medidas indisponíveis");
   selectionContextGroup_->setEnabled(editableSelection&&groupIds.size()>=2);
   selectionContextUngroup_->setEnabled(editableSelection&&groupedObject);
-  selectionContextDuplicate_->setEnabled(editableSelection&&!textOnly&&
-          view.selected.size()==1&&!groupedObject);
+  selectionContextDuplicate_->setEnabled(editableSelection&&!view.selected.empty());
   selectionContextDelete_->setEnabled(nativeSelected||editableSelection);
   if(selectionContextTextEdit_){
    selectionContextTextEdit_->setVisible(textOnly);
@@ -9051,6 +9099,49 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
          {"dpi_2x",true},{"normal_active_disabled_states",true},
          {"hardware_commands_sent",false}};
 }
+static QJsonObject duplicateBatch20cRegression(){
+ Editor editor(Document{});
+ const int a=editor.rectangle({10,10},20,10);
+ const int b=editor.rectangle({50,10},20,10);
+ const int c=editor.rectangle({90,10},20,10);
+ editor.group({a,b});
+ const auto initial=editor.state().doc.contours.size();
+ const auto undoBefore=editor.undoCount();
+ const auto copies=editor.duplicateSelection({a,c},{3,3});
+ check(copies.size()==3,"Selecao em grupo nao foi expandida");
+ check(editor.state().doc.contours.size()==initial+3,
+       "Duplicacao perdeu contornos");
+ check(editor.undoCount()==undoBefore+1,"Duplicacao gerou multiplos Undo");
+ const auto g1=editor.state().objects.at(copies[0]).group;
+ const auto g2=editor.state().objects.at(copies[1]).group;
+ check(g1>0&&g1==g2&&g1!=editor.state().objects.at(a).group,
+       "Grupos duplicados nao sao independentes");
+ check(editor.undo()&&editor.state().doc.contours.size()==initial,
+       "Undo nao restaurou geometria");
+ check(editor.redo()&&editor.state().doc.contours.size()==initial+3,
+       "Redo nao restaurou copias");
+ // Exact size observed in the 10 Nov user diagnostic. Build once, not
+ // 2300 individual Undo snapshots. Both original and duplicate stay intact.
+ Document bulk;bulk.nextId=1;
+ std::vector<int> all;all.reserve(2300);bulk.contours.reserve(2300);
+ for(int id=1;id<=2300;++id){
+  Contour c;c.key={id,0};c.closed=true;
+  const double x=double(id%100)*5.,y=double(id/100)*5.;
+  for(Pt p:std::vector<Pt>{{x,y},{x+3.,y},{x+3.,y+3.},{x,y+3.}})
+   c.nodes.push_back({bulk.nextId++,p});
+  bulk.contours.push_back(std::move(c));all.push_back(id);
+ }
+ Editor large(std::move(bulk));
+ const auto bigCopies=large.duplicateSelection(all,{3,3});
+ check(bigCopies.size()==2300&&large.state().doc.contours.size()==4600,
+       "Duplicacao de 2300 objetos falhou");
+ check(large.undo()&&large.state().doc.contours.size()==2300,
+       "Undo de 2300 objetos falhou");
+ check(large.redo()&&large.state().doc.contours.size()==4600,
+       "Redo de 2300 objetos falhou");
+ return {{"status","PASS"},{"multi_duplicate",true},{"large_batch_2300",true},
+         {"undo_redo",true},{"machine_commands_sent",false}};
+}
 static QJsonObject gearGenerator199Test(){
  // No device, connection, G-code or physical action is involved.
  alaser::gear::GearDialog dialog(400.,400.);
@@ -9082,6 +9173,18 @@ static QJsonObject gearGenerator199Test(){
  previewEnabled->setChecked(true);
  check(!preview->isHidden(),"Reativar previa nao restaurou componente");
  const auto shape=alaser::gear::generate(dialog.parameters());
+ // Regressions: angular and serrated profiles must remain available.
+ auto* profile=dialog.findChild<QComboBox*>("gear_profile_20q");
+ check(profile&&profile->count()==3,"Perfis angular/serrilhado desapareceram");
+ profile->setCurrentIndex(1);
+ const auto angular=alaser::gear::generate(dialog.parameters());
+ check(!angular.outer.empty()&&angular.outer.size()!=shape.outer.size(),
+       "Perfil angular nao foi gerado");
+ profile->setCurrentIndex(2);
+ const auto saw=alaser::gear::generate(dialog.parameters());
+ check(!saw.outer.empty()&&saw.outer.size()==angular.outer.size(),
+       "Perfil serrilhado nao foi gerado");
+ profile->setCurrentIndex(0);
  check(!shape.outer.empty()&&shape.bore.size()==96,"Geometria de engrenagem incorreta");
  LabWindow w(Document{});w.resize(1100,750);w.show();QApplication::processEvents();
  check(w.findChild<QAction*>("generate_gear_offline_19_9")!=nullptr,
@@ -10037,6 +10140,17 @@ int main(int argc,char** argv){
   QFile file(out+"/RESULTADO_ICONES_19_9.json");
   if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
+ if(mode=="--duplicate-batch-20c-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=duplicateBatch20cRegression();}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
+  }
+  QFile file(out+"/RESULTADO_DUPLICACAO_LOTE_20C.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
  }
  if(mode=="--gear-generator-19-9-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
