@@ -1936,6 +1936,10 @@ public:
  QGraphicsPathItem* pathItem(Key k){return objects_.at(k);}
  std::optional<Key> active()const{return active_;}
  std::optional<ScissorSpan> scissorPreview()const{return scissorHover_;}
+ // Display-only test contract: selection is orange, cut preview cyan.
+ QColor scissorPreviewColor20x()const{
+  return scissorPreview_?scissorPreview_->pen().color():QColor();
+ }
  uint64_t scissorHoverEventCount()const{return scissorHoverEvents_;}
  bool scissorHoverReceivedAt(QPoint expected)const{
   return scissorLastHoverPosition_&&*scissorLastHoverPosition_==expected;
@@ -2005,12 +2009,12 @@ public:
       preview.cubicTo(toQt(edge.p1),toQt(edge.p2),toQt(edge.p3));
      else preview.lineTo(toQt(edge.p3));
      clearScissorHover();
-     QPen pen(QColor(255,160,37),3);pen.setCosmetic(true);
+     QPen pen(QColor("#22D3EE"),3);pen.setCosmetic(true);
      pen.setCapStyle(Qt::RoundCap);pen.setJoinStyle(Qt::RoundJoin);
      scissorPreview_=scene_.addPath(preview,pen);
      scissorPreview_->setZValue(45);
      scissorPreview_->setAcceptedMouseButtons(Qt::NoButton);
-     viewport()->setToolTip("Tesoura: aresta Bezier inteira em laranja sera removida. Ctrl+Z desfaz.");
+     viewport()->setToolTip("Tesoura: PREVIA CIANO indica aresta Bezier removivel; laranja indica somente selecao. Ctrl+Z desfaz.");
      viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
      return;
     }
@@ -2038,7 +2042,7 @@ public:
   if(!next){
    if(scissorHover_||scissorPreview_)clearScissorHover();
    viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
-   viewport()->setToolTip("Tesoura ativa: sem intervalo seguro neste ponto; verifique cruzamentos.");
+   viewport()->setToolTip("Tesoura: SEM PREVIA CIANO = corte indisponivel. Laranja e selecao; verifique cruzamentos.");
    return;
   }
   if(scissorHover_&&scissorHover_->key==next->key&&
@@ -2046,12 +2050,12 @@ public:
      std::abs(scissorHover_->to-next->to)<1e-8)return;
   clearScissorHover();
   scissorHover_=std::move(next);
-  viewport()->setToolTip("Tesoura: todo o trecho laranja sera removido. Ctrl+Z desfaz.");
+  viewport()->setToolTip("Tesoura: PREVIA CIANO indica o trecho removivel; laranja e apenas selecao. Ctrl+clique desativa uniao; Ctrl+Z desfaz.");
   QPainterPath colored;
   colored.moveTo(toQt(scissorHover_->preview.front()));
   for(size_t i=1;i<scissorHover_->preview.size();i++)
    colored.lineTo(toQt(scissorHover_->preview[i]));
-  QPen highlight(QColor(255,160,37),3);
+  QPen highlight(QColor("#22D3EE"),3);
   highlight.setCosmetic(true);
   highlight.setCapStyle(Qt::RoundCap);
   highlight.setJoinStyle(Qt::RoundJoin);
@@ -2482,11 +2486,11 @@ void mousePressEvent(QMouseEvent* e)override{
       if(kind=="collinear_overlap")
        reason="Tesoura: linhas sobrepostas. Separe caminhos ou remova duplicidades antes de cortar.";
       else if(kind=="vertex_or_tangent")
-       reason="Tesoura: contato em vertice ou tangencia. Nenhum trecho seguro foi identificado.";
+       reason="Tesoura: contato em vertice ou tangencia; SEM PREVIA CIANO, corte bloqueado. Laranja indica selecao.";
       else if(kind=="degenerate_edge")
        reason="Tesoura: aresta sem comprimento. Corrija nos coincidentes.";
       else if(kind=="single_closed_intersection")
-       reason="Tesoura: apenas uma intersecao no contorno fechado; faltam limites seguros.";
+       reason="Tesoura: contorno fechado tem so uma intersecao; SEM PREVIA CIANO, corte bloqueado.";
       else if(kind=="boundary_proximity")
        reason="Tesoura: cursor muito proximo do cruzamento. Clique no meio do trecho.";
       else reason="Tesoura: intervalo inseguro ou indefinido; contorno preservado.";
@@ -6771,6 +6775,9 @@ static QJsonObject editTools197Test(const QString& directory){
   throw std::runtime_error("hover nao iluminou arco completo: "+v.scissorHoverDiagnostics(hoverPoint));
  }
  check(v.viewport()->cursor().shape()!=Qt::ArrowCursor,"cursor nao mudou sobre trecho valido");
+ check(v.scissorPreviewColor20x()==QColor("#22D3EE"),
+       "20x: preview de corte deve ser ciano, nunca laranja de selecao");
+
  check(v.scissorDisplayedSpanIsCurrentAt(hoverPoint),
        "20w: destaque laranja nao reutilizavel no mesmo ponto");
  check(!v.scissorDisplayedSpanIsCurrentAt(clearPoint),
@@ -6784,8 +6791,10 @@ static QJsonObject editTools197Test(const QString& directory){
   throw std::runtime_error("Tesoura: destaque nao foi removido ou cursor da ferramenta sumiu: "+
                            v.scissorHoverDiagnostics(clearPoint));
  }
- check(v.viewport()->toolTip().contains("sem intervalo seguro"),
-       "Tesoura fora de contorno nao informa que o corte esta indisponivel");
+ check(!v.scissorPreviewColor20x().isValid(),
+       "20x: preview colorida permaneceu apos sair do contorno");
+ check(v.viewport()->toolTip().contains("SEM PREVIA CIANO"),
+       "20x: ausencia de preview precisa ser distinta da selecao laranja");
  const size_t old=v.editor.undoCount();
  clickScene(w,{110,100});
  check(v.editor.undoCount()==old+1,"scissor mouse click did not create history");
