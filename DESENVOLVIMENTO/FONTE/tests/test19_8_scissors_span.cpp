@@ -100,6 +100,26 @@ int main(){
   auto ambiguous=planner.candidate(unsafeInterior.state().doc,
                      {{base,0},0,0,{2.5,0}});
   require(!ambiguous,"cruzamento no vertice interior foi excluido sem seguranca");
+  require(planner.lastRejectionReason()=="vertex_or_tangent",
+          "intersecao em vertice nao recebeu motivo seguro");
+  // Overlapping collinear segments are not unique trim boundaries.
+  Editor overlap(Document{});
+  const int longLine=overlap.line({0,0},{10,0});
+  overlap.line({3,0},{7,0});
+  planner.reset(overlap.state().doc);
+  auto overlapHit=planner.candidate(overlap.state().doc,
+                           {{longLine,0},0,0,{5,0}});
+  require(!overlapHit&&planner.lastRejectionReason()=="collinear_overlap",
+          "sobreposicao colinear foi recortada ou nao classificada");
+  // No intersections: the LightBurn-style whole-shape preview is retained.
+  Editor isolatedCheck(Document{});
+  const int isolatedId=isolatedCheck.rectangle({0,0},10,10);
+  planner.reset(isolatedCheck.state().doc);
+  auto whole=planner.candidate(isolatedCheck.state().doc,
+                     {{isolatedId,0},0,0,{5,0}});
+  require(bool(whole)&&planner.lastRejectionReason()=="none",
+          "retangulo isolado deixou de oferecer recorte integral");
+
 
   // Reproducao numerica da geometria enviada pelo operador: objeto 575.
   // O caminho aberto tem uma ponta acima do triangulo e termina com um

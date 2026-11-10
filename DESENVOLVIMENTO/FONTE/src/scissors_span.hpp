@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 
 namespace alaser {
@@ -60,10 +61,16 @@ inline Contour scissorLogicalContour(const Contour& contour){
  return result;
 }
 class ScissorSpanPlanner {
- struct Boundaries {std::vector<double> crossings;std::vector<std::pair<double,double>> unsafe;};
+ struct Boundaries {
+  std::vector<double> crossings;
+  std::vector<std::pair<double,double>> unsafe;
+  // Index-aligned classification for safe refusal; no geometry is altered.
+  std::vector<const char*> unsafeKinds;
+ };
  std::vector<Segment> segments_;
  std::unique_ptr<SegmentBVH> index_;
  std::map<Key,Boundaries> cache_;
+ std::string lastRejection_="none";
  Boundaries compute(const Contour& c)const{
   Boundaries out;
   if(!index_||c.nodes.size()<2)return out;
@@ -71,7 +78,10 @@ class ScissorSpanPlanner {
   for(int i=0;i<edges;i++){
    Pt a=c.nodes[size_t(i)].p,b=c.nodes[size_t(i+1)%c.nodes.size()].p;
    Pt r=b-a;const double rr=norm2(r);
-   if(rr<=1e-18){out.unsafe.push_back({double(i),double(i+1)});continue;}
+   if(rr<=1e-18){
+    out.unsafe.push_back({double(i),double(i+1)});
+    out.unsafeKinds.push_back("degenerate_edge");continue;
+   }
    const auto candidates=index_->candidateIdsBox(std::min(a.x,b.x),std::min(a.y,b.y),
                                                    std::max(a.x,b.x),std::max(a.y,b.y));
    for(int id:candidates){
@@ -94,6 +104,7 @@ class ScissorSpanPlanner {
       if(std::min(v0,v1)<1.-1e-8&&std::max(v0,v1)>1e-8){
        out.unsafe.push_back({i+std::max(0.,std::min(v0,v1)),
                              i+std::min(1.,std::max(v0,v1))});
+       out.unsafeKinds.push_back("collinear_overlap");
       }
      }
      continue;
@@ -121,7 +132,8 @@ class ScissorSpanPlanner {
     // estes casos ate haver classificacao topologica de ambos os lados.
     if(x<1e-7||x>1.-1e-7||y<1e-7||y>1.-1e-7){
      const double p=double(i)+std::clamp(x,0.,1.);
-     out.unsafe.push_back({p-1e-6,p+1e-6});continue;
+     out.unsafe.push_back({p-1e-6,p+1e-6});
+     out.unsafeKinds.push_back("vertex_or_tangent");continue;
     }
     out.crossings.push_back(double(i)+x);
    }
@@ -132,24 +144,26 @@ class ScissorSpanPlanner {
   return out;
  }
 public:
+ const std::string& lastRejectionReason()const noexcept{return lastRejection_;}
  void reset(const Document& d,const std::function<bool(Key)>& isVisible={}){
   segments_=alaser::segments(d);
   if(isVisible)segments_.erase(std::remove_if(segments_.begin(),segments_.end(),
     [&](const Segment& s){return !isVisible(s.key);}),segments_.end());
   index_=std::make_unique<SegmentBVH>(segments_);
-  cache_.clear();
+  cache_.clear();lastRejection_="none";
  }
  std::optional<ScissorSpan> candidate(const Document& d,const Hit& hit){
+  lastRejection_="none";
   const Contour* original=get(d,hit.key);
-  if(!original||original->nodes.size()<2)return {};
+  if(!original||original->nodes.size()<2){lastRejection_="missing_contour";return {};}
   // Tratar costura duplicada como anel fechado em arquivos ja existentes.
   Contour logical=scissorLogicalContour(*original);
   const Contour* c=&logical;
   const int m=int(c->nodes.size())-(c->closed?0:1);
-  if(hit.segment<0||hit.segment>=m)return {};
+  if(hit.segment<0||hit.segment>=m){lastRejection_="invalid_segment";return {};}
   const Pt a=c->nodes[size_t(hit.segment)].p,b=c->nodes[size_t(hit.segment+1)%c->nodes.size()].p;
   const Pt r=b-a;const double dd=norm2(r);
-  if(dd<1e-18)return {};
+  if(dd<1e-18){lastRejection_="degenerate_edge";return {};}
   const double t=std::clamp(((hit.projected-a).x*r.x+(hit.projected-a).y*r.y)/dd,0.,1.);
   const double pos=double(hit.segment)+t;
   auto it=cache_.find(hit.key);
@@ -158,16 +172,21 @@ public:
   // LightBurn Trim Shapes: sem nenhum cruzamento, a forma INTEIRA
   // (inclusive circulo/retangulo recem-criado) e o candidato a exclusao.
   // Exatamente um cruzamento no contorno fechado continua ambiguo.
-  if(c->closed&&bs.crossings.size()==1)return {};
+  if(c->closed&&bs.crossings.size()==1){
+   lastRejection_="single_closed_intersection";return {};
+  }
   if(bs.crossings.empty()){
    // Apos o primeiro corte, a extremidade do caminho aberto pode coincidir
    // exatamente com a linha usada como limite. Essa intersecao terminal
    // NAO deve impedir o recorte posterior do resto (caso real 29/10).
    // Manter bloqueios para sobreposicoes e tangencias no MEIO do caminho.
-   for(const auto& bad:bs.unsafe){
+   for(size_t k=0;k<bs.unsafe.size();++k){
+    const auto& bad=bs.unsafe[k];
     const bool onlyOpenEndpoint=!c->closed&&
       (bad.second<=1e-5||bad.first>=double(m)-1e-5);
-    if(!onlyOpenEndpoint)return {};
+    if(!onlyOpenEndpoint){
+     lastRejection_=bs.unsafeKinds.at(k);return {};
+    }
    }
    return ScissorSpan{hit.key,0.,double(m),c->closed,
                       spanPoints(*c,0.,double(m))};
@@ -185,22 +204,29 @@ public:
        next==edges.end()?edges.front()+m:*next);
    if(pos<lo)lo-=m;
   }else{
-   if(next==edges.begin()||next==edges.end())return {};
+   if(next==edges.begin()||next==edges.end()){
+    lastRejection_="no_interval";return {};
+   }
    lo=*(next-1);hi=*next;
   }
-  if(pos-lo<1e-7||hi-pos<1e-7||hi-lo<1e-7||hi-lo>m+1e-7)return {};
+  if(pos-lo<1e-7||hi-pos<1e-7||hi-lo<1e-7||hi-lo>m+1e-7){
+   lastRejection_="boundary_proximity";return {};
+  }
   // Bloqueia apenas spans que atravessam sobreposicoes/tangencias ambiguas,
   // sem inutilizar os outros arcos do mesmo objeto.
-  for(const auto& bad:bs.unsafe){
+  for(size_t k=0;k<bs.unsafe.size();++k){
+   const auto& bad=bs.unsafe[k];
    for(int shift=-1;shift<=1;shift++){
     const double offset=c->closed?double(shift*m):0.;
-    if(bad.second+offset>lo+1e-8&&bad.first+offset<hi-1e-8)return {};
+    if(bad.second+offset>lo+1e-8&&bad.first+offset<hi-1e-8){
+     lastRejection_=bs.unsafeKinds.at(k);return {};
+    }
     if(!c->closed)break;
    }
   }
   // Janela de previsualizacao deve ser igual ao intervalo aplicado no commit.
   ScissorSpan result{hit.key,lo,hi,c->closed,spanPoints(*c,lo,hi)};
-  if(result.preview.size()<2)return {};
+  if(result.preview.size()<2){lastRejection_="short_preview";return {};}
   return result;
  }
 };
