@@ -358,6 +358,9 @@ class QtEditorLab final:public QGraphicsView{
  bool workspaceDark_=true;
  std::map<Key,QGraphicsPathItem*> objects_;
  std::map<int,std::vector<QGraphicsPathItem*>> itemsByObject_;
+ // Fase 20c: bounded, opt-in, display-only cache (never production default).
+ const bool vectorDeviceCache20c_=qEnvironmentVariable("ALENCAR_VECTOR_DEVICE_CACHE_20C")=="1";
+ quint64 vectorCachedItems20c_=0,vectorCacheBudgetEstimate20c_=0;
  std::set<int> styledObjects_;
  // O modo de curvas compartilha a MESMA viewport do editor integrado.
  // A sessao e propriedade de LabWindow; QtEditorLab nunca a libera.
@@ -1810,6 +1813,33 @@ public:
  quint64 dragOverlayDenseLegacyUpdates199()const noexcept{return dragOverlayDenseLegacyUpdates199_;}
  quint64 dragOverlayLocalRequests199()const noexcept{return dragOverlayLocalRequests199_;}
  quint64 dragOverlayFullFallbacks199()const noexcept{return dragOverlayFullFallbacks199_;}
+ // Experimental cache: only small visible unselected Qt paths, 16 MiB estimate.
+ // Qt invalidates the item cache on geometry/style changes and zoom changes.
+ void applyVectorDeviceCache20c(){
+  vectorCachedItems20c_=0;vectorCacheBudgetEstimate20c_=0;
+  if(!vectorDeviceCache20c_||contourPaintProbeOptIn20_)return;
+  constexpr quint64 budget=16ULL*1024*1024;
+  const QRectF visible(viewport()->rect());
+  const QTransform tx=viewportTransform();
+  const double dpr=viewport()->devicePixelRatioF();
+  if(!std::isfinite(dpr)||dpr<=0.)return;
+  for(const auto& [key,item]:objects_){
+   if(!item->isVisible()||selected.count(key.object))continue;
+   const QRectF bounds=tx.mapRect(item->sceneBoundingRect());
+   if(!bounds.intersects(visible))continue;
+   const double w=std::ceil(std::abs(bounds.width())*dpr+8.);
+   const double h=std::ceil(std::abs(bounds.height())*dpr+8.);
+   if(!std::isfinite(w)||!std::isfinite(h)||w<1.||h<1.||w>256.||h>256.)continue;
+   const quint64 cost=quint64(w*h)*4;
+   if(cost>budget-vectorCacheBudgetEstimate20c_)continue;
+   item->setCacheMode(QGraphicsItem::DeviceCoordinateCache);
+   vectorCacheBudgetEstimate20c_+=cost;
+   ++vectorCachedItems20c_;
+  }
+ }
+ bool vectorDeviceCacheExperiment20c()const noexcept{return vectorDeviceCache20c_;}
+ quint64 vectorCachedItems20c()const noexcept{return vectorCachedItems20c_;}
+ quint64 vectorCacheBudgetEstimate20c()const noexcept{return vectorCacheBudgetEstimate20c_;}
  void rebuild(){
   QElapsedTimer rebuildProfiler;rebuildProfiler.start();
   // Adaptive drawing quality: no simplification of geometry or hit-testing.
@@ -1877,6 +1907,7 @@ public:
   if(active_)activate(*active_,false);else applySelectionStyles();
   createNativeItems();
   drawRasterOverlay();
+  applyVectorDeviceCache20c();
   // O índice só deve ser invalidado por uma alteração real na geometria.
   // Mudanças em camadas, agrupamentos ou destaque preservam o cache.
   fullRebuilds++;viewport()->update();
