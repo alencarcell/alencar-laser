@@ -677,20 +677,18 @@ public:
     struct End {Key key;bool start;Pt pos;};
     std::vector<End> ends;
     const int layer=state.objects.at(span.key.object).layer;
+    std::map<int,int> contourCounts;
+    for(const auto& c:state.doc.contours)++contourCounts[c.key.object];
+    std::set<int> editableTextMembers;
+    for(const auto& [root,text]:state.editableTexts)
+     editableTextMembers.insert(text.members.begin(),text.members.end());
     for(const auto& c:state.doc.contours){
      if(c.closed||c.nodes.size()<2)continue;
      const auto meta=state.objects.find(c.key.object);
      if(meta==state.objects.end()||meta->second.group||
         meta->second.layer!=layer||!editable(state,c.key.object))continue;
-     bool isText=false;
-     for(const auto& [root,t]:state.editableTexts)
-      if(std::find(t.members.begin(),t.members.end(),c.key.object)!=t.members.end())
-       isText=true;
-     if(isText)continue;
-     int parts=0;
-     for(const auto& other:state.doc.contours)
-      if(other.key.object==c.key.object)++parts;
-     if(parts!=1)continue;
+     if(editableTextMembers.count(c.key.object)||contourCounts[c.key.object]!=1)
+      continue;
      ends.push_back({c.key,true,c.nodes.front().p});
      ends.push_back({c.key,false,c.nodes.back().p});
     }
