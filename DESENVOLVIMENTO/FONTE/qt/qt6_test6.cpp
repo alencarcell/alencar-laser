@@ -3350,6 +3350,11 @@ public:
  WorkspaceConfig workspaceCfg_{};
  QLabel* workspaceSummary_=nullptr;
  QLabel* workspaceTopMeta_=nullptr;
+ QLabel* objectsSummary20z_=nullptr;
+ QGroupBox* objectsAlignGroup20z_=nullptr;
+ QPushButton* objectsRotate20z_=nullptr;
+ QPushButton* objectsScale20z_=nullptr;
+ QPushButton* objectsAlignLeft20z_=nullptr;
  QComboBox* machineProfileSelector_=nullptr;
  DiagnosticsCollector collector_;
  alaser::grbl::WindowsSerialObserver serial_;
@@ -4707,15 +4712,23 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
 
   auto* propsTab=new QWidget;auto* properties=new QVBoxLayout(propsTab);
   properties->setContentsMargins(9,9,9,9);properties->setSpacing(8);
-  properties->addWidget(titleLabel("ÁREA DE DESENHO / MESA"));
-  workspaceSummary_=new QLabel;workspaceSummary_->setWordWrap(true);properties->addWidget(workspaceSummary_);
-  auto* editWorkspace=new QPushButton("Configurar dimensões...");
-  connect(editWorkspace,&QPushButton::clicked,this,[this]{run([this]{configureWorkspace();});});
-  properties->addWidget(editWorkspace);
-  properties->addWidget(titleLabel("PROPRIEDADES DO OBJETO"));
-  properties->addWidget(new QLabel("Seleção e transformação em mm"));
+  // Workspace dimensions already have a dedicated toolbar action.
+  properties->addWidget(titleLabel("OBJETOS / EDIÇÃO CONTEXTUAL"));
+  objectsSummary20z_=new QLabel("Nenhuma forma selecionada. Use Seleção (V).");
+  objectsSummary20z_->setObjectName("objects_selection_summary_20z");
+  objectsSummary20z_->setWordWrap(true);properties->addWidget(objectsSummary20z_);
+  auto* edgeCutButton=new QPushButton("✂ Remover linha entre dois nós (J)");
+  edgeCutButton->setObjectName("objects_edge_trim_20z");
+  edgeCutButton->setToolTip("Ativa a remoção da aresta CIANO entre nós adjacentes, mesmo sem cruzamentos. Ctrl+Z desfaz.");
+  properties->addWidget(edgeCutButton);
+  connect(edgeCutButton,&QPushButton::clicked,this,[this]{
+   if(buttons.count("edge_trim"))buttons.at("edge_trim")->click();
+  });
+  auto* edgeCutNote=new QLabel("Tesoura (K): corta até cruzamentos.\nEntre nós (J): apaga só uma aresta.");
+  edgeCutNote->setWordWrap(true);properties->addWidget(edgeCutNote);
+  properties->addWidget(titleLabel("TRANSFORMAÇÃO DA SELEÇÃO"));
   auto* exactAngle=new QPushButton("Girar seleção por ângulo...");
-  exactAngle->setObjectName("rotate_exact_195");
+  exactAngle->setObjectName("rotate_exact_195");objectsRotate20z_=exactAngle;
   connect(exactAngle,&QPushButton::clicked,this,[this]{run([this]{
    check(!bezierToolActive_,"Girar exige modo Seleção de polilinhas.");
    const auto ids=selection();check(!ids.empty(),"Selecione formas editáveis.");
@@ -4725,7 +4738,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    view.editor.rotateObjects(ids,{(lo.x+hi.x)/2.,(lo.y+hi.y)/2.},angle);view.rebuild();
   });});properties->addWidget(exactAngle);
   auto* scaleExact=new QPushButton("Escalar seleção proporcionalmente...");
-  scaleExact->setObjectName("scale_exact_195");
+  scaleExact->setObjectName("scale_exact_195");objectsScale20z_=scaleExact;
   connect(scaleExact,&QPushButton::clicked,this,[this]{run([this]{
    check(!bezierToolActive_,"Escalar exige modo Seleção de polilinhas.");
    const auto ids=selection();check(!ids.empty(),"Selecione formas editáveis.");
@@ -4735,7 +4748,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    view.editor.scaleObjects(ids,{(lo.x+hi.x)/2.,(lo.y+hi.y)/2.},factor/100.,factor/100.);view.rebuild();
   });});properties->addWidget(scaleExact);
   auto* alignLeftBtn=new QPushButton("Alinhar à esquerda (2+ objetos)");
-  alignLeftBtn->setObjectName("align_left_195");
+  alignLeftBtn->setObjectName("align_left_195");objectsAlignLeft20z_=alignLeftBtn;
   connect(alignLeftBtn,&QPushButton::clicked,this,[this]{run([this]{
    check(!bezierToolActive_,"Alinhar exige modo Seleção de polilinhas.");
    const auto ids=selection();
@@ -4744,6 +4757,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    view.editor.alignLeft(ids);view.rebuild();
   });});properties->addWidget(alignLeftBtn);
   auto* alignmentSection=new QGroupBox("Alinhamento (2 ou mais)");
+  alignmentSection->setObjectName("objects_alignment_group_20z");
+  objectsAlignGroup20z_=alignmentSection;
   auto* alignGrid=new QGridLayout(alignmentSection);
   const std::vector<std::pair<QString,int>> choices={
    {"Esquerda",0},{"Direita",1},{"Topo",2},{"Base",3},
@@ -5755,7 +5770,39 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
   updateSelectionContext();
  }
+ void updateObjectsInspector20z(){
+  if(!objectsSummary20z_)return;
+  const size_t count=view.selected.size();
+  const bool native=view.nativeModeActive()&&view.nativeSelected().has_value();
+  const bool single=count==1&&!native;
+  const bool some=count>0&&!native;
+  const bool multi=count>=2&&!native;
+  if(native)objectsSummary20z_->setText(
+   "Curva Bézier selecionada. Use Tesoura (K) para remover sua aresta nativa.");
+  else if(!count)objectsSummary20z_->setText(
+   "Nenhuma forma selecionada. Selecione (V) ou use Entre nós (J) diretamente sobre uma polilinha.");
+  else if(single){
+   const int id=*view.selected.begin();
+   const auto it=view.editor.state().objects.find(id);
+   const Contour* c=get(view.editor.state().doc,{id,0});
+   if(it!=view.editor.state().objects.end()){
+    const auto li=view.editor.state().layers.find(it->second.layer);
+    const QString layer=li==view.editor.state().layers.end()?"?":
+      QString::fromStdString(li->second.name);
+    objectsSummary20z_->setText(QString("Objeto #%1 · %2\nCamada: %3\nNós: %4 · %5")
+     .arg(id).arg(it->second.group>0?"agrupado":"independente")
+     .arg(layer).arg(c?int(c->nodes.size()):0)
+     .arg(c?(c->closed?"fechado":"aberto"):"multicontorno"));
+   }else objectsSummary20z_->setText("Objeto selecionado sem metadados disponíveis.");
+  }else objectsSummary20z_->setText(
+    QString("%1 formas selecionadas. Alinhamento múltiplo disponível.").arg(count));
+  if(objectsRotate20z_)objectsRotate20z_->setEnabled(some);
+  if(objectsScale20z_)objectsScale20z_->setEnabled(some);
+  if(objectsAlignLeft20z_)objectsAlignLeft20z_->setEnabled(multi);
+  if(objectsAlignGroup20z_)objectsAlignGroup20z_->setVisible(multi);
+ }
  void updateSelectionContext(){
+  updateObjectsInspector20z();
   if(!selectionContextBar_)return;
   const bool nativeSelected=view.nativeSelected().has_value()&&view.nativeModeActive();
   const bool rasterSelected=view.rasterSelectionActive();
