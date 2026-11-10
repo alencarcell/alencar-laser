@@ -21,6 +21,7 @@
 #include <QPointF>
 #include <QPen>
 #include <QFrame>
+#include <QScrollArea>
 #include <algorithm>
 #include <cmath>
 namespace alaser::escape20s {
@@ -172,7 +173,9 @@ public:
   auto* layout=new QVBoxLayout(this);
   auto* warning=new QLabel("ESTUDO OFFLINE. A âncora é apenas uma guia visual: não exportar como peça mecânica.",this);
   warning->setWordWrap(true);layout->addWidget(warning);
-  auto* form=new QFormLayout;form->setVerticalSpacing(4);
+  auto* formHost=new QWidget(this);
+  auto* form=new QFormLayout(formHost);form->setVerticalSpacing(4);
+  form->setContentsMargins(4,3,4,3);
   teeth_=new QSpinBox(this);teeth_->setObjectName("escape_teeth_20s");
   teeth_->setRange(15,90);teeth_->setValue(30);
   form->addRow("Dentes da roda:",teeth_);
@@ -201,7 +204,12 @@ public:
   rotation_=new QComboBox(this);rotation_->setObjectName("escape_rotation_20s");
   rotation_->addItems({"Horária","Anti-horária"});form->addRow("Rotação nominal:",rotation_);
   form->addRow("Centro X (roda):",x_);form->addRow("Centro Y (roda):",y_);
-  layout->addLayout(form);
+  auto* formScroll=new QScrollArea(this);
+  formScroll->setObjectName("escape_form_scroll_20s");
+  formScroll->setFrameShape(QFrame::NoFrame);
+  formScroll->setWidgetResizable(true);formScroll->setWidget(formHost);
+  formScroll->setMinimumHeight(165);formScroll->setMaximumHeight(345);
+  layout->addWidget(formScroll,1);
   auto* tools=new QHBoxLayout;
   auto* less=new QPushButton("−",this);less->setObjectName("escape_zoom_out_20s");
   auto* more=new QPushButton("+",this);more->setObjectName("escape_zoom_in_20s");
