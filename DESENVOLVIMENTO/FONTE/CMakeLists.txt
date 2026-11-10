@@ -395,3 +395,12 @@ if(MSVC)
 else()
  target_compile_options(alencar_test_gear_measured_20r PRIVATE -O2 -Wall -Wextra -Wpedantic)
 endif()
+
+# Phase 20s: pure C++ escape-wheel shape and non-exportable anchor guides.
+add_executable(alencar_test_escapement_study_20s src/test_escapement_study_20s.cpp)
+target_include_directories(alencar_test_escapement_study_20s PRIVATE src)
+if(MSVC)
+ target_compile_options(alencar_test_escapement_study_20s PRIVATE /O2 /W4 /utf-8)
+else()
+ target_compile_options(alencar_test_escapement_study_20s PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
