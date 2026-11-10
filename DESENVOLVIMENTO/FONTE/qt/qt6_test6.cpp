@@ -1940,6 +1940,15 @@ public:
  bool scissorHoverReceivedAt(QPoint expected)const{
   return scissorLastHoverPosition_&&*scissorLastHoverPosition_==expected;
  }
+ // 20w: commit the exact safe interval that was visibly highlighted
+ // when the pointer has not moved. Never accept stale scene geometry.
+ bool scissorDisplayedSpanIsCurrentAt(QPoint at)const{
+  return tool==Tool::Scissors&&!nativeMode_&&!busy()&&
+         bool(scissorHover_)&&scissorPreview_!=nullptr&&
+         scissorIndexVersion_==editor.generation&&
+         scissorLastHoverPosition_&&
+         (*scissorLastHoverPosition_-at).manhattanLength()<=1;
+ }
  std::string scissorHoverDiagnostics(QPoint at){
   const auto scenePt=mapToScene(at);
   std::ostringstream out;
@@ -2431,7 +2440,14 @@ void mousePressEvent(QMouseEvent* e)override{
     if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));
     e->accept();return;
    }
-   updateScissorHover(e->position().toPoint());
+   const QPoint clickPoint=e->position().toPoint();
+   // Previously every click recomputed the hit list even when the user
+   // clicked the currently highlighted orange span. At overlapping edges
+   // a new hit ranking could invalidate or change that displayed target.
+   // Reuse ONLY the same-point, same-generation safe preview; otherwise
+   // the planner must validate again before any destructive operation.
+   if(!scissorDisplayedSpanIsCurrentAt(clickPoint))
+    updateScissorHover(clickPoint);
    if(!scissorHover_){
     // Diagnostico localizado: nao remove fragmentos quando nao existe intervalo seguro.
     const auto hits=clickHits(e->position().toPoint());
@@ -6755,6 +6771,10 @@ static QJsonObject editTools197Test(const QString& directory){
   throw std::runtime_error("hover nao iluminou arco completo: "+v.scissorHoverDiagnostics(hoverPoint));
  }
  check(v.viewport()->cursor().shape()!=Qt::ArrowCursor,"cursor nao mudou sobre trecho valido");
+ check(v.scissorDisplayedSpanIsCurrentAt(hoverPoint),
+       "20w: destaque laranja nao reutilizavel no mesmo ponto");
+ check(!v.scissorDisplayedSpanIsCurrentAt(clearPoint),
+       "20w: destaque antigo foi aceito em outra coordenada");
  moveHover(clearPoint);
  // A ferramenta continua SELECIONADA fora do desenho; isso nao significa
  // que exista trecho cortavel. O destaque laranja precisa desaparecer.
