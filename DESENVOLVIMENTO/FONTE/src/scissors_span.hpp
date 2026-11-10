@@ -80,7 +80,7 @@ class ScissorSpanPlanner {
   // is safe: its two incident sides must lie strictly on opposite sides of
   // the target line. A tangency (same side), T endpoint or degenerate corner
   // is still ambiguous. No synthetic snapping or coordinate modification.
-  auto transverseForeignVertex=[&](const Segment& s,double y,Pt a,Pt r,double rr){
+  auto transverseForeignVertex=[&](const Segment& s,double y,Pt r,double rr){
    auto it=contourLookup_.find(s.key);
    if(it==contourLookup_.end())return false;
    const auto& other=it->second;
@@ -214,7 +214,7 @@ class ScissorSpanPlanner {
     // allowed only with a strict sign-changing (transverse) crossing.
     if(s.key!=c.key&&x>1e-7&&x<1.-1e-7&&
        (y<1e-7||y>1.-1e-7)&&
-       transverseForeignVertex(s,y,a,r,rr)){
+       transverseForeignVertex(s,y,r,rr)){
      out.crossings.push_back(double(i)+x);continue;
     }
     if(s.key!=c.key&&(x<1e-7||x>1.-1e-7)&&

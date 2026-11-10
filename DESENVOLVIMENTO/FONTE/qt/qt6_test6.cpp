@@ -483,6 +483,11 @@ class QtEditorLab final:public QGraphicsView{
  QGraphicsPathItem* scissorPreview_=nullptr;
  uint64_t scissorHoverEvents_=0;
  std::optional<QPoint> scissorLastHoverPosition_;
+ std::optional<Hit> edgeTrimHover20z_;
+ std::optional<QPoint> edgeTrimPosition20z_;
+ QGraphicsPathItem* edgeTrimPreview20z_=nullptr;
+ uint64_t edgeTrimGeneration20z_=std::numeric_limits<uint64_t>::max();
+ QTransform edgeTrimViewportTransform20z_;
  // TESTE_12: caminho continuo e o modo seguro padrao.
  // Blocos sao EXCLUSIVAMENTE experimentais (ALENCAR_LAB_CHUNKS_EXPERIMENTAL=1).
  bool continuousPreview_=false;
@@ -1353,7 +1358,7 @@ private:
  }
 
 public:
- enum class Tool{Select,Nodes,Scissors,Rectangle,Line,Ellipse,Polygon,Pencil,Text,DrawBezier};
+ enum class Tool{Select,Nodes,Scissors,EdgeTrim,Rectangle,Line,Ellipse,Polygon,Pencil,Text,DrawBezier};
  Tool tool=Tool::Select;
  Editor editor;
  std::set<int> selected;
@@ -1856,7 +1861,7 @@ public:
    setRenderHint(QPainter::Antialiasing,!fast);
    setRenderHint(QPainter::SmoothPixmapTransform,!fast);
   }
-  clearScissorHover();clearShapePreview();cancelSelectionTransform();endChunkPreview();
+  clearScissorHover();clearEdgeTrimHover20z();clearShapePreview();cancelSelectionTransform();endChunkPreview();
   clearPolyline();clearBezierDraft();clearMarquee();scene_.clear();rasterOverlay_=nullptr;rasterFrame_=nullptr;rasterHandle_=nullptr;objects_.clear();nativeItems_.clear();itemsByObject_.clear();styledObjects_.clear();pendingPreview_=nullptr;
   contourProbe20_.itemStats.clear();
   // Composite closed Fill paths per layer with the same parity rule used
@@ -1997,6 +2002,57 @@ public:
   if(scissorPreview_){scene_.removeItem(scissorPreview_);delete scissorPreview_;scissorPreview_=nullptr;}
   viewport()->setCursor(Qt::ArrowCursor);
  }
+ // 20z: CYAN marks exactly one edge between consecutive nodes.
+ void clearEdgeTrimHover20z(){
+  edgeTrimHover20z_.reset();edgeTrimPosition20z_.reset();
+  edgeTrimGeneration20z_=std::numeric_limits<uint64_t>::max();
+  edgeTrimViewportTransform20z_=QTransform();
+  if(edgeTrimPreview20z_){
+   scene_.removeItem(edgeTrimPreview20z_);
+   delete edgeTrimPreview20z_;edgeTrimPreview20z_=nullptr;
+  }
+ }
+ bool edgeTrimCurrent20z(QPoint at)const{
+  return tool==Tool::EdgeTrim&&!nativeMode_&&!busy()&&
+         edgeTrimHover20z_.has_value()&&edgeTrimPreview20z_!=nullptr&&
+         edgeTrimGeneration20z_==editor.generation&&
+         edgeTrimViewportTransform20z_==viewportTransform()&&
+         edgeTrimPosition20z_&&
+         (*edgeTrimPosition20z_-at).manhattanLength()<=1;
+ }
+ bool edgeTrimPreviewVisible20z()const{return edgeTrimPreview20z_!=nullptr;}
+ void updateEdgeTrimHover20z(QPoint at){
+  if(tool!=Tool::EdgeTrim||nativeMode_||busy()){clearEdgeTrimHover20z();return;}
+  std::optional<Hit> chosen;
+  for(const Hit& hit:clickHits(at)){
+   const Contour* c=get(editor.state().doc,hit.key);
+   if(!c||!editable(editor.state(),hit.key.object)||
+      editor.state().objects.at(hit.key.object).group>0)continue;
+   const int edges=int(c->nodes.size())-(c->closed?0:1);
+   if(hit.segment<0||hit.segment>=edges)continue;
+   chosen=hit;break;
+  }
+  clearEdgeTrimHover20z();
+  if(!chosen){
+   viewport()->setToolTip("Entre nós: SEM CIANO = sem aresta livre sob o mouse. Camadas bloqueadas/grupos não são cortados.");
+   viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+   return;
+  }
+  const Contour* c=get(editor.state().doc,chosen->key);
+  const int i=chosen->segment,n=int(c->nodes.size());
+  QPainterPath segment;segment.moveTo(toQt(c->nodes[size_t(i)].p));
+  segment.lineTo(toQt(c->nodes[size_t((i+1)%n)].p));
+  QPen pen(QColor("#22D3EE"),3);pen.setCosmetic(true);
+  pen.setCapStyle(Qt::RoundCap);pen.setJoinStyle(Qt::RoundJoin);
+  edgeTrimPreview20z_=scene_.addPath(segment,pen);
+  edgeTrimPreview20z_->setZValue(46);
+  edgeTrimPreview20z_->setAcceptedMouseButtons(Qt::NoButton);
+  edgeTrimHover20z_=*chosen;edgeTrimPosition20z_=at;
+  edgeTrimGeneration20z_=editor.generation;
+  edgeTrimViewportTransform20z_=viewportTransform();
+  viewport()->setToolTip("Entre nós: a aresta CIANO entre 2 nós será removida. Ctrl+Z desfaz.");
+  viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+ }
  void updateScissorHover(QPoint where){
   ++scissorHoverEvents_;
   scissorLastHoverPosition_=where;
@@ -2078,7 +2134,7 @@ public:
   if(bezierDrawing_&&t!=Tool::DrawBezier)finishBezierDraft(false);
   if(!busy()){
    nativeInsertArmed_=false;
-   clearScissorHover();nativeMode_=false;tool=t;
+   clearScissorHover();clearEdgeTrimHover20z();nativeMode_=false;tool=t;
    viewport()->setCursor(Qt::ArrowCursor);viewport()->update();
   }
  }
@@ -2148,7 +2204,7 @@ public:
   // Qt fornece unidades da viewport em pixels logicos; passamos o DPR separadamente.
   const double pxPerMm=std::max(1e-8,std::min(sx,sy));
   // Tolerancia maior apenas para localizar linhas finas com a Tesoura.
-  const double tolerancePx=(tool==Tool::Scissors?9.:6.);
+  const double tolerancePx=(tool==Tool::Scissors||tool==Tool::EdgeTrim?9.:6.);
   auto hs=picker_.query(editor,fromQt(mapToScene(viewportPoint)),
                         tolerancePx,pxPerMm,viewport()->devicePixelRatioF());
   sample(hitTestMs,profiler.nsecsElapsed()/1e6);return hs;
@@ -2440,6 +2496,29 @@ void mousePressEvent(QMouseEvent* e)override{
     }
    }
    if(stateChanged)stateChanged();
+   e->accept();return;
+  }
+  if(tool==Tool::EdgeTrim){
+   const QPoint at=e->position().toPoint();
+   if(!edgeTrimCurrent20z(at))updateEdgeTrimHover20z(at);
+   if(!edgeTrimHover20z_){
+    if(toolWarning)toolWarning("Entre nós: aproxime o cursor de uma aresta editável. Sem ciano, não corta.");
+    e->accept();return;
+   }
+   try{
+    const Hit target=*edgeTrimHover20z_;
+    clearEdgeTrimHover20z();
+    const int result=editor.removePolylineEdge(target.key,target.segment);
+    selected.clear();active_.reset();rebuild();
+    if(get(editor.state().doc,target.key))activate(target.key);
+    else if(result>0&&get(editor.state().doc,{result,0}))activate({result,0});
+    if(diagnosticEvent)diagnosticEvent("polyline_edge_between_nodes_cut",1);
+    if(toolWarning)toolWarning("Somente a aresta entre os dois nós foi removida. Ctrl+Z restaura.");
+    if(stateChanged)stateChanged();
+   }catch(const std::exception& ex){
+    clearEdgeTrimHover20z();
+    if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));
+   }
    e->accept();return;
   }
   if(tool==Tool::Scissors){
@@ -2784,6 +2863,7 @@ void mouseMoveEvent(QMouseEvent* e)override{
   }
   if(strokeDrawing_){drawCurrent_=e->position();pendingPreview_->setPath(temporaryShape());frameUpdates++;e->accept();return;}
   if(tool==Tool::Scissors){updateScissorHover(e->position().toPoint());e->accept();return;}
+  if(tool==Tool::EdgeTrim){updateEdgeTrimHover20z(e->position().toPoint());e->accept();return;}
   QGraphicsView::mouseMoveEvent(e);
  }
 void mouseReleaseEvent(QMouseEvent* e)override{
@@ -2994,6 +3074,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   QAction* select=tools->addAction("Selecionar (V)");
   QAction* line=tools->addAction("Linha contínua");
   QAction* scissors=tools->addAction("Tesoura (K)");
+  QAction* edgeTrim=tools->addAction("Remover lado entre nós (J)");
   QAction* nodes=tools->addAction("Editar nós");
   menu.addSeparator();
   QAction* traceBitmap=menu.addAction("Traçar imagem (Alt+T) — P&B");
@@ -3040,6 +3121,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
     if(picked==select)requestToolChange(Tool::Select);
     else if(picked==line)requestToolChange(Tool::Line);
     else if(picked==scissors)requestToolChange(Tool::Scissors);
+    else if(picked==edgeTrim)requestToolChange(Tool::EdgeTrim);
     else if(picked==nodes)requestToolChange(Tool::Nodes);
    }
    if(stateChanged)stateChanged();
@@ -3272,6 +3354,11 @@ public:
  WorkspaceConfig workspaceCfg_{};
  QLabel* workspaceSummary_=nullptr;
  QLabel* workspaceTopMeta_=nullptr;
+ QLabel* objectsSummary20z_=nullptr;
+ QGroupBox* objectsAlignGroup20z_=nullptr;
+ QPushButton* objectsRotate20z_=nullptr;
+ QPushButton* objectsScale20z_=nullptr;
+ QPushButton* objectsAlignLeft20z_=nullptr;
  QComboBox* machineProfileSelector_=nullptr;
  DiagnosticsCollector collector_;
  alaser::grbl::WindowsSerialObserver serial_;
@@ -4234,10 +4321,14 @@ public:
      bezierToolActive_=true;view.enableNative(true);
      captureEvent("tool_bezier_activated");
      status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
-  compact(editorGrid,3,0,"scissors","✂ Tesoura","Trecho laranja = removido no clique (K). Em Bézier, remove a aresta entre âncoras; Ctrl+Z desfaz.",
+  compact(editorGrid,3,0,"scissors","✂ Tesoura","Trecho CIANO = recorte até as interseções (K). Bézier: remove aresta nativa. Ctrl+Z desfaz.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
      captureEvent("tool_scissors_activated");
-     status->setText("Tesoura: passe o mouse sobre um trecho; destaque laranja = corte completo. Ctrl+Z desfaz.");});
+     status->setText("Tesoura (K): CIANO = trecho entre cruzamentos. Ctrl+Z desfaz.");});
+  compact(editorGrid,5,0,"edge_trim","✂ Entre nós","J: remova somente UMA aresta entre dois nós consecutivos, sem cruzamentos. Prévia CIANO; Ctrl+Z desfaz.",
+    [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::EdgeTrim);
+     captureEvent("tool_edge_trim_activated");
+     status->setText("Entre nós (J): CIANO = só essa aresta será apagada. Ctrl+Z desfaz.");});
   compact(editorGrid,4,0,"new_bezier","Desenhar caminhos e curvas",
     "Clique cria segmento reto; clique e arraste cria curva Bézier. Duplo clique com Seleção edita nós. Direito conclui; Esc cancela.",
      [this]{
@@ -4625,15 +4716,23 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
 
   auto* propsTab=new QWidget;auto* properties=new QVBoxLayout(propsTab);
   properties->setContentsMargins(9,9,9,9);properties->setSpacing(8);
-  properties->addWidget(titleLabel("ÁREA DE DESENHO / MESA"));
-  workspaceSummary_=new QLabel;workspaceSummary_->setWordWrap(true);properties->addWidget(workspaceSummary_);
-  auto* editWorkspace=new QPushButton("Configurar dimensões...");
-  connect(editWorkspace,&QPushButton::clicked,this,[this]{run([this]{configureWorkspace();});});
-  properties->addWidget(editWorkspace);
-  properties->addWidget(titleLabel("PROPRIEDADES DO OBJETO"));
-  properties->addWidget(new QLabel("Seleção e transformação em mm"));
+  // Workspace dimensions already have a dedicated toolbar action.
+  properties->addWidget(titleLabel("OBJETOS / EDIÇÃO CONTEXTUAL"));
+  objectsSummary20z_=new QLabel("Nenhuma forma selecionada. Use Seleção (V).");
+  objectsSummary20z_->setObjectName("objects_selection_summary_20z");
+  objectsSummary20z_->setWordWrap(true);properties->addWidget(objectsSummary20z_);
+  auto* edgeCutButton=new QPushButton("✂ Remover linha entre dois nós (J)");
+  edgeCutButton->setObjectName("objects_edge_trim_20z");
+  edgeCutButton->setToolTip("Ativa a remoção da aresta CIANO entre nós adjacentes, mesmo sem cruzamentos. Ctrl+Z desfaz.");
+  properties->addWidget(edgeCutButton);
+  connect(edgeCutButton,&QPushButton::clicked,this,[this]{
+   if(buttons.count("edge_trim"))buttons.at("edge_trim")->click();
+  });
+  auto* edgeCutNote=new QLabel("Tesoura (K): corta até cruzamentos.\nEntre nós (J): apaga só uma aresta.");
+  edgeCutNote->setWordWrap(true);properties->addWidget(edgeCutNote);
+  properties->addWidget(titleLabel("TRANSFORMAÇÃO DA SELEÇÃO"));
   auto* exactAngle=new QPushButton("Girar seleção por ângulo...");
-  exactAngle->setObjectName("rotate_exact_195");
+  exactAngle->setObjectName("rotate_exact_195");objectsRotate20z_=exactAngle;
   connect(exactAngle,&QPushButton::clicked,this,[this]{run([this]{
    check(!bezierToolActive_,"Girar exige modo Seleção de polilinhas.");
    const auto ids=selection();check(!ids.empty(),"Selecione formas editáveis.");
@@ -4643,7 +4742,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    view.editor.rotateObjects(ids,{(lo.x+hi.x)/2.,(lo.y+hi.y)/2.},angle);view.rebuild();
   });});properties->addWidget(exactAngle);
   auto* scaleExact=new QPushButton("Escalar seleção proporcionalmente...");
-  scaleExact->setObjectName("scale_exact_195");
+  scaleExact->setObjectName("scale_exact_195");objectsScale20z_=scaleExact;
   connect(scaleExact,&QPushButton::clicked,this,[this]{run([this]{
    check(!bezierToolActive_,"Escalar exige modo Seleção de polilinhas.");
    const auto ids=selection();check(!ids.empty(),"Selecione formas editáveis.");
@@ -4653,7 +4752,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    view.editor.scaleObjects(ids,{(lo.x+hi.x)/2.,(lo.y+hi.y)/2.},factor/100.,factor/100.);view.rebuild();
   });});properties->addWidget(scaleExact);
   auto* alignLeftBtn=new QPushButton("Alinhar à esquerda (2+ objetos)");
-  alignLeftBtn->setObjectName("align_left_195");
+  alignLeftBtn->setObjectName("align_left_195");objectsAlignLeft20z_=alignLeftBtn;
   connect(alignLeftBtn,&QPushButton::clicked,this,[this]{run([this]{
    check(!bezierToolActive_,"Alinhar exige modo Seleção de polilinhas.");
    const auto ids=selection();
@@ -4662,6 +4761,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    view.editor.alignLeft(ids);view.rebuild();
   });});properties->addWidget(alignLeftBtn);
   auto* alignmentSection=new QGroupBox("Alinhamento (2 ou mais)");
+  alignmentSection->setObjectName("objects_alignment_group_20z");
+  objectsAlignGroup20z_=alignmentSection;
   auto* alignGrid=new QGridLayout(alignmentSection);
   const std::vector<std::pair<QString,int>> choices={
    {"Esquerda",0},{"Direita",1},{"Topo",2},{"Base",3},
@@ -5096,6 +5197,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    });
   });
   command(editMenu,"Selecionar (Esc / V)","select");command(editMenu,"Tesoura (K)","scissors");
+  command(editMenu,"Remover aresta entre nós (J)","edge_trim");
   auto* arrangeMenu=mainMenu->addMenu("Organizar");
   command(arrangeMenu,"Agrupar","group");command(arrangeMenu,"Desagrupar","ungroup");
   command(arrangeMenu,"Enviar selecao para camada ativa (Ctrl+L)","move_layer");
@@ -5492,6 +5594,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     case QtEditorLab::Tool::Select:id="select";break;
     case QtEditorLab::Tool::Line:id="line";break;
     case QtEditorLab::Tool::Scissors:id="scissors";break;
+    case QtEditorLab::Tool::EdgeTrim:id="edge_trim";break;
     case QtEditorLab::Tool::Nodes:id="nodes";break;
     default:break;
    }
@@ -5507,6 +5610,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
   shortcut("V",[this]{buttons.at("select")->click();});
   shortcut("K",[this]{buttons.at("scissors")->click();});
+  shortcut("J",[this]{buttons.at("edge_trim")->click();});
   shortcut("Ctrl+K",[this]{buttons.at("scissors")->click();});
   shortcut("Ctrl+R",[this]{buttons.at("rectangle")->click();});
   shortcut("P",[this]{buttons.at("pencil")->click();});
@@ -5670,7 +5774,39 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
   updateSelectionContext();
  }
+ void updateObjectsInspector20z(){
+  if(!objectsSummary20z_)return;
+  const size_t count=view.selected.size();
+  const bool native=view.nativeModeActive()&&view.nativeSelected().has_value();
+  const bool single=count==1&&!native;
+  const bool some=count>0&&!native;
+  const bool multi=count>=2&&!native;
+  if(native)objectsSummary20z_->setText(
+   "Curva Bézier selecionada. Use Tesoura (K) para remover sua aresta nativa.");
+  else if(!count)objectsSummary20z_->setText(
+   "Nenhuma forma selecionada. Selecione (V) ou use Entre nós (J) diretamente sobre uma polilinha.");
+  else if(single){
+   const int id=*view.selected.begin();
+   const auto it=view.editor.state().objects.find(id);
+   const Contour* c=get(view.editor.state().doc,{id,0});
+   if(it!=view.editor.state().objects.end()){
+    const auto li=view.editor.state().layers.find(it->second.layer);
+    const QString layer=li==view.editor.state().layers.end()?"?":
+      QString::fromStdString(li->second.name);
+    objectsSummary20z_->setText(QString("Objeto #%1 · %2\nCamada: %3\nNós: %4 · %5")
+     .arg(id).arg(it->second.group>0?"agrupado":"independente")
+     .arg(layer).arg(c?int(c->nodes.size()):0)
+     .arg(c?(c->closed?"fechado":"aberto"):"multicontorno"));
+   }else objectsSummary20z_->setText("Objeto selecionado sem metadados disponíveis.");
+  }else objectsSummary20z_->setText(
+    QString("%1 formas selecionadas. Alinhamento múltiplo disponível.").arg(count));
+  if(objectsRotate20z_)objectsRotate20z_->setEnabled(some);
+  if(objectsScale20z_)objectsScale20z_->setEnabled(some);
+  if(objectsAlignLeft20z_)objectsAlignLeft20z_->setEnabled(multi);
+  if(objectsAlignGroup20z_)objectsAlignGroup20z_->setVisible(multi);
+ }
  void updateSelectionContext(){
+  updateObjectsInspector20z();
   if(!selectionContextBar_)return;
   const bool nativeSelected=view.nativeSelected().has_value()&&view.nativeModeActive();
   const bool rasterSelected=view.rasterSelectionActive();
@@ -6896,9 +7032,59 @@ static QJsonObject editTools197Test(const QString& directory){
  clickScene(shapes,{154,90});
  check(sv.editor.state().doc.contours.empty()&&sv.editor.state().objects.count(rectId)==0,
        "Retangulo isolado nao excluido");
+ // 20z GUI: independent single edge cutter, no intersections needed,
+ // cyan preview, one Undo, and contextual Objects inspector.
+ LabWindow edgeWindow(Document{});
+ edgeWindow.show();QApplication::processEvents();
+ auto& ev=edgeWindow.view;
+ ev.setTransform(QTransform::fromScale(8.,8.));
+ const int edgeObject=ev.editor.addContour(
+    {{100,100},{120,100},{140,100},{160,100}},false);
+ ev.rebuild();ev.centerOn(QPointF(130,100));QApplication::processEvents();
+ auto* panelSummary=edgeWindow.findChild<QLabel*>("objects_selection_summary_20z");
+ auto* panelCut=edgeWindow.findChild<QPushButton*>("objects_edge_trim_20z");
+ auto* panelAlign=edgeWindow.findChild<QGroupBox*>("objects_alignment_group_20z");
+ check(panelSummary&&panelCut&&panelAlign,"20z: contextual Objects inspector absent");
+ check(panelAlign->isHidden(),"20z: alignment shown with no selection");
+ panelCut->click();
+ check(ev.tool==QtEditorLab::Tool::EdgeTrim,
+       "20z: Objects panel did not activate between-nodes cutter");
+ const QPoint edgePoint=ev.mapFromScene({130,100});
+ QTest::mouseMove(ev.viewport(),edgePoint);QApplication::processEvents();
+ if(!ev.edgeTrimPreviewVisible20z()){
+  const QPointF local(edgePoint),global(ev.viewport()->mapToGlobal(edgePoint));
+  QMouseEvent move(QEvent::MouseMove,local,global,
+                   Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+  QApplication::sendEvent(ev.viewport(),&move);QApplication::processEvents();
+ }
+ check(ev.edgeTrimPreviewVisible20z()&&ev.edgeTrimCurrent20z(edgePoint),
+       "20z: hover did not highlight the exact edge");
+ const Document edgeOriginal=ev.editor.state().doc;
+ const size_t edgeUndo=ev.editor.undoCount();
+ QTest::mouseClick(ev.viewport(),Qt::LeftButton,Qt::NoModifier,edgePoint);
+ QApplication::processEvents();
+ check(ev.editor.state().doc.contours.size()==2&&
+       ev.editor.undoCount()==edgeUndo+1,
+       "20z: mouse cut did not split one edge in one Undo");
+ const Contour* edgeLeft=get(ev.editor.state().doc,{edgeObject,0});
+ check(edgeLeft&&edgeLeft->nodes.size()==2,
+       "20z: wrong side was removed by mouse");
+ edgeWindow.refresh();
+ check(panelSummary->text().contains("Objeto #"),
+       "20z: Objects summary did not follow the active selection");
+ check(panelAlign->isHidden(),
+       "20z: one selected object incorrectly enabled alignment");
+ ev.selected.clear();
+ for(const auto& [id,meta]:ev.editor.state().objects)ev.selected.insert(id);
+ edgeWindow.refresh();
+ check(!panelAlign->isHidden(),
+       "20z: alignment not available after selecting two objects");
+ pressKey(edgeWindow,Qt::Key_Z,Qt::ControlModifier);
+ check(sameDoc(edgeOriginal,ev.editor.state().doc),
+       "20z: Ctrl+Z did not restore exact contour in GUI");
  w.grab().save(directory+"/TESTE_19_7_FERRAMENTAS.png");
  return {{"status","PASS"},{"selection_esc",true},{"selection_v",true},
-   {"scissors_k",true},{"scissors_mouse",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"scissors_isolated_circle",true},{"scissors_isolated_rectangle",true},{"undo_scissors",true},
+   {"scissors_k",true},{"scissors_mouse",true},{"edge_between_nodes_20z",true},{"objects_inspector_context_20z",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"scissors_isolated_circle",true},{"scissors_isolated_rectangle",true},{"undo_scissors",true},
    {"hover_delivery",usedViewportEventFallback?"viewport_synthetic_mouse_move":"qtest_mouse_move"},
    {"hardware_hover_verified",false},
    {"ctrl_r_rectangle",true},{"ctrl_e_ellipse",true},{"shift_square_circle",true},{"create_layer_by_palette",true},

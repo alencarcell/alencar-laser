@@ -36,6 +36,53 @@ int main(){
   require(e.redo()&&get(e.state().doc,{second,0}),"redo nao restaurou segunda peca");
   validate(e.state());
 
+  // 20z: remove exactly the edge between adjacent nodes, even when it
+  // does NOT cross any other path. Never delete neighboring lines or merge.
+  Editor nodeEdge(Document{});
+  const int nodePath=nodeEdge.addContour({
+    {0,0},{10,0},{20,0},{30,0}},false);
+  const Document nodeBefore=nodeEdge.state().doc;
+  const size_t nodeUndo=nodeEdge.undoCount();
+  const int nodeRight=nodeEdge.removePolylineEdge({nodePath,0},1);
+  const auto* nodeLeftRemain=get(nodeEdge.state().doc,{nodePath,0});
+  const auto* nodeRightRemain=get(nodeEdge.state().doc,{nodeRight,0});
+  require(nodeRight!=nodePath&&nodeRight>0&&nodeLeftRemain&&nodeRightRemain,
+          "20z: open path did not split into two independent rests");
+  require(nodeLeftRemain->nodes.size()==2&&nodeRightRemain->nodes.size()==2,
+          "20z: cut removed more than one consecutive-node edge");
+  close(nodeLeftRemain->nodes.back().p.x,10.);
+  close(nodeRightRemain->nodes.front().p.x,20.);
+  require(nodeEdge.state().objects.at(nodePath).group==0&&
+          nodeEdge.state().objects.at(nodeRight).group==0,
+          "20z: edge cut grouped leftovers");
+  require(nodeEdge.undoCount()==nodeUndo+1,
+          "20z: edge cut produced more than one Undo state");
+  require(nodeEdge.undo()&&sameDoc(nodeBefore,nodeEdge.state().doc),
+          "20z: Ctrl+Z did not restore original open contour");
+  require(nodeEdge.redo()&&get(nodeEdge.state().doc,{nodeRight,0})!=nullptr,
+          "20z: Ctrl+Y did not restore cut pieces");
+  Editor closedEdge(Document{});
+  const int closedId=closedEdge.rectangle({0,0},10,10);
+  const Document closedBefore=closedEdge.state().doc;
+  closedEdge.removePolylineEdge({closedId,0},2);
+  const auto* opened=get(closedEdge.state().doc,{closedId,0});
+  require(opened&&!opened->closed&&opened->nodes.size()==4,
+          "20z: closed contour did not open by deleting exactly one edge");
+  require(closedEdge.state().doc.contours.size()==1,
+          "20z: closed contour cut created unwanted separate object");
+  require(closedEdge.undo()&&sameDoc(closedBefore,closedEdge.state().doc),
+          "20z: closed contour Undo failed");
+  Editor groupedEdge(Document{});
+  const int ga=groupedEdge.line({0,0},{10,0});
+  const int gb=groupedEdge.line({10,0},{20,0});
+  groupedEdge.group({ga,gb});
+  const size_t beforeReject=groupedEdge.undoCount();
+  bool groupedEdgeRejected=false;
+  try{groupedEdge.removePolylineEdge({ga,0},0);}
+  catch(const std::exception&){groupedEdgeRejected=true;}
+  require(groupedEdgeRejected&&groupedEdge.undoCount()==beforeReject,
+          "20z: grouped contour was altered by edge cutter");
+
   // Regressao real do GUI 19.8: cruzamentos nas arestas verticais de
   // retangulo e clique na aresta superior, antes do PRIMEIRO cruzamento
   // na sequencia circular dos nos (intervalo que cruza a origem).
