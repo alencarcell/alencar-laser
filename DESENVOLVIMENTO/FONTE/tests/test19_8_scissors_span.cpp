@@ -121,6 +121,48 @@ int main(){
           "retangulo isolado deixou de oferecer recorte integral");
 
 
+  // 20u: a foreign path vertex that genuinely crosses the target
+  // must delimit the same span as a crossing inside a single edge.
+  Editor vertexPass(Document{});
+  const int horizontal=vertexPass.line({0,0},{10,0});
+  const int joint=vertexPass.addContour({{5,-4},{5,0},{5,4}},false);
+  const int outerLimit=vertexPass.line({8,-4},{8,4});
+  const Document vertexBefore=vertexPass.state().doc;
+  planner.reset(vertexPass.state().doc);
+  auto safeVertex=planner.candidate(vertexPass.state().doc,
+                      {{horizontal,0},0,0,{6.5,0}});
+  require(bool(safeVertex),"cruzamento transversal em vertice externo foi recusado");
+  close(safeVertex->from,0.5);close(safeVertex->to,0.8);
+  close(safeVertex->preview.front().x,5.);
+  close(safeVertex->preview.back().x,8.);
+  vertexPass.removeScissorSpan(*safeVertex);
+  require(get(vertexPass.state().doc,{joint,0})&&
+          get(vertexPass.state().doc,{outerLimit,0}),
+          "corte no vertice externo alterou linhas de referencia");
+  require(vertexPass.undo()&&sameDoc(vertexBefore,vertexPass.state().doc),
+          "undo do cruzamento transversal nao restaurou geometria");
+
+  // A corner touching the line and returning to the same side is NOT a cut.
+  Editor tangentVertex(Document{});
+  const int target=tangentVertex.line({0,0},{10,0});
+  tangentVertex.addContour({{5,-4},{5,0},{6,-4}},false);
+  planner.reset(tangentVertex.state().doc);
+  auto tangentSpan=planner.candidate(tangentVertex.state().doc,
+                              {{target,0},0,0,{5.5,0}});
+  require(!tangentSpan&&planner.lastRejectionReason()=="vertex_or_tangent",
+          "tangencia de vertice foi tratada como cruzamento seguro");
+
+  // An open foreign endpoint meeting the target is a T, not a
+  // transverse two-sided crossing.
+  Editor tee(Document{});
+  const int horizontalT=tee.line({0,0},{10,0});
+  tee.line({5,-4},{5,0});
+  planner.reset(tee.state().doc);
+  require(!planner.candidate(tee.state().doc,
+                     {{horizontalT,0},0,0,{6,0}})&&
+          planner.lastRejectionReason()=="vertex_or_tangent",
+          "ponta externa em T foi promovida a intersecao transversal");
+
   // Reproducao numerica da geometria enviada pelo operador: objeto 575.
   // O caminho aberto tem uma ponta acima do triangulo e termina com um
   // vertice sobre a PRIMEIRA aresta, uma junção em T de ponta externa.
