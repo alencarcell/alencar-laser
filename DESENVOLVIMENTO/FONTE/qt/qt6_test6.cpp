@@ -7041,7 +7041,7 @@ static QJsonObject editTools197Test(const QString& directory){
  auto* panelCut=edgeWindow.findChild<QPushButton*>("objects_edge_trim_20z");
  auto* panelAlign=edgeWindow.findChild<QGroupBox*>("objects_alignment_group_20z");
  check(panelSummary&&panelCut&&panelAlign,"20z: contextual Objects inspector absent");
- check(!panelAlign->isVisible(),"20z: alignment shown with no selection");
+ check(panelAlign->isHidden(),"20z: alignment shown with no selection");
  panelCut->click();
  check(ev.tool==QtEditorLab::Tool::EdgeTrim,
        "20z: Objects panel did not activate between-nodes cutter");
@@ -7068,12 +7068,12 @@ static QJsonObject editTools197Test(const QString& directory){
  edgeWindow.refresh();
  check(panelSummary->text().contains("Objeto #"),
        "20z: Objects summary did not follow the active selection");
- check(!panelAlign->isVisible(),
+ check(panelAlign->isHidden(),
        "20z: one selected object incorrectly enabled alignment");
  ev.selected.clear();
  for(const auto& [id,meta]:ev.editor.state().objects)ev.selected.insert(id);
  edgeWindow.refresh();
- check(panelAlign->isVisible(),
+ check(!panelAlign->isHidden(),
        "20z: alignment not available after selecting two objects");
  pressKey(edgeWindow,Qt::Key_Z,Qt::ControlModifier);
  check(sameDoc(edgeOriginal,ev.editor.state().doc),
