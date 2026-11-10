@@ -5276,10 +5276,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     layerPalette_.push_back(b);swatches->addWidget(b);
   }
   swatches->addStretch();palScroll->setWidget(palBody);paletteOuter->addWidget(palScroll,1);
-  auto* sendToLayer=new QPushButton("→ Enviar seleção");sendToLayer->setObjectName("quick_move_layer");
-  sendToLayer->setToolTip("Selecionar uma ou mais formas, clicar na camada e enviar (Ctrl+L)");
-  sendToLayer->setFocusPolicy(Qt::NoFocus);paletteOuter->addWidget(sendToLayer);
-  connect(sendToLayer,&QPushButton::clicked,this,[this]{buttons.at("move_layer")->click();});
+  // A paleta ja transfere a selecao no clique (e ativa a camada quando
+  // vazia); nao duplicar a acao com um botao que falha sem selecao.
+  // Manter comando interno move_layer/Ctrl+L para compatibilidade com testes
+  // antigos e transferencia de curvas Bezier nativas.
   layout->insertWidget(layout->count()-1,paletteFrame);
   connect(layers,&QComboBox::currentIndexChanged,this,[this]{
     if(refreshing)return;
