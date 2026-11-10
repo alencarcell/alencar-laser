@@ -2453,10 +2453,34 @@ void mousePressEvent(QMouseEvent* e)override{
      }
      if(grouped)reason="Tesoura: forma agrupada; desagrupe para recortar.";
      else if(locked||hidden)reason="Tesoura: objeto em camada bloqueada ou oculta.";
-     else reason="Tesoura: contorno encontrado, mas sem trecho seguro; verifique vertice, tangencia, sobreposicao ou geometria composta.";
+     else {
+      ScissorSpanPlanner audit;
+      audit.reset(editor.state().doc,[&](Key key){
+       const auto mi=editor.state().objects.find(key.object);
+       if(mi==editor.state().objects.end())return false;
+       const auto li=editor.state().layers.find(mi->second.layer);
+       return li!=editor.state().layers.end()&&li->second.visible;
+      });
+      (void)audit.candidate(editor.state().doc,hits.front());
+      const auto& kind=audit.lastRejectionReason();
+      if(kind=="collinear_overlap")
+       reason="Tesoura: linhas sobrepostas. Separe caminhos ou remova duplicidades antes de cortar.";
+      else if(kind=="vertex_or_tangent")
+       reason="Tesoura: contato em vertice ou tangencia. Nenhum trecho seguro foi identificado.";
+      else if(kind=="degenerate_edge")
+       reason="Tesoura: aresta sem comprimento. Corrija nos coincidentes.";
+      else if(kind=="single_closed_intersection")
+       reason="Tesoura: apenas uma intersecao no contorno fechado; faltam limites seguros.";
+      else if(kind=="boundary_proximity")
+       reason="Tesoura: cursor muito proximo do cruzamento. Clique no meio do trecho.";
+      else reason="Tesoura: intervalo inseguro ou indefinido; contorno preservado.";
+      if(scissorDetail)scissorDetail(kind=="none"?"ambiguous":kind,
+                                    hits.front().key.object,hits.front().segment);
+     }
+     if(grouped||locked||hidden)
+      if(scissorDetail)scissorDetail(grouped?"grouped":(locked?"locked":"hidden"),
+                                    hits.front().key.object,hits.front().segment);
      if(diagnosticEvent)diagnosticEvent("scissor_no_safe_span",1);
-     if(scissorDetail)scissorDetail(grouped?"grouped":(locked?"locked":(hidden?"hidden":"ambiguous")),
-       hits.front().key.object,hits.front().segment);
     }
     if(toolWarning)toolWarning(reason);
     e->accept();return;
