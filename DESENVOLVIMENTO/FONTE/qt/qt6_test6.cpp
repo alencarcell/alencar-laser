@@ -9191,7 +9191,11 @@ static QJsonObject escapeWheelStudy20sTest(){
  auto* diameter=dialog.findChild<QDoubleSpinBox*>("escape_diameter_20s");
  auto* rotation=dialog.findChild<QComboBox*>("escape_rotation_20s");
  auto* summary=dialog.findChild<QLabel*>("escape_summary_20s");
- auto* preview=dialog.findChild<alaser::escape20s::Preview*>("escape_preview_20s");
+ // Qt's typed findChild<T>() requires T to declare Q_OBJECT. Preview
+ // intentionally inherits QWidget without its own Q_OBJECT macro; locate
+ // through QWidget's metaobject, then cast to the known concrete widget.
+ auto* previewWidget=dialog.findChild<QWidget*>("escape_preview_20s");
+ auto* preview=static_cast<alaser::escape20s::Preview*>(previewWidget);
  auto* more=dialog.findChild<QPushButton*>("escape_zoom_in_20s");
  auto* fit=dialog.findChild<QPushButton*>("escape_zoom_fit_20s");
  check(teeth&&diameter&&rotation&&summary&&preview&&more&&fit,
