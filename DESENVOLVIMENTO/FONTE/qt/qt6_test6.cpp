@@ -483,6 +483,10 @@ class QtEditorLab final:public QGraphicsView{
  QGraphicsPathItem* scissorPreview_=nullptr;
  uint64_t scissorHoverEvents_=0;
  std::optional<QPoint> scissorLastHoverPosition_;
+ std::optional<Hit> edgeTrimHover20z_;
+ std::optional<QPoint> edgeTrimPosition20z_;
+ QGraphicsPathItem* edgeTrimPreview20z_=nullptr;
+ uint64_t edgeTrimGeneration20z_=std::numeric_limits<uint64_t>::max();
  // TESTE_12: caminho continuo e o modo seguro padrao.
  // Blocos sao EXCLUSIVAMENTE experimentais (ALENCAR_LAB_CHUNKS_EXPERIMENTAL=1).
  bool continuousPreview_=false;
@@ -1353,7 +1357,7 @@ private:
  }
 
 public:
- enum class Tool{Select,Nodes,Scissors,Rectangle,Line,Ellipse,Polygon,Pencil,Text,DrawBezier};
+ enum class Tool{Select,Nodes,Scissors,EdgeTrim,Rectangle,Line,Ellipse,Polygon,Pencil,Text,DrawBezier};
  Tool tool=Tool::Select;
  Editor editor;
  std::set<int> selected;
@@ -1997,6 +2001,54 @@ public:
   if(scissorPreview_){scene_.removeItem(scissorPreview_);delete scissorPreview_;scissorPreview_=nullptr;}
   viewport()->setCursor(Qt::ArrowCursor);
  }
+ // 20z: CYAN marks exactly one edge between consecutive nodes.
+ void clearEdgeTrimHover20z(){
+  edgeTrimHover20z_.reset();edgeTrimPosition20z_.reset();
+  edgeTrimGeneration20z_=std::numeric_limits<uint64_t>::max();
+  if(edgeTrimPreview20z_){
+   scene_.removeItem(edgeTrimPreview20z_);
+   delete edgeTrimPreview20z_;edgeTrimPreview20z_=nullptr;
+  }
+ }
+ bool edgeTrimCurrent20z(QPoint at)const{
+  return tool==Tool::EdgeTrim&&!nativeMode_&&!busy()&&
+         edgeTrimHover20z_.has_value()&&edgeTrimPreview20z_!=nullptr&&
+         edgeTrimGeneration20z_==editor.generation&&
+         edgeTrimPosition20z_&&
+         (*edgeTrimPosition20z_-at).manhattanLength()<=1;
+ }
+ bool edgeTrimPreviewVisible20z()const{return edgeTrimPreview20z_!=nullptr;}
+ void updateEdgeTrimHover20z(QPoint at){
+  if(tool!=Tool::EdgeTrim||nativeMode_||busy()){clearEdgeTrimHover20z();return;}
+  std::optional<Hit> chosen;
+  for(const Hit& hit:clickHits(at)){
+   const Contour* c=get(editor.state().doc,hit.key);
+   if(!c||!editable(editor.state(),hit.key.object)||
+      editor.state().objects.at(hit.key.object).group>0)continue;
+   const int edges=int(c->nodes.size())-(c->closed?0:1);
+   if(hit.segment<0||hit.segment>=edges)continue;
+   chosen=hit;break;
+  }
+  clearEdgeTrimHover20z();
+  if(!chosen){
+   viewport()->setToolTip("Entre nós: SEM CIANO = sem aresta livre sob o mouse. Camadas bloqueadas/grupos não são cortados.");
+   viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+   return;
+  }
+  const Contour* c=get(editor.state().doc,chosen->key);
+  const int i=chosen->segment,n=int(c->nodes.size());
+  QPainterPath segment;segment.moveTo(toQt(c->nodes[size_t(i)].p));
+  segment.lineTo(toQt(c->nodes[size_t((i+1)%n)].p));
+  QPen pen(QColor("#22D3EE"),3);pen.setCosmetic(true);
+  pen.setCapStyle(Qt::RoundCap);pen.setJoinStyle(Qt::RoundJoin);
+  edgeTrimPreview20z_=scene_.addPath(segment,pen);
+  edgeTrimPreview20z_->setZValue(46);
+  edgeTrimPreview20z_->setAcceptedMouseButtons(Qt::NoButton);
+  edgeTrimHover20z_=*chosen;edgeTrimPosition20z_=at;
+  edgeTrimGeneration20z_=editor.generation;
+  viewport()->setToolTip("Entre nós: a aresta CIANO entre 2 nós será removida. Ctrl+Z desfaz.");
+  viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+ }
  void updateScissorHover(QPoint where){
   ++scissorHoverEvents_;
   scissorLastHoverPosition_=where;
@@ -2078,7 +2130,7 @@ public:
   if(bezierDrawing_&&t!=Tool::DrawBezier)finishBezierDraft(false);
   if(!busy()){
    nativeInsertArmed_=false;
-   clearScissorHover();nativeMode_=false;tool=t;
+   clearScissorHover();clearEdgeTrimHover20z();nativeMode_=false;tool=t;
    viewport()->setCursor(Qt::ArrowCursor);viewport()->update();
   }
  }
@@ -2148,7 +2200,7 @@ public:
   // Qt fornece unidades da viewport em pixels logicos; passamos o DPR separadamente.
   const double pxPerMm=std::max(1e-8,std::min(sx,sy));
   // Tolerancia maior apenas para localizar linhas finas com a Tesoura.
-  const double tolerancePx=(tool==Tool::Scissors?9.:6.);
+  const double tolerancePx=(tool==Tool::Scissors||tool==Tool::EdgeTrim?9.:6.);
   auto hs=picker_.query(editor,fromQt(mapToScene(viewportPoint)),
                         tolerancePx,pxPerMm,viewport()->devicePixelRatioF());
   sample(hitTestMs,profiler.nsecsElapsed()/1e6);return hs;
@@ -2440,6 +2492,29 @@ void mousePressEvent(QMouseEvent* e)override{
     }
    }
    if(stateChanged)stateChanged();
+   e->accept();return;
+  }
+  if(tool==Tool::EdgeTrim){
+   const QPoint at=e->position().toPoint();
+   if(!edgeTrimCurrent20z(at))updateEdgeTrimHover20z(at);
+   if(!edgeTrimHover20z_){
+    if(toolWarning)toolWarning("Entre nós: aproxime o cursor de uma aresta editável. Sem ciano, não corta.");
+    e->accept();return;
+   }
+   try{
+    const Hit target=*edgeTrimHover20z_;
+    clearEdgeTrimHover20z();
+    const int result=editor.removePolylineEdge(target.key,target.segment);
+    selected.clear();active_.reset();rebuild();
+    if(get(editor.state().doc,target.key))activate(target.key);
+    else if(result>0&&get(editor.state().doc,{result,0}))activate({result,0});
+    if(diagnosticEvent)diagnosticEvent("polyline_edge_between_nodes_cut",1);
+    if(toolWarning)toolWarning("Somente a aresta entre os dois nós foi removida. Ctrl+Z restaura.");
+    if(stateChanged)stateChanged();
+   }catch(const std::exception& ex){
+    clearEdgeTrimHover20z();
+    if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));
+   }
    e->accept();return;
   }
   if(tool==Tool::Scissors){
@@ -2784,6 +2859,7 @@ void mouseMoveEvent(QMouseEvent* e)override{
   }
   if(strokeDrawing_){drawCurrent_=e->position();pendingPreview_->setPath(temporaryShape());frameUpdates++;e->accept();return;}
   if(tool==Tool::Scissors){updateScissorHover(e->position().toPoint());e->accept();return;}
+  if(tool==Tool::EdgeTrim){updateEdgeTrimHover20z(e->position().toPoint());e->accept();return;}
   QGraphicsView::mouseMoveEvent(e);
  }
 void mouseReleaseEvent(QMouseEvent* e)override{
