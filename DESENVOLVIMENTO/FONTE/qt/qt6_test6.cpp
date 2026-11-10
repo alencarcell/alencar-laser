@@ -25,6 +25,7 @@
 #include "render_chunks.hpp"
 #include "rotary_dialog_19_9.hpp"
 #include "gear_dialog_19_9.hpp"
+#include "escapement_study_dialog_20s.hpp"
 #include "gear_compound_dialog_19_9.hpp"
 #include "mechanism_studio_dialog_19_9.hpp"
 #include <QApplication>
@@ -3529,9 +3530,40 @@ public:
   view.activate({inserted.front(),0});recoveryPolicy_.edited();
   captureEvent("gear_generator_created",int(inserted.size()));
   refresh();
-  status->setText(QString("Engrenagem de %1 dentes criada (%2 contornos, um Undo). "
-    "Confira espessura do material, folga e kerf antes de cortar.")
-    .arg(spec.teeth).arg(inserted.size()));
+  const QString profileNote=spec.profile==alaser::gear::ToothProfile::Involute
+    ?"Confira espessura, folga e kerf antes de cortar."
+    :"Perfil angular/serrilhado decorativo: engrenamento mecânico NÃO validado.";
+  status->setText(QString("Engrenagem de %1 dentes criada (%2 contornos, um Undo). %3")
+    .arg(spec.teeth).arg(inserted.size()).arg(profileNote));
+ }
+
+ // Create only cutting wheel contours; guide arm, pivot and pallet arc
+ // are displayed in the preview, NEVER included in document/export.
+ void insertEscapeWheelStudy(const alaser::escape20s::Settings& spec,
+                             alaser::escape20s::Pt center){
+  check(!view.busy(),"Conclua o gesto antes de gerar roda de escape.");
+  check(std::isfinite(center.x)&&std::isfinite(center.y),"Centro invalido.");
+  const auto model=alaser::escape20s::generate(spec);
+  const int layerId=layers->currentData().toInt();
+  const auto& layer=view.editor.state().layers.at(layerId);
+  check(layer.visible&&!layer.locked,"Camada deve estar visivel e desbloqueada");
+  auto toEditor=[&](const std::vector<alaser::escape20s::Pt>& source){
+   std::vector<Pt> result;result.reserve(source.size());
+   for(const auto& p:source)result.push_back({center.x+p.x,center.y-p.y});
+   return result;
+  };
+  std::vector<std::vector<Pt>> contours;
+  contours.push_back(toEditor(model.wheel));
+  if(!model.axleHole.empty())contours.push_back(toEditor(model.axleHole));
+  const auto ids=view.editor.addContours(std::move(contours),true,layerId,true);
+  view.clearSelection();view.invalidateSelectionCache();view.rebuild();
+  view.activate({ids.front(),0});recoveryPolicy_.edited();
+  captureEvent("escape_wheel_study_created",int(ids.size()));
+  refresh();
+  status->setText(QString(
+   "Roda de escape %1 dentes (%2 contornos, um Undo). "
+   "Pivo e guias NAO exportados. Contato e escapamento NAO homologados.")
+   .arg(spec.teeth).arg(ids.size()));
  }
 
  // Creates nominal editable outlines only. No output/G-code/hardware.
@@ -5115,6 +5147,21 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    const auto settings=dialog.parameters();
    const auto center=dialog.centerMm();
    run([this,settings,center]{insertGeneratedGear(settings,center);});
+   view.setFocus();
+  });
+
+  auto* escapeAction=gearsMenu->addAction("Roda de escape — estudo geométrico (OFFLINE)...");
+  escapeAction->setObjectName("generate_escape_wheel_study_20s");
+  escapeAction->setIcon(alaser::toolGlyph("gear_simple"));
+  escapeAction->setToolTip("Roda especial de referência para escapamento: SOMENTE roda e furo no projeto. Pivo e palhetas exibidos como guias.");
+  connect(escapeAction,&QAction::triggered,this,[this]{
+   if(view.busy()){status->setText("Conclua o gesto antes de gerar a roda de escape.");return;}
+   alaser::escape20s::Dialog dlg(workspaceCfg_.drawingWidth,
+                                  workspaceCfg_.drawingHeight,this);
+   if(dlg.exec()!=QDialog::Accepted){view.setFocus();return;}
+   const auto params=dlg.parameters();
+   const auto center=dlg.centerMm();
+   run([this,params,center]{insertEscapeWheelStudy(params,center);});
    view.setFocus();
   });
 
