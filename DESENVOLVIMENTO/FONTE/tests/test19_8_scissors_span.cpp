@@ -155,16 +155,97 @@ int main(){
   require(!tangentSpan&&planner.lastRejectionReason()=="vertex_or_tangent",
           "tangencia de vertice foi tratada como cruzamento seguro");
 
-  // An open foreign endpoint meeting the target is a T, not a
-  // transverse two-sided crossing.
+  // 20y: the tip of an independent OPEN path exactly on a target edge
+  // is a trim boundary (T). The foreign path is not grouped or modified.
   Editor tee(Document{});
   const int horizontalT=tee.line({0,0},{10,0});
-  tee.line({5,-4},{5,0});
+  const int verticalT=tee.line({5,-4},{5,0});
+  const Document teeBefore=tee.state().doc;
   planner.reset(tee.state().doc);
-  require(!planner.candidate(tee.state().doc,
-                     {{horizontalT,0},0,0,{6,0}})&&
-          planner.lastRejectionReason()=="vertex_or_tangent",
-          "ponta externa em T foi promovida a intersecao transversal");
+  auto teeLimit=planner.candidate(tee.state().doc,
+                            {{horizontalT,0},0,0,{7,0}});
+  require(bool(teeLimit),"20y: terminal real em T bloqueou o contorno independente");
+  close(teeLimit->from,.5);close(teeLimit->to,1.);
+  tee.removeScissorSpan(*teeLimit);
+  require(get(tee.state().doc,{verticalT,0})!=nullptr,
+          "20y: guia com terminal em T foi excluida");
+  require(tee.undo()&&sameDoc(teeBefore,tee.state().doc),
+          "20y: Undo nao restaurou a juncao T");
+
+  // Core user regression: first trim between two crossings, then trim the
+  // OTHER line at the newly created endpoint, then trim a remaining piece
+  // AGAIN while the original crossing is now an endpoint.
+  Editor repeat(Document{});
+  const int horizontalR=repeat.line({0,0},{12,0});
+  const int fence2=repeat.line({2,-5},{2,5});
+  const int fence4=repeat.line({4,-5},{4,5});
+  const int fence8=repeat.line({8,-5},{8,5});
+  const int fence10=repeat.line({10,-5},{10,5});
+  const Document repeatedOriginal=repeat.state().doc;
+  planner.reset(repeat.state().doc);
+  auto first=planner.candidate(repeat.state().doc,
+                          {{horizontalR,0},0,0,{6,0}});
+  require(bool(first),"20y: primeiro corte entre dois cruzamentos falhou");
+  close(first->from,4./12.);close(first->to,8./12.);
+  const int rightR=repeat.removeScissorSpan(*first,false);
+  require(rightR>0&&rightR!=horizontalR,
+          "20y: primeiro corte nao produziu dois caminhos livres");
+  require(repeat.state().objects.at(horizontalR).group==0&&
+          repeat.state().objects.at(rightR).group==0,
+          "20y: corte criou agrupamento inesperado");
+  const Document afterFirst=repeat.state().doc;
+
+  // Vertical x=4 is still cuttable where the left remnant ENDS at x=4.
+  planner.reset(repeat.state().doc);
+  auto nextVertical=planner.candidate(repeat.state().doc,
+                          {{fence4,0},0,0,{4,-2}});
+  require(bool(nextVertical),
+          "20y: segunda linha nao corta em extremidade gerada pelo primeiro recorte");
+  close(nextVertical->from,0.);close(nextVertical->to,.5);
+  repeat.removeScissorSpan(*nextVertical,false);
+  require(get(repeat.state().doc,{horizontalR,0})&&
+          get(repeat.state().doc,{fence2,0})&&
+          get(repeat.state().doc,{fence8,0}),
+          "20y: segunda tesourada afetou outras linhas independentes");
+  // Now x=4 is an endpoint on BOTH paths; it cannot falsely veto the
+  // interval x=2..4 on the already-trimmed horizontal remnant.
+  planner.reset(repeat.state().doc);
+  auto cutAgain=planner.candidate(repeat.state().doc,
+                            {{horizontalR,0},0,0,{3,0}});
+  require(bool(cutAgain),
+          "20y: resto do caminho ja cortado ficou bloqueado no ponto terminal");
+  close(cutAgain->preview.front().x,2.);
+  close(cutAgain->preview.back().x,4.);
+  const Document beforeThird=repeat.state().doc;
+  repeat.removeScissorSpan(*cutAgain,false);
+  require(repeat.undo()&&sameDoc(beforeThird,repeat.state().doc),
+          "20y: Undo do terceiro corte nao restaurou o desenho");
+
+  // Reverse-side proof: right remnant starts at x=8 (terminal contact),
+  // but the next real crossing at x=10 must remain usable.
+  planner.reset(repeat.state().doc);
+  auto rightInterval=planner.candidate(repeat.state().doc,
+                           {{rightR,0},0,0,{9,0}});
+  require(bool(rightInterval),
+          "20y: terminal inicial bloqueou cruzamento posterior no mesmo resto");
+  close(rightInterval->preview.front().x,8.);
+  close(rightInterval->preview.back().x,10.);
+  repeat.removeScissorSpan(*rightInterval,false);
+  require(get(repeat.state().doc,{fence10,0})!=nullptr,
+          "20y: limite vertical foi excluido apos corte sucessivo");
+  require(repeat.undo()&&repeat.undo()&&repeat.undo()&&
+          sameDoc(repeatedOriginal,repeat.state().doc),
+          "20y: Undo em cadeia nao restaurou as linhas independentes");
+
+  // Near misses must NOT be upgraded to terminal intersections.
+  Editor nearT(Document{});
+  const int nearH=nearT.line({0,0},{10,0});
+  nearT.line({5,-4},{5,-0.001});
+  planner.reset(nearT.state().doc);
+  const auto noContact=planner.candidate(nearT.state().doc,
+                                  {{nearH,0},0,0,{7,0}});
+  require(bool(noContact),"20y: linha independente sem intersecao recusada");
+  close(noContact->from,0.);close(noContact->to,1.);
 
   // 20x: the CUT PATH crosses a straight foreign line exactly at its
   // own interior vertices. This is a true transverse crossing, not a touch.
