@@ -9206,6 +9206,18 @@ static QJsonObject escapeWheelStudy20sTest(){
  check(baseline.wheel.size()==150&&baseline.axleHole.size()==96&&
        baseline.anchorReferenceArc.size()==65,
        "Contornos e guias nao construidos");
+ // Capture preview performance as diagnostics, NOT a machine-specific speedup
+ // claim; offscreen p95 is only comparable to an identical Qt setup.
+ std::vector<double> previewPaintMs;
+ previewPaintMs.reserve(24);
+ for(int i=0;i<24;++i){
+  QElapsedTimer clock;clock.start();
+  const auto shot=preview->grab().toImage();
+  check(!shot.isNull(),"Previa da roda nao foi renderizada");
+  previewPaintMs.push_back(double(clock.nsecsElapsed())/1e6);
+ }
+ std::sort(previewPaintMs.begin(),previewPaintMs.end());
+ const double previewP95=previewPaintMs.at(22);
  const auto imageA=preview->grab().toImage();
  rotation->setCurrentIndex(1);
  QApplication::processEvents();
@@ -9241,6 +9253,8 @@ static QJsonObject escapeWheelStudy20sTest(){
   {"bore_nodes",96},{"guide_nodes_exported",0},
   {"square_pivot_guide_only",true},{"preview_rotation_changes",true},
   {"preview_zoom_fit",true},{"undo_redo_atomic",true},
+  {"preview_grab_p95_ms",previewP95},{"preview_grab_samples",24},
+  {"preview_metric_type","Qt QWidget.grab offscreen, diagnostic only"},
   {"hardware_commands_sent",false},{"production_homologated",false}};
 }
 
