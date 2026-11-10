@@ -716,7 +716,7 @@ public:
    bool touched=false;for(int id:text.members)if(ids.count(id))touched=true;
    if(touched)ids.insert(text.members.begin(),text.members.end());
   }
-  if(ids.size()>2000)throw std::runtime_error("too many objects to duplicate");
+  if(ids.size()>5000)throw std::runtime_error("too many objects to duplicate (5000 max)");
   size_t nodes=0,contours=0;
   for(const auto& c:current.doc.contours)if(ids.count(c.key.object)){
    nodes+=c.nodes.size();++contours;
