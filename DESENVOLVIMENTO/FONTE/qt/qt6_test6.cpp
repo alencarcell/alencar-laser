@@ -9184,6 +9184,66 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
          {"dpi_2x",true},{"normal_active_disabled_states",true},
          {"hardware_commands_sent",false}};
 }
+static QJsonObject escapeWheelStudy20sTest(){
+ // Full GUI regression, performed offline and with no machine access.
+ alaser::escape20s::Dialog dialog(400.,400.);
+ auto* teeth=dialog.findChild<QSpinBox*>("escape_teeth_20s");
+ auto* diameter=dialog.findChild<QDoubleSpinBox*>("escape_diameter_20s");
+ auto* rotation=dialog.findChild<QComboBox*>("escape_rotation_20s");
+ auto* summary=dialog.findChild<QLabel*>("escape_summary_20s");
+ auto* preview=dialog.findChild<alaser::escape20s::Preview*>("escape_preview_20s");
+ auto* more=dialog.findChild<QPushButton*>("escape_zoom_in_20s");
+ auto* fit=dialog.findChild<QPushButton*>("escape_zoom_fit_20s");
+ check(teeth&&diameter&&rotation&&summary&&preview&&more&&fit,
+       "Janela de estudo de escapamento incompleta");
+ dialog.show();QApplication::processEvents();
+ check(teeth->value()==30&&std::abs(diameter->value()-80.)<1e-10,
+       "Valores iniciais do estudo alterados");
+ check(summary->text().contains("APENAS GUIAS")&&
+       summary->text().contains("Sem validação"),
+       "Aviso de guias nao exportaveis ausente");
+ const auto baseline=alaser::escape20s::generate(dialog.parameters());
+ check(baseline.wheel.size()==150&&baseline.axleHole.size()==96&&
+       baseline.anchorReferenceArc.size()==65,
+       "Contornos e guias nao construidos");
+ const auto imageA=preview->grab().toImage();
+ rotation->setCurrentIndex(1);
+ QApplication::processEvents();
+ const auto imageB=preview->grab().toImage();
+ check(!imageA.isNull()&&!imageB.isNull()&&imageA!=imageB,
+       "Sentido de giro nao atualizou a previa");
+ const double initial=preview->zoomFactor();
+ more->click();QApplication::processEvents();
+ check(preview->zoomFactor()>initial,"Botao de zoom nao ampliou a previa");
+ fit->click();QApplication::processEvents();
+ check(std::abs(preview->zoomFactor()-1.)<1e-10&&
+       QLineF(preview->panOffset(),QPointF(0,0)).length()<1e-10,
+       "Ajustar nao restaurou o enquadramento");
+ LabWindow w(Document{});w.resize(1050,760);w.show();
+ QApplication::processEvents();
+ check(w.findChild<QAction*>("generate_escape_wheel_study_20s")!=nullptr,
+       "Menu do estudo de roda de escape ausente");
+ const auto initialDoc=w.view.editor.state().doc;
+ const auto undoStart=w.view.editor.undoCount();
+ w.insertEscapeWheelStudy(dialog.parameters(),{200.,200.});
+ check(w.view.editor.state().doc.contours.size()==2&&
+       w.view.editor.undoCount()==undoStart+1,
+       "Geracao de roda e furo nao foi um unico Undo");
+ const auto& contours=w.view.editor.state().doc.contours;
+ check(contours[0].closed&&contours[0].nodes.size()==150&&
+       contours[1].closed&&contours[1].nodes.size()==96,
+       "Guia da ancora foi exportada por engano ou perda de nos");
+ check(w.view.editor.undo()&&sameDoc(initialDoc,w.view.editor.state().doc),
+       "Undo nao restaurou documento");
+ check(w.view.editor.redo()&&w.view.editor.state().doc.contours.size()==2,
+       "Redo nao restaurou roda");
+ return {{"status","PASS"},{"teeth",30},{"wheel_nodes",150},
+  {"bore_nodes",96},{"guide_nodes_exported",0},
+  {"square_pivot_guide_only",true},{"preview_rotation_changes",true},
+  {"preview_zoom_fit",true},{"undo_redo_atomic",true},
+  {"hardware_commands_sent",false},{"production_homologated",false}};
+}
+
 static QJsonObject gearMeasured20rTest(){
  // Focused Qt regression: measured angular teeth + interactive preview.
  alaser::gear::GearDialog dialog(400.,400.);
@@ -10546,6 +10606,17 @@ int main(int argc,char** argv){
   QFile file(out+"/RESULTADO_ICONES_19_9.json");
   if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
+ if(mode=="--escape-wheel-study-20s-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=escapeWheelStudy20sTest();}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
+  }
+  QFile file(out+"/RESULTADO_RODA_ESCAPE_20S.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
  }
  if(mode=="--gear-measured-20r-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
