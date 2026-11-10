@@ -77,10 +77,10 @@ int main(){
   const int gb=groupedEdge.line({10,0},{20,0});
   groupedEdge.group({ga,gb});
   const size_t beforeReject=groupedEdge.undoCount();
-  bool rejected=false;
+  bool groupedEdgeRejected=false;
   try{groupedEdge.removePolylineEdge({ga,0},0);}
-  catch(const std::exception&){rejected=true;}
-  require(rejected&&groupedEdge.undoCount()==beforeReject,
+  catch(const std::exception&){groupedEdgeRejected=true;}
+  require(groupedEdgeRejected&&groupedEdge.undoCount()==beforeReject,
           "20z: grouped contour was altered by edge cutter");
 
   // Regressao real do GUI 19.8: cruzamentos nas arestas verticais de
