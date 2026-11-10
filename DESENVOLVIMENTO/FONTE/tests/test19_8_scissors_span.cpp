@@ -97,11 +97,14 @@ int main(){
   const int base=unsafeInterior.addContour({{0,0},{5,0},{10,0}},false);
   unsafeInterior.line({5,-3},{5,3});
   planner.reset(unsafeInterior.state().doc);
-  auto ambiguous=planner.candidate(unsafeInterior.state().doc,
+  auto vertexOnStraight=planner.candidate(unsafeInterior.state().doc,
                      {{base,0},0,0,{2.5,0}});
-  require(!ambiguous,"cruzamento no vertice interior foi excluido sem seguranca");
-  require(planner.lastRejectionReason()=="vertex_or_tangent",
-          "intersecao em vertice nao recebeu motivo seguro");
+  require(bool(vertexOnStraight),
+          "20x: vertice interno colinear com cruzamento transversal deve permitir corte");
+  close(vertexOnStraight->from,0.);
+  close(vertexOnStraight->to,1.);
+  // A separate same-side corner/tangency is still rejected below.
+
   // Overlapping collinear segments are not unique trim boundaries.
   Editor overlap(Document{});
   const int longLine=overlap.line({0,0},{10,0});
