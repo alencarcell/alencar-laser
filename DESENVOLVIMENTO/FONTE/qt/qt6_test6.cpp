@@ -3070,6 +3070,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
   QAction* select=tools->addAction("Selecionar (V)");
   QAction* line=tools->addAction("Linha contínua");
   QAction* scissors=tools->addAction("Tesoura (K)");
+  QAction* edgeTrim=tools->addAction("Remover lado entre nós (J)");
   QAction* nodes=tools->addAction("Editar nós");
   menu.addSeparator();
   QAction* traceBitmap=menu.addAction("Traçar imagem (Alt+T) — P&B");
@@ -3116,6 +3117,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
     if(picked==select)requestToolChange(Tool::Select);
     else if(picked==line)requestToolChange(Tool::Line);
     else if(picked==scissors)requestToolChange(Tool::Scissors);
+    else if(picked==edgeTrim)requestToolChange(Tool::EdgeTrim);
     else if(picked==nodes)requestToolChange(Tool::Nodes);
    }
    if(stateChanged)stateChanged();
@@ -4310,10 +4312,14 @@ public:
      bezierToolActive_=true;view.enableNative(true);
      captureEvent("tool_bezier_activated");
      status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
-  compact(editorGrid,3,0,"scissors","✂ Tesoura","Trecho laranja = removido no clique (K). Em Bézier, remove a aresta entre âncoras; Ctrl+Z desfaz.",
+  compact(editorGrid,3,0,"scissors","✂ Tesoura","Trecho CIANO = recorte até as interseções (K). Bézier: remove aresta nativa. Ctrl+Z desfaz.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
      captureEvent("tool_scissors_activated");
-     status->setText("Tesoura: passe o mouse sobre um trecho; destaque laranja = corte completo. Ctrl+Z desfaz.");});
+     status->setText("Tesoura (K): CIANO = trecho entre cruzamentos. Ctrl+Z desfaz.");});
+  compact(editorGrid,5,0,"edge_trim","✂ Entre nós","J: remova somente UMA aresta entre dois nós consecutivos, sem cruzamentos. Prévia CIANO; Ctrl+Z desfaz.",
+    [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::EdgeTrim);
+     captureEvent("tool_edge_trim_activated");
+     status->setText("Entre nós (J): CIANO = só essa aresta será apagada. Ctrl+Z desfaz.");});
   compact(editorGrid,4,0,"new_bezier","Desenhar caminhos e curvas",
     "Clique cria segmento reto; clique e arraste cria curva Bézier. Duplo clique com Seleção edita nós. Direito conclui; Esc cancela.",
      [this]{
@@ -5172,6 +5178,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    });
   });
   command(editMenu,"Selecionar (Esc / V)","select");command(editMenu,"Tesoura (K)","scissors");
+  command(editMenu,"Remover aresta entre nós (J)","edge_trim");
   auto* arrangeMenu=mainMenu->addMenu("Organizar");
   command(arrangeMenu,"Agrupar","group");command(arrangeMenu,"Desagrupar","ungroup");
   command(arrangeMenu,"Enviar selecao para camada ativa (Ctrl+L)","move_layer");
@@ -5568,6 +5575,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     case QtEditorLab::Tool::Select:id="select";break;
     case QtEditorLab::Tool::Line:id="line";break;
     case QtEditorLab::Tool::Scissors:id="scissors";break;
+    case QtEditorLab::Tool::EdgeTrim:id="edge_trim";break;
     case QtEditorLab::Tool::Nodes:id="nodes";break;
     default:break;
    }
@@ -5583,6 +5591,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
   shortcut("V",[this]{buttons.at("select")->click();});
   shortcut("K",[this]{buttons.at("scissors")->click();});
+  shortcut("J",[this]{buttons.at("edge_trim")->click();});
   shortcut("Ctrl+K",[this]{buttons.at("scissors")->click();});
   shortcut("Ctrl+R",[this]{buttons.at("rectangle")->click();});
   shortcut("P",[this]{buttons.at("pencil")->click();});
