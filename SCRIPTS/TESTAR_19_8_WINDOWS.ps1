@@ -35,12 +35,12 @@ function Checar-Saida([string]$etapa) {
 # Captura ambos os fluxos do processo nativo. Start-Transcript sozinho pode
 # nao registrar o stderr emitido pelo g++/ninja no Windows PowerShell 5.1.
 function Compilar-QtComDiagnostico {
+    param([string[]]$Targets = @('alencar_test7_qt6'))
     $saidaPadrao = Join-Path $relatorios 'BUILD_QT_19_8_STDOUT.txt'
     $saidaErros = Join-Path $relatorios 'BUILD_QT_19_8_STDERR.txt'
     Write-Host 'Compilando Qt em modo diagnostico (1 processo); saida em arquivos separados...' -ForegroundColor Cyan
-    $processo = Start-Process -FilePath $cmake -ArgumentList @(
-        '--build', $build, '--parallel', '1', '--target', 'alencar_test7_qt6'
-    ) -WorkingDirectory $raiz -PassThru -Wait -NoNewWindow `
+    $argumentos = @('--build', $build, '--parallel', '1', '--target') + $Targets
+    $processo = Start-Process -FilePath $cmake -ArgumentList $argumentos -WorkingDirectory $raiz -PassThru -Wait -NoNewWindow `
       -RedirectStandardOutput $saidaPadrao -RedirectStandardError $saidaErros
     if ($processo.ExitCode -ne 0) {
         Write-Host "Compilacao Qt falhou (codigo $($processo.ExitCode)). PRIMEIROS ERROS REAIS:" -ForegroundColor Red
@@ -448,8 +448,9 @@ try {
         # Este gate precisa incluir tanto a geometria C++ dos recortes sucessivos
         # quanto o hover real Qt; um PASS grafico isolado nao homologa a Tesoura.
         Write-Host 'TESOURA: compilando nucleo 19.7/19.8 e regressao GUI Qt, offline.' -ForegroundColor Cyan
-        & $cmake --build $build --parallel 2 --target alencar_test7_qt6 alencar_test19_7_scissors_layers alencar_test19_8_scissors_span alencar_test19_8_native_scissors_realcut
-        Checar-Saida 'Compilacao Qt e nucleos Tesoura'
+        # O qt6_test6.cpp e muito grande: evitar compilar em paralelo com
+        # outros nucleos e preservar stdout/stderr completos do Ninja/g++.
+        Compilar-QtComDiagnostico -Targets @('alencar_test7_qt6', 'alencar_test19_7_scissors_layers', 'alencar_test19_8_scissors_span', 'alencar_test19_8_native_scissors_realcut')
         foreach ($nome in @('alencar_test19_7_scissors_layers', 'alencar_test19_8_scissors_span', 'alencar_test19_8_native_scissors_realcut')) {
             $executavel = Join-Path $build ($nome + '.exe')
             if (-not (Test-Path -LiteralPath $executavel -PathType Leaf)) { throw "Teste da Tesoura ausente: $executavel" }
