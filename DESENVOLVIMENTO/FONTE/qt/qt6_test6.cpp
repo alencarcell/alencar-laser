@@ -9099,6 +9099,30 @@ static QJsonObject sketchIcons199Audit(const QString& folder){
          {"dpi_2x",true},{"normal_active_disabled_states",true},
          {"hardware_commands_sent",false}};
 }
+static QJsonObject duplicateBatch20cRegression(){
+ Editor editor(Document{});
+ const int a=editor.rectangle({10,10},20,10);
+ const int b=editor.rectangle({50,10},20,10);
+ const int c=editor.rectangle({90,10},20,10);
+ editor.group({a,b});
+ const auto initial=editor.state().doc.contours.size();
+ const auto undoBefore=editor.undoCount();
+ const auto copies=editor.duplicateSelection({a,c},{3,3});
+ check(copies.size()==3,"Selecao em grupo nao foi expandida");
+ check(editor.state().doc.contours.size()==initial+3,
+       "Duplicacao perdeu contornos");
+ check(editor.undoCount()==undoBefore+1,"Duplicacao gerou multiplos Undo");
+ const auto g1=editor.state().objects.at(copies[0]).group;
+ const auto g2=editor.state().objects.at(copies[1]).group;
+ check(g1>0&&g1==g2&&g1!=editor.state().objects.at(a).group,
+       "Grupos duplicados nao sao independentes");
+ check(editor.undo()&&editor.state().doc.contours.size()==initial,
+       "Undo nao restaurou geometria");
+ check(editor.redo()&&editor.state().doc.contours.size()==initial+3,
+       "Redo nao restaurou copias");
+ return {{"status","PASS"},{"multi_duplicate",true},
+         {"undo_redo",true},{"machine_commands_sent",false}};
+}
 static QJsonObject gearGenerator199Test(){
  // No device, connection, G-code or physical action is involved.
  alaser::gear::GearDialog dialog(400.,400.);
@@ -9130,6 +9154,18 @@ static QJsonObject gearGenerator199Test(){
  previewEnabled->setChecked(true);
  check(!preview->isHidden(),"Reativar previa nao restaurou componente");
  const auto shape=alaser::gear::generate(dialog.parameters());
+ // Regressions: angular and serrated profiles must remain available.
+ auto* profile=dialog.findChild<QComboBox*>("gear_profile_20q");
+ check(profile&&profile->count()==3,"Perfis angular/serrilhado desapareceram");
+ profile->setCurrentIndex(1);
+ const auto angular=alaser::gear::generate(dialog.parameters());
+ check(!angular.outer.empty()&&angular.outer.size()!=shape.outer.size(),
+       "Perfil angular nao foi gerado");
+ profile->setCurrentIndex(2);
+ const auto saw=alaser::gear::generate(dialog.parameters());
+ check(!saw.outer.empty()&&saw.outer.size()==angular.outer.size(),
+       "Perfil serrilhado nao foi gerado");
+ profile->setCurrentIndex(0);
  check(!shape.outer.empty()&&shape.bore.size()==96,"Geometria de engrenagem incorreta");
  LabWindow w(Document{});w.resize(1100,750);w.show();QApplication::processEvents();
  check(w.findChild<QAction*>("generate_gear_offline_19_9")!=nullptr,
@@ -10085,6 +10121,17 @@ int main(int argc,char** argv){
   QFile file(out+"/RESULTADO_ICONES_19_9.json");
   if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson());return pass?0:1;
+ }
+ if(mode=="--duplicate-batch-20c-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=duplicateBatch20cRegression();}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
+  }
+  QFile file(out+"/RESULTADO_DUPLICACAO_LOTE_20C.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
  }
  if(mode=="--gear-generator-19-9-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
