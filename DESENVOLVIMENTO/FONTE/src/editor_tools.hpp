@@ -590,7 +590,8 @@ public:
  // Corte por INTERVALO CONTINUO: o preview escolhido e a geometria removida
  // usam os mesmos parametros. Os demais contornos nao sao modificados.
  // Uma unica transacao cria no maximo dois restos independentes.
- int removeScissorSpan(const ScissorSpan& span){
+ // Optional 20v join: exact endpoints only; Ctrl disables from the GUI.
+ int removeScissorSpan(const ScissorSpan& span,bool autoJoin=false){
   const Contour* source=get(current.doc,span.key);
   if(!source)throw std::runtime_error("contorno de tesoura ausente");
   const bool logicalClosed=source->closed||hasExactDuplicateClosure(*source);
@@ -666,6 +667,80 @@ public:
      for(const auto& c:state.doc.contours)if(c.key.object==span.key.object){others=true;break;}
      if(!others)state.objects.erase(span.key.object);
      selectedResult=0;
+    }
+   }
+   // Optional topology weld is in the SAME atomic change()/Undo.
+   // Only a newly cut endpoint can cause it; other coincidences are ignored.
+   if(autoJoin&&selectedResult>0){
+    const Pt fromPoint=pointAt(before,before.closed?wrapScissorParam(span.from,m):span.from);
+    const Pt toPoint=pointAt(before,before.closed?wrapScissorParam(span.to,m):span.to);
+    struct End {Key key;bool start;Pt pos;};
+    std::vector<End> ends;
+    const int layer=state.objects.at(span.key.object).layer;
+    for(const auto& c:state.doc.contours){
+     if(c.closed||c.nodes.size()<2)continue;
+     const auto meta=state.objects.find(c.key.object);
+     if(meta==state.objects.end()||meta->second.group||
+        meta->second.layer!=layer||!editable(state,c.key.object))continue;
+     bool isText=false;
+     for(const auto& [root,t]:state.editableTexts)
+      if(std::find(t.members.begin(),t.members.end(),c.key.object)!=t.members.end())
+       isText=true;
+     if(isText)continue;
+     int parts=0;
+     for(const auto& other:state.doc.contours)
+      if(other.key.object==c.key.object)++parts;
+     if(parts!=1)continue;
+     ends.push_back({c.key,true,c.nodes.front().p});
+     ends.push_back({c.key,false,c.nodes.back().p});
+    }
+    for(size_t i=0;i<ends.size();++i){
+     const auto& e=ends[i];
+     if(e.key.object!=span.key.object&&e.key.object!=nextObject)continue;
+     if(dist(e.pos,fromPoint)>1e-9&&dist(e.pos,toPoint)>1e-9)continue;
+     std::vector<size_t> touching;
+     for(size_t j=0;j<ends.size();++j)
+      if(dist(e.pos,ends[j].pos)<=1e-9)touching.push_back(j);
+     if(touching.size()!=2)continue;
+     size_t other=touching[0]==i?touching[1]:touching[0];
+     if(other==i||ends[other].key.object==e.key.object||
+        ends[other].key.object==span.key.object||
+        ends[other].key.object==nextObject)continue;
+     // A third path at the join point makes the topology ambiguous.
+     bool junction=false;
+     for(const auto& c:state.doc.contours){
+      if(c.key==e.key||c.key==ends[other].key)continue;
+      int edgeCount=int(c.nodes.size())-(c.closed?0:1);
+      for(int edge=0;edge<edgeCount;++edge){
+       Pt a=c.nodes[size_t(edge)].p,b=c.nodes[size_t(edge+1)%c.nodes.size()].p;
+       Pt v=b-a;double vv=norm2(v);
+       if(vv<=1e-18)continue;
+       double t=((e.pos-a).x*v.x+(e.pos-a).y*v.y)/vv;
+       if(t>=0.&&t<=1.&&dist(a+v*t,e.pos)<=1e-9){
+        junction=true;break;
+       }
+      }
+      if(junction)break;
+     }
+     if(junction)continue;
+     Contour* head=nullptr;Contour* tail=nullptr;
+     for(auto& c:state.doc.contours){
+      if(c.key==e.key)head=&c;
+      if(c.key==ends[other].key)tail=&c;
+     }
+     if(!head||!tail)continue;
+     std::vector<Node> first=head->nodes,second=tail->nodes;
+     if(e.start)std::reverse(first.begin(),first.end());
+     if(!ends[other].start)std::reverse(second.begin(),second.end());
+     first.insert(first.end(),second.begin()+1,second.end());
+     head->nodes=std::move(first);
+     const Key tailKey=ends[other].key;
+     state.doc.contours.erase(std::remove_if(state.doc.contours.begin(),
+      state.doc.contours.end(),[&](const Contour& c){return c.key==tailKey;}),
+      state.doc.contours.end());
+     state.objects.erase(tailKey.object);
+     selectedResult=e.key.object;
+     break;
     }
    }
   });
