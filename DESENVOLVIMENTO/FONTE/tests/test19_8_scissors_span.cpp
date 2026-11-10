@@ -163,6 +163,36 @@ int main(){
           planner.lastRejectionReason()=="vertex_or_tangent",
           "ponta externa em T foi promovida a intersecao transversal");
 
+  // 20v atomic weld contract. This artificially specified valid interval
+  // isolates the *post-cut join* from the planner's separate T-junction gate.
+  Editor weld(Document{});
+  const int cutLine=weld.line({0,0},{10,0});
+  const int continuation=weld.line({3,0},{3,4});
+  const Document weldBefore=weld.state().doc;
+  const auto undoBefore=weld.undoCount();
+  ScissorSpan trim{{cutLine,0},.3,.7,false,{{3,0},{7,0}}};
+  weld.removeScissorSpan(trim,true);
+  require(weld.undoCount()==undoBefore+1,"20v: weld created multiple Undo states");
+  require(weld.state().doc.contours.size()==2,
+          "20v: unique matching endpoint did not weld");
+  require(!get(weld.state().doc,{continuation,0}),
+          "20v: welded object retained as duplicate");
+  require(weld.undo()&&sameDoc(weldBefore,weld.state().doc),
+          "20v: Undo did not restore cut and weld atomically");
+  // Ctrl-style no-join leaves the cut pieces and the other path separate.
+  weld.removeScissorSpan(trim,false);
+  require(weld.state().doc.contours.size()==3&&
+          get(weld.state().doc,{continuation,0}),
+          "20v: no-join modifier failed");
+  // Different layers never weld, even with exact endpoints.
+  Editor otherLayer(Document{});
+  const int source=otherLayer.line({0,0},{10,0});
+  const int next=otherLayer.line({3,0},{3,4});
+  otherLayer.addLayer(2,"second");
+  otherLayer.moveToLayer(next,2);
+  otherLayer.removeScissorSpan({{source,0},.3,.7,false,{{3,0},{7,0}}},true);
+  require(otherLayer.state().doc.contours.size()==3,
+          "20v: joined contours across different layers");
   // Reproducao numerica da geometria enviada pelo operador: objeto 575.
   // O caminho aberto tem uma ponta acima do triangulo e termina com um
   // vertice sobre a PRIMEIRA aresta, uma junção em T de ponta externa.

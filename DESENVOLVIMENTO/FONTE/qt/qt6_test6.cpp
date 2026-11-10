@@ -2488,7 +2488,10 @@ void mousePressEvent(QMouseEvent* e)override{
    try{
     const ScissorSpan cutting=*scissorHover_;
     clearScissorHover();
-    const int obj=editor.removeScissorSpan(cutting);
+    // LightBurn-style modifier: Ctrl suppresses automatic endpoint joining.
+    // Geometry joining is conservative and disabled for native Bezier mode.
+    const bool joinAllowed=!e->modifiers().testFlag(Qt::ControlModifier);
+    const int obj=editor.removeScissorSpan(cutting,joinAllowed);
     selected.clear();rebuild();if(obj>0)activate({obj,0});
     if(diagnosticEvent)diagnosticEvent("scissor_continuous_span_removed",1);
     if(scissorDetail)scissorDetail("cut",cutting.key.object,int(cutting.from));
