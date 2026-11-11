@@ -793,16 +793,17 @@ public:
  // Rotate-aware affine resize. A single atomic transaction keeps grouped objects
  // intact; the preview rectangle is NOT serialized as project geometry.
  // [a b; c d] maps the local axes of the oriented selection.
- void affineObjects(std::vector<int> ids,Pt pivot,double a,double b,double c,double d){
+ void affineObjects(std::vector<int> ids,Pt pivot,double a,double b,double c,double d,Pt offset={}){
   const double determinant=a*d-b*c;
   if(!std::isfinite(pivot.x)||!std::isfinite(pivot.y)||
      !std::isfinite(a)||!std::isfinite(b)||!std::isfinite(c)||!std::isfinite(d)||
-     !std::isfinite(determinant)||std::abs(determinant)<1e-9)
+     !std::isfinite(determinant)||std::abs(determinant)<1e-9||
+     !std::isfinite(offset.x)||!std::isfinite(offset.y))
    throw std::runtime_error("invalid oriented resize");
   change([&](EditorState& st){
    apply(st,ids,[&](Pt p){
     const double x=p.x-pivot.x,y=p.y-pivot.y;
-    return Pt{pivot.x+a*x+b*y,pivot.y+c*x+d*y};
+    return Pt{pivot.x+a*x+b*y+offset.x,pivot.y+c*x+d*y+offset.y};
    });
   });
  }
