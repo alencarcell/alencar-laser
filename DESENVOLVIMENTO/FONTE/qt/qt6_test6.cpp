@@ -1604,7 +1604,15 @@ public:
   if(!enabled)nativeInsertArmed_=false;
   nativeMode_=enabled&&hasNativeDocument();
   nativeEditHandles_=nativeMode_;
-  if(nativeMode_){tool=Tool::Select;viewport()->setCursor(Qt::ArrowCursor);}
+  if(nativeMode_){
+   tool=Tool::Select;viewport()->setCursor(Qt::ArrowCursor);
+   if(!activeNative_&&nativeSession_->selected())activeNative_=nativeSession_->selected();
+   if(!activeNative_&&!selectedNative_.empty())activeNative_=*selectedNative_.rbegin();
+   if(activeNative_&&nativeEditable(*activeNative_)){
+    selected.clear();selectedNative_.clear();selectedNative_.insert(*activeNative_);
+    active_.reset();nativeSession_->select(*activeNative_);applySelectionStyles();
+   }
+  }
   updateNativePaths(false);
  }
  bool nativeSelectionMode()const{return nativeMode_&&!nativeEditHandles_;}
@@ -1620,7 +1628,12 @@ public:
  void nativeLayerChanged(){
   if(!nativeSession_)return;
   lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
-  // Layer selection changes metadata, not the geometry of every path.
+  for(auto it=selectedNative_.begin();it!=selectedNative_.end();){
+   if(!nativeEditable(*it))it=selectedNative_.erase(it);else ++it;
+  }
+  if(activeNative_&&!selectedNative_.count(*activeNative_))activeNative_.reset();
+  if(activeNative_)nativeSession_->select(*activeNative_);
+  else nativeSession_->clearSelection();
   updateNativeSelection199();
   if(stateChanged)stateChanged();
  }
