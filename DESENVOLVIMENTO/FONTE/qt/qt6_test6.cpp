@@ -1491,6 +1491,7 @@ public:
       (nativeSession_?nativeSession_->selected():std::nullopt);}
  const std::set<Key>& nativeSelectedKeys()const{return selectedNative_;}
  std::optional<Key> activeNativeKey()const{return activeNative_;}
+ size_t selectionCount()const{return totalSelectionCount();}
  std::optional<int64_t> nativeSelectedNode()const{
   if(!nativeSelectedPart_||nativeSelectedPart_->part==CurvePart::Edge)return {};
   return nativeSelectedPart_->nodeId;
@@ -6299,7 +6300,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const bool nativeSelected=nativeCount>0;
   const bool rasterSelected=view.rasterSelectionActive();
   const bool polyline=view.tool==QtEditorLab::Tool::Select&&!view.nativeModeActive()&&
-       !rasterSelected&&view.totalSelectionCount()>0;
+       !rasterSelected&&view.selectionCount()>0;
   const bool show=nativeEditing||polyline||rasterSelected;
   // Selection updates data; never switches tabs or changes canvas dimensions.
   if(!show){
