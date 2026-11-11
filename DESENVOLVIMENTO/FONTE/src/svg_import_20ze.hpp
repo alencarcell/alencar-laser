@@ -7,6 +7,7 @@
 #include <QRegularExpression>
 #include <QXmlStreamReader>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cctype>
 #include <limits>
@@ -393,8 +394,8 @@ inline void appendEllipse(double cx,double cy,double rx,double ry,
   {cx+rx,cy+k*ry},{cx-k*rx,cy+ry},
   {cx-rx,cy-k*ry},{cx+k*rx,cy-ry}}};
  const std::array<Pt,4> in{{
-  {cx+k*rx,cy+ry},{cx-rx,cy+k*ry},
-  {cx-k*rx,cy-ry},{cx+rx,cy-k*ry}}};
+  {cx+rx,cy-k*ry},{cx+k*rx,cy+ry},
+  {cx-rx,cy+k*ry},{cx-k*rx,cy-ry}}};
  for(std::size_t i=0;i<4;++i)c.nodes.push_back({0,p[i],in[i],out[i]});
  c.edgeKind.assign(4,1);
  appendContour(output,std::move(c),transform);
@@ -417,7 +418,7 @@ inline void appendRect(double x,double y,double w,double h,double rx,double ry,
  add({x+rx,y+h},{x+rx,y+h},{x+rx-k*rx,y+h});
  add({x,y+h-ry},{x,y+h-ry+k*ry},{x,y+h-ry});
  add({x,y+ry},{x,y+ry},{x,y+ry-k*ry});
- c.edgeKind={1,1,0,1,1,0,1,1};
+ c.edgeKind={0,1,0,1,0,1,0,1};
  appendContour(output,std::move(c),transform);
 }
 inline Matrix viewportTransform(const QXmlStreamAttributes& a,ImportResult& out){
