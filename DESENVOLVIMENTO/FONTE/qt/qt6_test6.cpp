@@ -9648,7 +9648,7 @@ static QJsonObject svgExport20zcTest(const QString& directory){
  const QString prefsPath=isolated.filePath("prefs.ini");
  const QString previous=isolated.filePath("projeto_anterior.alaser");
  QSettings first(prefsPath,QSettings::IniFormat);
- const QString defaultPath=alaser::svg20zc::initialSavePath(first,"Desenho.svg",previous);
+ const QString defaultPath=alaser::svg20zc::initialSavePath(first,"Desenho.svg",previous,false);
  check(QFileInfo(defaultPath).absolutePath()==isolated.path()&&
        QFileInfo(defaultPath).fileName()=="Desenho.svg",
        "20zc: diretorio inicial nao seguiu o local anterior");
@@ -9787,9 +9787,6 @@ static QJsonObject saveFolderPersistence20zdTest(const QString& outputDirectory)
        "20zd: reopened Save As dialog did not start in the last saved folder");
  reopened.close();QApplication::processEvents();
  QDir().mkpath(outputDirectory);
- QFile reportFile(QDir(outputDirectory).filePath("PROJETO_PASTA_MEMORIA_20ZD.alaser"));
- // The report is a JSON file; use a neutral extension only for its filename.
- Q_UNUSED(reportFile);
  return {{"status","PASS"},{"actual_save_as_dialog_exercised",true},
          {"file_written",true},{"settings_read_back_after_new_instance",true},
          {"reopened_save_as_initial_directory_matches",true},
