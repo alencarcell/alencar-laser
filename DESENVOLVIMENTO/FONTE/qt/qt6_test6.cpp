@@ -1383,6 +1383,7 @@ public:
   measurements.push_back(duration);
  }
  qint64 markerCandidates=0,markerDraws=0;
+ quint64 overlayLocalUpdates20zb_=0,overlayFullUpdates20zb_=0;
  std::function<void()> stateChanged;
  std::function<void(const QString&)> toolWarning;
  std::function<void(Pt)> requestTextAt;
@@ -1757,6 +1758,8 @@ public:
   setMouseTracking(true);viewport()->setMouseTracking(true);
   viewport()->setAttribute(Qt::WA_Hover,true);
   setFocusPolicy(Qt::StrongFocus);resize(780,560);
+  measurePairedPaintPhases199=
+    qEnvironmentVariable("ALENCAR_PAINT_PHASE_PROFILE_20ZB")=="1";
   clock_.start();rebuild();
  }
  // Apenas objetos que trocam de estado visual devem ser modificados.
@@ -1923,14 +1926,54 @@ public:
   sample(rebuildMs,rebuildProfiler.nsecsElapsed()/1e6);
   if(stateChanged)stateChanged();
  }
+ 
+ // 20zb: Selection frame and node markers are painted in drawForeground,
+ // not by QGraphicsItems. Repaint only their old/new screen-space bounds.
+ QRect foregroundOverlayDirtyRect20zb()const{
+  if(nativeMode_&&nativeEditHandles_)return viewport()->rect();
+  if(tool==Tool::Select&&!nativeEditHandles_){
+   const auto quad=selectionQuadScene();
+   if(!quad)return {};
+   const auto dirty=shapeOverlayDirtyRect199(quad);
+   // Invalid / nonfinite overlay: retain the previous safe full repaint.
+   return dirty?*dirty:viewport()->rect();
+  }
+  if(tool==Tool::Nodes&&active_){
+   const auto it=objects_.find(*active_);
+   if(it==objects_.end())return viewport()->rect();
+   QRectF pixels=viewportTransform().mapRect(it->second->sceneBoundingRect());
+   if(const auto* contour=get(editor.state().doc,*active_);
+      contour&&contour->nodes.size()==1){
+    const QPointF at=viewportTransform().map(toQt(contour->nodes.front().p));
+    pixels=pixels.united(QRectF(at,QSizeF(1.,1.)));
+   }
+   if(!std::isfinite(pixels.left())||!std::isfinite(pixels.top())||
+      !std::isfinite(pixels.right())||!std::isfinite(pixels.bottom()))
+    return viewport()->rect();
+   return pixels.adjusted(-12.,-12.,12.,12.)
+     .intersected(QRectF(viewport()->rect())).toAlignedRect();
+  }
+  return {};
+ }
+ void repaintForegroundChange20zb(const QRect& before,const QRect& after){
+  const QRect dirty=before.united(after).intersected(viewport()->rect());
+  if(dirty.isEmpty())return;
+  if(dirty==viewport()->rect())++overlayFullUpdates20zb_;
+  else ++overlayLocalUpdates20zb_;
+  viewport()->update(dirty);
+ }
+ quint64 overlayLocalUpdates20zb()const{return overlayLocalUpdates20zb_;}
+ quint64 overlayFullUpdates20zb()const{return overlayFullUpdates20zb_;}
  int activeObjectId()const{return active_?active_->object:0;}
  void activate(Key key,bool replace=true){
-  bool changedActive=!active_.has_value()||*active_!=key;
+  const bool changedActive=!active_||*active_!=key;
+  const bool changedSelection=replace&&
+     (selected.size()!=1||selected.count(key.object)==0);
+  const QRect before=foregroundOverlayDirtyRect20zb();
   active_=key;if(replace){selected.clear();selected.insert(key.object);}
   applySelectionStyles();
-  // Foreground node markers depend on the active contour. A repeated click
-  // on the same contour needs no full-viewport invalidation.
-  if(changedActive)viewport()->update();
+  if(changedActive||changedSelection)
+   repaintForegroundChange20zb(before,foregroundOverlayDirtyRect20zb());
  }
  // O caminho QGraphicsPathItem::setPath() invalida seus limites antigos/novos.
  // Os marcadores desenhados em drawForeground nao sao QGraphicsItems;
@@ -2189,8 +2232,10 @@ public:
   if(bezierDrawing_&&t!=Tool::DrawBezier)finishBezierDraft(false);
   if(!busy()){
    nativeInsertArmed_=false;
+   const QRect before=foregroundOverlayDirtyRect20zb();
    clearScissorHover();clearEdgeTrimHover20z();nativeMode_=false;tool=t;
-   viewport()->setCursor(Qt::ArrowCursor);viewport()->update();
+   viewport()->setCursor(Qt::ArrowCursor);
+   repaintForegroundChange20zb(before,foregroundOverlayDirtyRect20zb());
   }
  }
  QPointF constrainedCorner(QPointF first,QPointF last,bool shift)const{
@@ -2232,7 +2277,12 @@ public:
    if(diagnosticEvent)diagnosticEvent(redo?"redo":"undo",1);
   }
  }
- void clearSelection(){bool hadActive=active_.has_value();active_.reset();selected.clear();applySelectionStyles();if(hadActive)viewport()->update();}
+ void clearSelection(){
+  if(!active_&&selected.empty())return;
+  const QRect before=foregroundOverlayDirtyRect20zb();
+  active_.reset();selected.clear();applySelectionStyles();
+  repaintForegroundChange20zb(before,{});
+ }
  void selectAllVisible(){
   if(nativeMode_||busy())return;
   selected.clear();active_.reset();
@@ -3591,6 +3641,13 @@ public:
       {"history_memory_metric","capacity_based_node_payload_only"},
       {"fast_dense_display",view.fastDenseDisplay()},
       {"viewport_update_strategy","bounding_rect"},
+      {"foreground_overlay_local_updates_20zb",double(view.overlayLocalUpdates20zb())},
+      {"foreground_overlay_full_updates_20zb",double(view.overlayFullUpdates20zb())},
+      {"paint_phase_profile_20zb",view.measurePairedPaintPhases199},
+      {"paint_phase_paired_samples_20zb",int(view.pairedTotalMs199.size())},
+      {"paint_phase_paired_other_inclusive_p95_ms_20zb",percentile(view.pairedOtherInclusiveMs199,.95)},
+      {"paint_phase_paired_total_p95_ms_20zb",percentile(view.pairedTotalMs199,.95)},
+      {"paint_phase_paired_invalid_20zb",double(view.pairedPhaseInvalid199)},
       {"paint_samples",int(view.paintMs.size())},
       {"paint_p50_ms",percentile(view.paintMs,.5)},
       {"paint_p95_ms",percentile(view.paintMs,.95)},
@@ -6943,6 +7000,25 @@ static QJsonObject editTools197Test(const QString& directory){
  int line=v.editor.line({150,110},{190,110});
  int crossing=v.editor.line({90,110},{130,110});v.rebuild();
  v.centerOn(QPointF(135,110));QApplication::processEvents();
+ // 20zb: exercise small selection, node-edit tool changes and clear.
+ // Local repainting must never mutate canonical geometry or Undo history.
+ const auto beforeOverlay=stateText(v.editor.state());
+ const size_t beforeOverlayUndo=v.editor.undoCount();
+ const quint64 beforeLocal=v.overlayLocalUpdates20zb();
+ const quint64 beforeFull=v.overlayFullUpdates20zb();
+ v.activate({rectangle,0});
+ v.setTool(QtEditorLab::Tool::Nodes);
+ v.activate({rectangle,0});
+ v.setTool(QtEditorLab::Tool::Select);
+ v.clearSelection();
+ QApplication::processEvents();
+ check(v.overlayLocalUpdates20zb()>=beforeLocal+3,
+       "20zb: selection/node/tool localized repaint requests missing");
+ check(v.overlayFullUpdates20zb()==beforeFull,
+       "20zb: small selection unexpectedly forced full viewport repaint");
+ check(stateText(v.editor.state())==beforeOverlay&&
+       v.editor.undoCount()==beforeOverlayUndo,
+       "20zb: repaint changed canonical state/history");
  clickButton(w,"nodes");check(v.tool==QtEditorLab::Tool::Nodes,"nodes tool not activated");
  pressKey(w,Qt::Key_Escape);check(v.tool==QtEditorLab::Tool::Select,"Esc failed to restore selection");
  clickButton(w,"line");pressKey(w,Qt::Key_Escape);
