@@ -2836,62 +2836,66 @@ void mousePressEvent(QMouseEvent* e)override{
   e->accept();return;
  }
  if(e->button()!=Qt::LeftButton){QGraphicsView::mousePressEvent(e);return;}
-  if(nativeMode_){
-   if(tool==Tool::Select&&!nativeEditHandles_){
-    if(beginSelectionTransform(e->position())){e->accept();return;}
-    // Normal Select must pick both native Bézier and regular polylines.
-    if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),true)){
-     e->accept();return;
-    }
-    nativeMode_=false;
-    nativeSession_->clearSelection();
-    updateNativeSelection199();
-   }else if(tool==Tool::Select&&nativeEditHandles_){
-    // A click away from native edges/handles returns to ordinary selection.
-    const Pt at=fromQt(mapToScene(e->position().toPoint()));
-    const auto part=nativeSession_->selected()?pickCurveNode(
-      nativeSession_->committed(),*nativeSession_->selected(),
-      at,nativePxPerMm(),viewport()->devicePixelRatioF(),7):std::nullopt;
-    const auto hits=nativeSession_->pickEdges(
-      at,nativePxPerMm(),viewport()->devicePixelRatioF(),6);
-    if(part||!hits.empty()){nativeMousePress(e);return;}
-    nativeMode_=false;nativeEditHandles_=false;
-    nativeSession_->clearSelection();updateNativeSelection199();
-   }else{nativeMousePress(e);return;}
+  if(nativeMode_&&tool==Tool::Select&&nativeEditHandles_){
+   // Bézier node editing is an explicit mode. Clicking away exits it and
+   // returns to the unified object selector without touching canonical nodes.
+   const Pt at=fromQt(mapToScene(e->position().toPoint()));
+   const auto part=nativeSession_&&nativeSession_->selected()?pickCurveNode(
+     nativeSession_->committed(),*nativeSession_->selected(),
+     at,nativePxPerMm(),viewport()->devicePixelRatioF(),7):std::nullopt;
+   std::vector<CurveHit> hits;
+   if(nativeSession_)hits=nativeSession_->pickEdges(
+     at,nativePxPerMm(),viewport()->devicePixelRatioF(),6);
+   hits.erase(std::remove_if(hits.begin(),hits.end(),
+      [&](const CurveHit& hit){return !nativeEditable(hit.key);}),hits.end());
+   if(part||!hits.empty()){nativeMousePress(e);return;}
+   nativeMode_=false;nativeEditHandles_=false;
+   selectedNative_.clear();activeNative_.reset();
+   if(nativeSession_)nativeSession_->clearSelection();
+   updateNativeSelection199();
+  }else if(nativeMode_&&!nativeEditHandles_){
+   nativeMode_=false;
   }
-   if(tool==Tool::Select){
-    if(rasterSelected_&&beginRasterDrag(e->position())){e->accept();return;}
-    if(beginSelectionTransform(e->position())){rasterSelected_=false;
-      if(rasterFrame_)rasterFrame_->setVisible(false);
-      if(rasterHandle_)rasterHandle_->setVisible(false);
-      e->accept();return;}
-    if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),true)){
-     e->accept();return;
-    }
-    auto hits=clickHits(e->position().toPoint());
+  if(tool==Tool::Select){
+   if(rasterSelected_&&beginRasterDrag(e->position())){e->accept();return;}
+   if(beginSelectionTransform(e->position())){rasterSelected_=false;
+     if(rasterFrame_)rasterFrame_->setVisible(false);
+     if(rasterHandle_)rasterHandle_->setVisible(false);
+     e->accept();return;}
+   if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),false,e->modifiers())){
+    if(e->modifiers()==Qt::NoModifier)beginShapePreview(e->position());
+    e->accept();return;
+   }
+   auto hits=clickHits(e->position().toPoint());
    if(hits.empty()){
     if(beginRasterDrag(e->position())){e->accept();return;}
     rasterSelected_=false;
     if(rasterFrame_)rasterFrame_->setVisible(false);
     if(rasterHandle_)rasterHandle_->setVisible(false);
     marqueeActive_=true;marqueeStart_=e->position();
-   }
-   else {Key chosen=hits.front().key;
-    if(e->modifiers().testFlag(Qt::AltModifier)&&active_){auto it=std::find_if(hits.begin(),hits.end(),[&](const auto& h){return h.key==*active_;});if(it!=hits.end())chosen=hits[(size_t(it-hits.begin())+1)%hits.size()].key;}
-    if(e->modifiers().testFlag(Qt::ControlModifier)){
-     // Ctrl alterna: segundo clique remove; o alvo removido nao fica ativo.
-     if(selected.erase(chosen.object)){
-      active_.reset();applySelectionStyles();viewport()->update();
-     }else {selected.insert(chosen.object);activate(chosen,false);}
-    }else if(e->modifiers().testFlag(Qt::ShiftModifier)){
-     // Shift SEMPRE adiciona; nunca desmarca objeto ja selecionado.
-     selected.insert(chosen.object);activate(chosen,false);
+   }else{
+    Key chosen=hits.front().key;
+    if(e->modifiers().testFlag(Qt::AltModifier)&&active_){
+     auto it=std::find_if(hits.begin(),hits.end(),
+       [&](const auto& hit){return hit.key==*active_;});
+     if(it!=hits.end())chosen=hits[(size_t(it-hits.begin())+1)%hits.size()].key;
     }
-    else {
-     // Não colapsar seleção múltipla ao arrastar um dos objetos selecionados.
-     if(!selected.count(chosen.object)||selected.size()<2)activate(chosen);
-     else {active_=chosen;applySelectionStyles();}
-     if(e->modifiers()==Qt::NoModifier)beginShapePreview(e->position());
+    if(e->modifiers().testFlag(Qt::ControlModifier)){
+     if(selected.erase(chosen.object)){
+      if(active_&&active_->object==chosen.object)active_.reset();
+      applySelectionStyles();updateNativeSelection199();viewport()->update();
+     }else activate(chosen,false);
+    }else if(e->modifiers().testFlag(Qt::ShiftModifier)){
+     selected.insert(chosen.object);activate(chosen,false);
+    }else{
+     // Keep a mixed selection when dragging any member already inside it.
+     if(!selected.count(chosen.object)||totalSelectionCount()<=1)activate(chosen);
+     else{
+      active_=chosen;activeNative_.reset();
+      if(nativeSession_)nativeSession_->clearSelection();
+      applySelectionStyles();updateNativeSelection199();
+     }
+     beginShapePreview(e->position());
     }
    }
    if(stateChanged)stateChanged();
