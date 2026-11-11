@@ -3583,10 +3583,10 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    if(e->key()==Qt::Key_Z){history(e->modifiers().testFlag(Qt::ShiftModifier));e->accept();return;}
    if(e->key()==Qt::Key_Y){history(true);e->accept();return;}
   }
-  if(e->modifiers()==Qt::ControlModifier&&e->key()==Qt::Key_A&&tool==Tool::Select&&!nativeMode_){
+  if(e->modifiers()==Qt::ControlModifier&&e->key()==Qt::Key_A&&tool==Tool::Select){
    selectAllVisible();e->accept();return;
   }
-  if(e->modifiers()==(Qt::ControlModifier|Qt::ShiftModifier)&&e->key()==Qt::Key_I&&tool==Tool::Select&&!nativeMode_){
+  if(e->modifiers()==(Qt::ControlModifier|Qt::ShiftModifier)&&e->key()==Qt::Key_I&&tool==Tool::Select){
    invertSelection();e->accept();return;
   }
   if(e->key()==Qt::Key_Delete&&tool==Tool::Select&&!nativeMode_){
