@@ -382,6 +382,69 @@ public:
   index_.reset();
   return true;
  }
+ // Translate multiple native contours with independent offsets in ONE history entry.
+ // Anchors and both handles move together; cubic topology and edge kinds are untouched.
+ bool moveContoursBy(const std::map<Key,Pt>& moves){
+  if(dragging()||moves.empty())return false;
+  bool any=false;
+  for(const auto& [key,delta]:moves){
+   if(!std::isfinite(delta.x)||!std::isfinite(delta.y))
+    throw std::invalid_argument("invalid native translation");
+   const bool found=std::any_of(committed().contours.begin(),committed().contours.end(),
+     [&](const CurveContour& c){return c.key==key;});
+   if(!found)throw std::runtime_error("native translation target missing");
+   any=any||std::hypot(delta.x,delta.y)>1e-12;
+  }
+  if(!any)return false;
+  history_.change([&](CurveDocument& d){
+   for(auto& contour:d.contours){
+    const auto it=moves.find(contour.key);if(it==moves.end())continue;
+    const Pt delta=it->second;
+    for(auto& node:contour.nodes){
+     node.anchor=node.anchor+delta;
+     node.handleIn=node.handleIn+delta;
+     node.handleOut=node.handleOut+delta;
+    }
+   }
+  });
+  index_.reset();return true;
+ }
+ // Apply one exact affine matrix to any set of native contours in ONE history
+ // entry. This transforms cubic control points directly, never flattening them.
+ bool transformContoursAffine(const std::vector<Key>& keys,Pt pivot,
+                              double a,double b,double c,double d,Pt offset={}){
+  if(dragging()||keys.empty())return false;
+  const double determinant=a*d-b*c;
+  if(!std::isfinite(pivot.x)||!std::isfinite(pivot.y)||
+     !std::isfinite(a)||!std::isfinite(b)||!std::isfinite(c)||
+     !std::isfinite(d)||!std::isfinite(determinant)||
+     !std::isfinite(offset.x)||!std::isfinite(offset.y)||
+     std::abs(determinant)<1e-9)
+   throw std::invalid_argument("invalid native affine transform");
+  std::set<Key> wanted(keys.begin(),keys.end());
+  for(const Key key:wanted)
+   if(std::none_of(committed().contours.begin(),committed().contours.end(),
+      [&](const CurveContour& contour){return contour.key==key;}))
+    throw std::runtime_error("native transform target missing");
+  const bool identity=std::abs(a-1.)<1e-12&&std::abs(b)<1e-12&&
+      std::abs(c)<1e-12&&std::abs(d-1.)<1e-12&&
+      std::hypot(offset.x,offset.y)<1e-12;
+  if(identity)return false;
+  auto mapPoint=[&](Pt point){
+   const double x=point.x-pivot.x,y=point.y-pivot.y;
+   return Pt{pivot.x+a*x+b*y+offset.x,
+             pivot.y+c*x+d*y+offset.y};
+  };
+  history_.change([&](CurveDocument& doc){
+   for(auto& contour:doc.contours)if(wanted.count(contour.key))
+    for(auto& node:contour.nodes){
+     node.anchor=mapPoint(node.anchor);
+     node.handleIn=mapPoint(node.handleIn);
+     node.handleOut=mapPoint(node.handleOut);
+    }
+  });
+  index_.reset();return true;
+ }
  // Affine transform of a WHOLE native Bezier. Exact cubic controls are
  // transformed along with anchors: no polyline flattening or fake contour.
  // Commits as ONE history entry; destination must be finite and nondegenerate.
