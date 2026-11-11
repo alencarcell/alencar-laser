@@ -117,7 +117,7 @@ inline void appendContour(ImportResult& out,CurveContour contour,const Matrix& t
   throw std::runtime_error("SVG: contorno fechado degenerado");
  if(out.curves.contours.size()>=50000)
   throw std::runtime_error("SVG: limite de 50 mil contornos excedido");
- if(contour.nodes.size()>1000000-out.anchors)
+ if(out.anchors>1000000||contour.nodes.size()>1000000-out.anchors)
   throw std::runtime_error("SVG: limite de um milhao de ancoras excedido");
  for(auto& node:contour.nodes){
   for(Pt* p:{&node.anchor,&node.handleIn,&node.handleOut}){
@@ -506,7 +506,8 @@ inline void readChildren(QXmlStreamReader& xml,const Matrix& parent,ImportResult
    const double x=attrNumber(a,"x"),y=attrNumber(a,"y");
    const double w=attrNumber(a,"width"),h=attrNumber(a,"height");
    double rx=attrNumber(a,"rx"),ry=attrNumber(a,"ry");
-   if(rx==0&&ry!=0)rx=ry;if(ry==0&&rx!=0)ry=rx;
+   if(rx==0&&ry!=0)rx=ry;
+   if(ry==0&&rx!=0)ry=rx;
    appendRect(x,y,w,h,rx,ry,transform,out);
    ++out.sourceShapes;xml.skipCurrentElement();continue;
   }
