@@ -9728,6 +9728,73 @@ static QJsonObject svgExport20zcTest(const QString& directory){
          {"width_mm",summary.widthMm},{"height_mm",summary.heightMm},
          {"sample_file",sample},{"hardware_commands_sent",false}};
 }
+static QJsonObject saveFolderPersistence20zdTest(const QString& outputDirectory){
+ struct RestoreEnv{
+  const char* key;QByteArray old;bool existed;
+  explicit RestoreEnv(const char* k):key(k),old(qgetenv(k)),existed(qEnvironmentVariableIsSet(k)){}
+  ~RestoreEnv(){if(existed)qputenv(key,old);else qunsetenv(key);}
+ };
+ RestoreEnv settingsEnv("ALENCAR_SAVE_LOCATIONS_TEST_FILE_20ZD");
+ RestoreEnv dialogEnv("ALENCAR_TEST_SAVE_DIALOG_20ZD");
+ RestoreEnv allowEnv("ALENCAR_TEST_SAVE_FOLDER_20ZD");
+ QTemporaryDir isolated;
+ check(isolated.isValid(),"20zd: temporary directory unavailable");
+ const QString prefs=isolated.filePath("save-locations.ini");
+ const QString folder=isolated.filePath("chosen_folder");
+ check(QDir().mkpath(folder),"20zd: chosen folder could not be created");
+ qputenv("ALENCAR_SAVE_LOCATIONS_TEST_FILE_20ZD",prefs.toUtf8());
+ qputenv("ALENCAR_TEST_SAVE_DIALOG_20ZD","1");
+ qputenv("ALENCAR_TEST_SAVE_FOLDER_20ZD","1");
+ const QString target=QDir(folder).filePath("projeto_salvo.alaser");
+ LabWindow first(Document{});
+ first.view.editor.rectangle({20,30},50,40);
+ first.view.rebuild();
+ first.show();QApplication::processEvents();
+ bool firstDialogSeen=false;
+ QTimer::singleShot(0,&first,[&]{
+  auto* dialog=qobject_cast<QFileDialog*>(QApplication::activeModalWidget());
+  if(!dialog)return;
+  firstDialogSeen=true;
+  dialog->setDirectory(folder);
+  dialog->selectFile(target);
+  dialog->accept();
+ });
+ first.saveAs();
+ check(firstDialogSeen,"20zd: Save As first dialog was not intercepted");
+ check(QFileInfo::exists(target),"20zd: Save As did not create the chosen project");
+ QSettings afterSave(prefs,QSettings::IniFormat);
+ afterSave.sync();
+ const QString stored=alaser::svg20zc::normalizedExistingDirectory(
+     afterSave.value(alaser::svg20zc::kSaveDirectoryKey).toString());
+ check(afterSave.status()==QSettings::NoError&&stored==QDir(folder).canonicalPath(),
+       "20zd: Save As did not persist the chosen directory in UserScope settings");
+ first.close();QApplication::processEvents();
+ // New LabWindow + new QSettings instance simulate closing and reopening.
+ LabWindow reopened(Document{});
+ reopened.show();QApplication::processEvents();
+ QString reopenedDialogDirectory;
+ bool reopenedDialogSeen=false;
+ QTimer::singleShot(0,&reopened,[&]{
+  auto* dialog=qobject_cast<QFileDialog*>(QApplication::activeModalWidget());
+  if(!dialog)return;
+  reopenedDialogSeen=true;
+  reopenedDialogDirectory=dialog->directory().canonicalPath();
+  dialog->reject();
+ });
+ reopened.saveAs();
+ check(reopenedDialogSeen,"20zd: Save As dialog did not open after restart");
+ check(reopenedDialogDirectory==QDir(folder).canonicalPath(),
+       "20zd: reopened Save As dialog did not start in the last saved folder");
+ reopened.close();QApplication::processEvents();
+ QDir().mkpath(outputDirectory);
+ QFile reportFile(QDir(outputDirectory).filePath("PROJETO_PASTA_MEMORIA_20ZD.alaser"));
+ // The report is a JSON file; use a neutral extension only for its filename.
+ Q_UNUSED(reportFile);
+ return {{"status","PASS"},{"actual_save_as_dialog_exercised",true},
+         {"file_written",true},{"settings_read_back_after_new_instance",true},
+         {"reopened_save_as_initial_directory_matches",true},
+         {"machine_commands_sent",false}};
+}
 static QJsonObject gearGenerator199Test(){
  // No device, connection, G-code or physical action is involved.
  alaser::gear::GearDialog dialog(400.,400.);
@@ -10734,6 +10801,18 @@ int main(int argc,char** argv){
    pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
   }
   QFile file(out+"/RESULTADO_DUPLICACAO_LOTE_20C.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--save-folder-20zd-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=saveFolderPersistence20zdTest(out);}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())},
+                     {"machine_commands_sent",false}};
+  }
+  QFile file(out+"/RESULTADO_MEMORIA_PASTAS_20ZD.json");
   if(!file.open(QIODevice::WriteOnly))return 2;
   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
   return pass?0:1;
