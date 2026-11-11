@@ -6392,7 +6392,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   selectionContextGroup_->setEnabled(editableSelection&&groupIds.size()>=2);
   selectionContextUngroup_->setEnabled(editableSelection&&groupedObject);
   selectionContextDuplicate_->setEnabled(editableSelection&&!view.selected.empty());
-  selectionContextDelete_->setEnabled(nativeEditing||editableSelection);
+  selectionContextDelete_->setEnabled(nativeEditing||polyline);
   if(selectionContextTextEdit_){
    selectionContextTextEdit_->setVisible(textOnly);
    selectionContextTextEdit_->setEnabled(textOnly&&editableSelection);
