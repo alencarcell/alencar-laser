@@ -2452,6 +2452,7 @@ public:
   return applySelectionMoves(objects,curves);
  }
  bool alignSelection(int mode){
+  if(nativeMode_){nativeMode_=false;nativeEditHandles_=false;nativeSelectedPart_.reset();}
   if(mode<0||mode>6||totalSelectionCount()<2)
    throw std::runtime_error("select at least two objects to align");
   using UnitKey=std::tuple<int,int,int>; // kind, object/group id, group flag
@@ -2532,6 +2533,7 @@ public:
   return changed;
  }
  bool centerSelectionOnBed(double width,double height){
+  if(nativeMode_){nativeMode_=false;nativeEditHandles_=false;nativeSelectedPart_.reset();}
   if(!std::isfinite(width)||!std::isfinite(height)||width<=0||height<=0)
    throw std::runtime_error("invalid configured bed dimensions");
   const auto bounds=selectedBounds();
