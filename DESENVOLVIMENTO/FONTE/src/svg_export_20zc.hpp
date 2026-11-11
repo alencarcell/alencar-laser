@@ -89,10 +89,24 @@ inline bool rememberSaveDirectory(QSettings& settings,const QString& savedPath,
  const QString readBack=normalizedExistingDirectory(verify.value(kSaveDirectoryKey).toString());
  if(verify.status()!=QSettings::NoError||readBack!=directory)
   return fail("a preferencia nao passou na verificacao de leitura");
- // Keep the old native key synchronized for compatibility with 20zc builds.
- QSettings legacy("AlencarLaser","DesktopBeta");
- legacy.setValue(kSaveDirectoryKey,directory);
- legacy.sync();
+ // Keep the old native key synchronized only for the real application store.
+ // Tests and isolated QSettings files must never modify the user's registry.
+ bool applicationStore=false;
+ const QString overrideFile=qEnvironmentVariable("ALENCAR_SAVE_LOCATIONS_TEST_FILE_20ZD");
+ if(!overrideFile.isEmpty()){
+  applicationStore=QFileInfo(settings.fileName()).absoluteFilePath()==
+                   QFileInfo(overrideFile).absoluteFilePath();
+ }else{
+  QSettings expected(QSettings::IniFormat,QSettings::UserScope,
+                     "AlencarLaser","DesktopBeta");
+  applicationStore=QFileInfo(settings.fileName()).absoluteFilePath()==
+                   QFileInfo(expected.fileName()).absoluteFilePath();
+ }
+ if(applicationStore){
+  QSettings legacy("AlencarLaser","DesktopBeta");
+  legacy.setValue(kSaveDirectoryKey,directory);
+  legacy.sync();
+ }
  return true;
 }
 
