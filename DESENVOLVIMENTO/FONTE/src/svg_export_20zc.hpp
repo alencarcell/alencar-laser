@@ -39,13 +39,21 @@ inline QString normalizedExistingDirectory(QString directory){
  if(canonical.isEmpty())canonical=candidate.absolutePath();
  return QDir::cleanPath(canonical);
 }
+inline bool isUserSaveLocationStore(const QSettings& settings){
+ // A test override or arbitrary INI file is never the real user preference store.
+ if(!qEnvironmentVariable("ALENCAR_SAVE_LOCATIONS_TEST_FILE_20ZD").isEmpty())return false;
+ QSettings expected(QSettings::IniFormat,QSettings::UserScope,
+                    "AlencarLaser","DesktopBeta");
+ return QFileInfo(settings.fileName()).absoluteFilePath()==
+        QFileInfo(expected.fileName()).absoluteFilePath();
+}
 inline QString initialSavePath(QSettings& settings,const QString& name,
                                const QString& fallbackFile={},bool migrateLegacy=true){
  settings.setFallbacksEnabled(false);
  settings.sync();
  QString directory=normalizedExistingDirectory(settings.value(kSaveDirectoryKey).toString());
  // Migrate the 20zc native QSettings key to the dedicated UserScope INI store.
- if(directory.isEmpty()&&migrateLegacy){
+ if(directory.isEmpty()&&migrateLegacy&&isUserSaveLocationStore(settings)){
   QSettings legacy("AlencarLaser","DesktopBeta");
   legacy.sync();
   const QString oldDirectory=normalizedExistingDirectory(
@@ -91,18 +99,7 @@ inline bool rememberSaveDirectory(QSettings& settings,const QString& savedPath,
   return fail("a preferencia nao passou na verificacao de leitura");
  // Keep the old native key synchronized only for the real application store.
  // Tests and isolated QSettings files must never modify the user's registry.
- bool applicationStore=false;
- const QString overrideFile=qEnvironmentVariable("ALENCAR_SAVE_LOCATIONS_TEST_FILE_20ZD");
- if(!overrideFile.isEmpty()){
-  applicationStore=QFileInfo(settings.fileName()).absoluteFilePath()==
-                   QFileInfo(overrideFile).absoluteFilePath();
- }else{
-  QSettings expected(QSettings::IniFormat,QSettings::UserScope,
-                     "AlencarLaser","DesktopBeta");
-  applicationStore=QFileInfo(settings.fileName()).absoluteFilePath()==
-                   QFileInfo(expected.fileName()).absoluteFilePath();
- }
- if(applicationStore){
+ if(isUserSaveLocationStore(settings)){
   QSettings legacy("AlencarLaser","DesktopBeta");
   legacy.setValue(kSaveDirectoryKey,directory);
   legacy.sync();
