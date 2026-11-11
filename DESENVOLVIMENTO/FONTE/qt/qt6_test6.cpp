@@ -1653,6 +1653,7 @@ public:
    const auto current=std::find(eligible.begin(),eligible.end(),*activeNative_);
    if(current!=eligible.end())key=eligible[(size_t(current-eligible.begin())+1)%eligible.size()];
   }
+  const auto priorRegularActive=active_;
   const bool control=modifiers.testFlag(Qt::ControlModifier);
   const bool shift=modifiers.testFlag(Qt::ShiftModifier);
   if(control){
@@ -1669,11 +1670,14 @@ public:
    selectedNative_.insert(key);
   }
   activeNative_=selectedNative_.count(key)?std::optional<Key>{key}:std::nullopt;
-  active_.reset();
-  if(activeNative_)nativeSession_->select(*activeNative_);
-  else if(!selectedNative_.empty()){
-   activeNative_=*selectedNative_.rbegin();nativeSession_->select(*activeNative_);
-  }else nativeSession_->clearSelection();
+  if(!activeNative_&&!selectedNative_.empty())activeNative_=*selectedNative_.rbegin();
+  if(activeNative_){
+   active_.reset();nativeSession_->select(*activeNative_);
+  }else{
+   active_=priorRegularActive&&selected.count(priorRegularActive->object)?priorRegularActive:
+           std::optional<Key>{};
+   nativeSession_->clearSelection();
+  }
   nativeMode_=false;nativeEditHandles_=false;tool=Tool::Select;
   applySelectionStyles();updateNativeSelection199();
   if(stateChanged)stateChanged();
