@@ -3333,14 +3333,16 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    const auto displacedFrame=selectionQuadScene();
    clearShapePreview();
    if(QLineF(QPointF{},delta).length()>1e-8){
-    const int changed=int(selected.size());
-    editor.moveObjects({selected.begin(),selected.end()},fromQt(delta));
-    if(displacedFrame){
+    const int changed=int(totalSelectionCount());
+    const bool moved=moveSelectionBy(fromQt(delta));
+    if(moved&&selectedNative_.empty()&&displacedFrame){
      orientedFrame_=*displacedFrame;orientedFrameIds_=selected;
      orientedFrameGeneration_=editor.geometryGeneration;
     }
-    rebuild();
-    if(diagnosticEvent)diagnosticEvent("shapes_moved",changed);
+    if(moved){
+     rebuild();
+     if(diagnosticEvent)diagnosticEvent("shapes_moved",changed);
+    }
    }
    if(stateChanged)stateChanged();e->accept();return;
   }
