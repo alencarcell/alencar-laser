@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteSvg, [switch]$SomenteIcones, [switch]$SomenteHistorico, [switch]$SomenteFluidez, [switch]$SomenteImportacaoSegura, [switch]$SomenteBezierNativo, [switch]$SomenteBezierNativoUI, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteSvg, [switch]$SomentePastas, [switch]$SomenteIcones, [switch]$SomenteHistorico, [switch]$SomenteFluidez, [switch]$SomenteImportacaoSegura, [switch]$SomenteBezierNativo, [switch]$SomenteBezierNativoUI, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -210,6 +210,17 @@ try {
         & $app --svg-export-20zc-test $fixture $destino
         Checar-ResultadoQt 'SVG 20zc e memoria de pastas' (Join-Path $destino 'RESULTADO_EXPORTACAO_SVG_20ZC.json')
         Write-Host '20zc SVG + memoria de pastas PASS automatizado; teste visual em LightBurn ainda necessario.' -ForegroundColor Green
+        return
+    }
+    if ($SomentePastas) {
+        Write-Host '20zd: fluxo real Salvar como, fechar/reabrir e verificar a pasta inicial.' -ForegroundColor Cyan
+        Compilar-QtComDiagnostico
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\memoria_pastas_20zd'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --save-folder-20zd-test '-' $destino
+        Checar-ResultadoQt 'Memoria persistente real do dialogo Salvar como 20zd' (Join-Path $destino 'RESULTADO_MEMORIA_PASTAS_20ZD.json')
+        Write-Host '20zd: fluxo real Salvar como/reabrir PASS; teste manual ainda necessario.' -ForegroundColor Green
         return
     }
     if ($SomenteEngrenagens) {
@@ -526,6 +537,10 @@ try {
     New-Item -ItemType Directory -Path $dirSvg -Force | Out-Null
     & $app --svg-export-20zc-test $fixture $dirSvg
     Checar-ResultadoQt 'SVG 20zc: engrenagens, Bezier, mm e pasta persistente' (Join-Path $dirSvg 'RESULTADO_EXPORTACAO_SVG_20ZC.json')
+    $dirFolders = Join-Path $destino 'memoria_pastas_20zd'
+    New-Item -ItemType Directory -Path $dirFolders -Force | Out-Null
+    & $app --save-folder-20zd-test '-' $dirFolders
+    Checar-ResultadoQt 'Memoria persistente real do dialogo Salvar como 20zd' (Join-Path $dirFolders 'RESULTADO_MEMORIA_PASTAS_20ZD.json')
     & $app --recovery-19-8-test $fixture $dirRecuperacao
     Checar-ResultadoQt 'Recuperacao persistente GUI 19.8' (Join-Path $dirRecuperacao 'RESULTADO_RECUPERACAO_19_8.json')
     $dirImportacao = Join-Path $destino 'importacao'
