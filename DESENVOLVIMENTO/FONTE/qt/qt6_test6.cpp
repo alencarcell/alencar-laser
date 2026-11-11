@@ -768,32 +768,47 @@ class QtEditorLab final:public QGraphicsView{
  void updateNativePaths(bool all){
   if(!nativeSession_)return;
   QElapsedTimer nativePathProfiler;nativePathProfiler.start();
-  auto selectedKey=nativeSession_->selected();
-  // Durante drag, apenas o item ativo recebe setPath; selecao troca estilo
-  // somente do item anterior/novo, nunca dos 575 outros contornos.
-  bool selectionChanged=nativeStyledKey_!=selectedKey;
+  std::vector<Key> changedKeys;
+  std::set_symmetric_difference(styledNativeKeys_.begin(),styledNativeKeys_.end(),
+    selectedNative_.begin(),selectedNative_.end(),std::back_inserter(changedKeys));
+  const bool selectionChanged=!changedKeys.empty();
   QRect nativeSelectionDirty;
   if(selectionChanged&&!all&&!nativeLegacyFullViewportOnSelect_){
-   nativeSelectionDirty=nativeSelectionDirtyRect199(nativeStyledKey_);
-   nativeSelectionDirty=nativeSelectionDirty.united(nativeSelectionDirtyRect199(selectedKey));
+   for(const Key key:changedKeys)
+    nativeSelectionDirty=nativeSelectionDirty.united(
+       nativeSelectionDirtyRect199(std::optional<Key>{key}));
   }
+  const std::set<Key> changedSet(changedKeys.begin(),changedKeys.end());
   for(const auto& c:nativeSession_->visible().contours){
    auto it=nativeItems_.find(c.key);if(it==nativeItems_.end())continue;
-   const bool selected=selectedKey&&*selectedKey==c.key;
-   const bool wasSelected=nativeStyledKey_&&*nativeStyledKey_==c.key;
-   if(all||selected){
+   const auto layer=editor.state().layers.find(c.layer);
+   const bool visible=layer!=editor.state().layers.end()&&layer->second.visible;
+   it->second->setVisible(visible);
+   const bool selected=selectedNative_.count(c.key)>0;
+   const bool wasSelected=styledNativeKeys_.count(c.key)>0;
+   // Selection-only changes never rebuild canonical paths. A single active
+   // contour still refreshes for native node previews; mixed transforms rebuild
+   // the scene once at commit, preserving the dense-import fast path.
+   if(all||(selected&&selectedNative_.size()==1)){
     it->second->setPath(nativeCurvePath(c));
     if(all)++nativeFullPathBuilds_;
     else ++nativeSelectivePathBuilds_;
    }
-   if(all||(selectionChanged&&(selected||wasSelected))){
+   if(all||(selectionChanged&&changedSet.count(c.key))){
+    QPen pen(selected?QColor(239,109,25):QColor(71,91,105));
+    pen.setCosmetic(true);pen.setWidthF(selected?2.0:1.2);
+    pen.setCapStyle(Qt::RoundCap);pen.setJoinStyle(Qt::RoundJoin);
+    it->second->setPen(pen);it->second->setZValue(selected?30:3);
+   }else if(!selectionChanged&&all){
     QPen pen(selected?QColor(239,109,25):QColor(71,91,105));
     pen.setCosmetic(true);pen.setWidthF(selected?2.0:1.2);
     pen.setCapStyle(Qt::RoundCap);pen.setJoinStyle(Qt::RoundJoin);
     it->second->setPen(pen);it->second->setZValue(selected?30:3);
    }
+   (void)wasSelected;
   }
-  nativeStyledKey_=selectedKey;
+  styledNativeKeys_=selectedNative_;
+  nativeStyledKey_=activeNative_;
   if(all)viewport()->update();
   else if(selectionChanged){
    if(nativeLegacyFullViewportOnSelect_){
@@ -803,8 +818,6 @@ class QtEditorLab final:public QGraphicsView{
     ++nativeSelectionLocalRepaints_;
     viewport()->update(nativeSelectionDirty);
    }
-   // QGraphicsPathItem::setPen/setPath independently invalidates its geometry.
-   // Overlay handles need only the old/new contour rectangle, not the canvas.
   }
   sample(all?nativeFullRefreshMs:nativeSelectiveRefreshMs,
          nativePathProfiler.nsecsElapsed()/1e6);
@@ -1296,7 +1309,7 @@ private:
  void clearNativeItems(){
   nativeContourPressing_=false;
   for(auto& entry:nativeItems_){scene_.removeItem(entry.second);delete entry.second;}
-  nativeItems_.clear();nativeSelectedPart_.reset();nativeStyledKey_.reset();nativePressing_=false;
+  nativeItems_.clear();nativeSelectedPart_.reset();nativeStyledKey_.reset();styledNativeKeys_.clear();nativePressing_=false;
  }
  void createNativeItems(){
   clearNativeItems();
