@@ -1162,6 +1162,7 @@ class QtEditorLab final:public QGraphicsView{
  }
  void beginShapePreview(QPointF origin){
   clearShapePreview();
+  if(totalSelectionCount()==0||nativeEditHandles_)return;
   std::set<int> ids=selected,groups;
   const auto& state=editor.state();
   for(int id:ids){const auto it=state.objects.find(id);
@@ -1172,6 +1173,12 @@ class QtEditorLab final:public QGraphicsView{
    if(!editable(state,id)){clearShapePreview();return;}
    const auto it=itemsByObject_.find(id);
    if(it!=itemsByObject_.end())shapePreviewItems_.insert(shapePreviewItems_.end(),it->second.begin(),it->second.end());
+  }
+  for(const Key key:selectedNative_){
+   if(!nativeEditable(key)){clearShapePreview();return;}
+   const auto it=nativeItems_.find(key);
+   if(it==nativeItems_.end()){clearShapePreview();return;}
+   shapePreviewItems_.push_back(it->second);
   }
   if(shapePreviewItems_.empty())return;
   shapePreviewBounds_=selectedBounds();
