@@ -2482,7 +2482,6 @@ public:
   }
   if(regularChanged&&nativeChanged)captureMixedHistorySnapshot();
   else{
-   mixedActionApplied_=mixedActionUndone_=false;
    lastNativeAction_=nativeChanged;
    lastEditorGenerationSeen_=editor.generation;
   }
