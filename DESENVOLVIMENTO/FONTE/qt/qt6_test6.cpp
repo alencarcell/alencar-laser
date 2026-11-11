@@ -10688,6 +10688,98 @@ QJsonObject nativeImportGui199Test(){
                     {"hardware_commands_sent",false}};
 }
 
+static QJsonObject mixedSelection20zeTest(){
+ LabWindow w(Document{});
+ const int first=w.view.editor.rectangle({10,10},10,10);
+ const int second=w.view.editor.rectangle({40,10},10,10);
+ CurveDocument document;
+ CurveContour curve;curve.key={900,0};curve.layer=0;
+ curve.nodes={{1,{100,100},{100,100},{108,100}},
+              {2,{120,100},{112,100},{120,100}}};
+ curve.edgeKind={1};document.contours.push_back(curve);document.nextId=3;
+ w.curves=std::make_unique<CurveDragSession>(std::move(document));
+ w.view.attachNative(w.curves.get());
+ w.view.rebuild();w.show();QApplication::processEvents();
+ w.view.setTransform(QTransform::fromScale(4.,4.));
+ pressKey(w,Qt::Key_A,Qt::ControlModifier);
+ check(w.view.selected.size()==2&&w.view.nativeSelectedKeys().size()==1&&
+       w.view.selectionCount()==3,
+       "20ze mixed selection: Ctrl+A did not select conventional and native objects");
+ check(!w.view.nativeModeActive(),
+       "20ze mixed selection: Ctrl+A left the exclusive Bezier edit mode active");
+ w.view.clearSelection();
+ w.view.activate({first,0},true);
+ const Key nativeKey{900,0};
+ check(w.view.selectNativeAt(Pt{110,100},false,Qt::ShiftModifier),
+       "20ze mixed selection: Shift-click did not add the native cubic");
+ check(w.view.selected.count(first)==1&&w.view.nativeSelectedKeys().count(nativeKey)==1&&
+       w.view.selectionCount()==2,
+       "20ze mixed selection: native and conventional objects did not remain selected together");
+ check(w.view.activeNativeKey()&&*w.view.activeNativeKey()==nativeKey,
+       "20ze mixed selection: last clicked native object did not become reference");
+ check(w.view.alignSelection(6),
+       "20ze mixed selection: center-to-center alignment did not move the regular object");
+ auto regularBounds=boundsOf(w.view.editor.state().doc,{first});
+ const QPointF regularCenter((regularBounds.first.x+regularBounds.second.x)*.5,
+                             (regularBounds.first.y+regularBounds.second.y)*.5);
+ const QPointF nativeCenter=w.view.nativeItemPath(nativeKey).boundingRect().center();
+ check(QLineF(regularCenter,nativeCenter).length()<1e-6,
+       "20ze mixed selection: regular object was not centered on the active native reference");
+ const auto alignedRegular=w.view.editor.state().doc.contours.front().nodes.front().p;
+ const auto alignedNative=w.curves->committed().contours.front().nodes.front();
+ const Pt nativeHandleVector=alignedNative.handleOut-alignedNative.anchor;
+ check(w.view.moveSelectionBy({5.,-3.}),
+       "20ze mixed selection: common translation was not applied");
+ w.view.rebuild();
+ const auto movedRegular=w.view.editor.state().doc.contours.front().nodes.front().p;
+ const auto movedNative=w.curves->committed().contours.front().nodes.front();
+ check(dist(movedRegular,alignedRegular+Pt{5.,-3.})<1e-8&&
+       dist(movedNative.anchor,alignedNative.anchor+Pt{5.,-3.})<1e-8,
+       "20ze mixed selection: translation did not affect both documents");
+ check(dist(movedNative.handleOut-movedNative.anchor,nativeHandleVector)<1e-8,
+       "20ze mixed selection: translation changed the cubic handle vector");
+ w.view.history(false);
+ check(dist(w.view.editor.state().doc.contours.front().nodes.front().p,alignedRegular)<1e-8&&
+       dist(w.curves->committed().contours.front().nodes.front().anchor,alignedNative.anchor)<1e-8,
+       "20ze mixed selection: one Undo did not restore both documents");
+ w.view.history(true);
+ check(dist(w.view.editor.state().doc.contours.front().nodes.front().p,
+            alignedRegular+Pt{5.,-3.})<1e-8&&
+       dist(w.curves->committed().contours.front().nodes.front().anchor,
+            alignedNative.anchor+Pt{5.,-3.})<1e-8,
+       "20ze mixed selection: one Redo did not restore both documents");
+ check(w.view.rotateSelection(30.),
+       "20ze mixed selection: rotation did not affect both object types");
+ check(w.curves->committed().contours.front().edgeKind==std::vector<uint8_t>{1}&&
+       w.curves->committed().contours.front().nodes.size()==2,
+       "20ze mixed selection: rotation flattened or changed cubic topology");
+ check(w.view.scaleSelection(1.25),
+       "20ze mixed selection: proportional scale did not affect both object types");
+ check(w.view.centerSelectionOnBed(400.,300.),
+       "20ze mixed selection: bed centering did not move the mixed selection");
+ const auto centered=w.view.selectionPreviewRect();
+ check(centered&&QLineF(centered->center(),QPointF(200.,150.)).length()<1e-6,
+       "20ze mixed selection: combined selection center differs from bed center");
+ check(w.view.deleteSelectedShapes(),
+       "20ze mixed selection: deleting the mixed selection failed");
+ check(w.view.editor.state().doc.contours.empty()&&
+       w.curves->committed().contours.empty(),
+       "20ze mixed selection: delete did not remove both object types");
+ w.view.history(false);
+ check(w.view.editor.state().doc.contours.size()==2&&
+       w.curves->committed().contours.size()==1,
+       "20ze mixed selection: one Undo did not restore mixed deletion");
+ w.view.history(true);
+ check(w.view.editor.state().doc.contours.empty()&&
+       w.curves->committed().contours.empty(),
+       "20ze mixed selection: one Redo did not repeat mixed deletion");
+ return QJsonObject{{"status","PASS"},{"ctrl_a_selects_both_models",true},
+   {"shift_adds_native_to_regular",true},{"active_native_reference",true},
+   {"center_x_y_alignment",true},{"mixed_translation_undo_redo",true},
+   {"native_cubic_topology_preserved",true},{"mixed_rotation_scale",true},
+   {"mixed_bed_centering",true},{"mixed_delete_undo_redo",true},
+   {"hardware_commands_sent",false}};
+}
 QJsonObject groupedDrag199Test(){
  LabWindow w(Document{});w.show();QApplication::processEvents();
  auto& v=w.view;
