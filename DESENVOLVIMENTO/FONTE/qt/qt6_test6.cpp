@@ -6481,7 +6481,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   refresh();
   view.setFocus();
   status->setText(QString("SVG importado: %1 contornos, %2 ancoras, %3 curvas Bezier. "
-      "Adicionado a camada %4. Salve o projeto .alaser; nenhum parametro ou comando de laser foi importado.")
+      "Adicionado a camada %4. Ctrl+Z desfaz o lote. Salve o projeto .alaser; nenhum comando de laser foi importado.")
     .arg(contourCount).arg(qulonglong(imported.anchors)).arg(qulonglong(imported.cubicSegments))
     .arg(layerName));
  }
@@ -9883,6 +9883,17 @@ static QJsonObject svgImport20zeTest(const QString& outputDirectory){
  check(QCryptographicHash::hash(after.readAll(),QCryptographicHash::Sha256)==originalHash,
        "20ze: import modified the source SVG");
 
+ const QString primitivesPath=isolated.filePath("primitives.svg");
+ QFile primitivesFile(primitivesPath);
+ check(primitivesFile.open(QIODevice::WriteOnly),"20ze: cannot create primitive fixture");
+ primitivesFile.write("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100mm\" height=\"50mm\" viewBox=\"0 0 100 50\"><g transform=\"translate(10,5)\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"5\"/><circle cx=\"20\" cy=\"10\" r=\"3\"/><path d=\"M 30 10 h 10 v 10 a 5 5 0 0 1 -5 5 z\"/></g></svg>");
+ primitivesFile.close();
+ const auto primitives=alaser::svg20ze::readSvgGeometry(primitivesPath);
+ check(primitives.curves.contours.size()==3&&
+       dist(primitives.curves.contours[0].nodes[0].anchor,{10,5})<1e-7&&
+       primitives.cubicSegments>=5,
+       "20ze: primitive shapes, transform or SVG arc conversion failed");
+
  const QString unsupported=isolated.filePath("unsupported.svg");
  QFile bad(unsupported);check(bad.open(QIODevice::WriteOnly),"20ze: cannot create negative fixture");
  bad.write("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10mm\" height=\"10mm\" viewBox=\"0 0 10 10\"><text x=\"1\" y=\"5\">X</text></svg>");
@@ -9897,6 +9908,7 @@ static QJsonObject svgImport20zeTest(const QString& outputDirectory){
          {"gear_rings_and_bezier_preserved",true},
          {"physical_dimensions_mm",true},{"atomic_undo_redo",true},
          {"source_file_unchanged",true},{"unsupported_text_rejected",true},
+         {"basic_shapes_transforms_and_arcs",true},
          {"contours",int(parsed.curves.contours.size())},
          {"anchors",double(parsed.anchors)},
          {"cubic_segments",double(parsed.cubicSegments)},
