@@ -201,15 +201,17 @@ try {
         return
     }
     if ($SomenteSvg) {
-        Write-Host '20zc: exportacao SVG (incluindo engrenagens) e pasta persistente, sem hardware.' -ForegroundColor Cyan
+        Write-Host '20zc/20ze: exportacao e importacao SVG vetorial, sem hardware.' -ForegroundColor Cyan
         Compilar-QtComDiagnostico
         $app = Join-Path $build 'alencar_test7_qt6.exe'
         $fixture = Join-Path $fontes 'fixtures\web_nodes_normalized.csv'
         $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\svg_20zc'
         New-Item -ItemType Directory -Path $destino -Force | Out-Null
         & $app --svg-export-20zc-test $fixture $destino
-        Checar-ResultadoQt 'SVG 20zc e memoria de pastas' (Join-Path $destino 'RESULTADO_EXPORTACAO_SVG_20ZC.json')
-        Write-Host '20zc SVG + memoria de pastas PASS automatizado; teste visual em LightBurn ainda necessario.' -ForegroundColor Green
+        Checar-ResultadoQt 'SVG 20zc: exportacao vetorial e memoria de pastas' (Join-Path $destino 'RESULTADO_EXPORTACAO_SVG_20ZC.json')
+        & $app --svg-import-20ze-test '-' $destino
+        Checar-ResultadoQt 'SVG 20ze: importacao, arrastar/soltar e round-trip' (Join-Path $destino 'RESULTADO_IMPORTACAO_SVG_20ZE.json')
+        Write-Host '20zc exportacao + 20ze importacao SVG: PASS automatizado; teste manual no aplicativo ainda necessario.' -ForegroundColor Green
         return
     }
     if ($SomentePastas) {
@@ -537,6 +539,8 @@ try {
     New-Item -ItemType Directory -Path $dirSvg -Force | Out-Null
     & $app --svg-export-20zc-test $fixture $dirSvg
     Checar-ResultadoQt 'SVG 20zc: engrenagens, Bezier, mm e pasta persistente' (Join-Path $dirSvg 'RESULTADO_EXPORTACAO_SVG_20ZC.json')
+    & $app --svg-import-20ze-test '-' $dirSvg
+    Checar-ResultadoQt 'SVG 20ze: round-trip e arrastar/soltar na mesa' (Join-Path $dirSvg 'RESULTADO_IMPORTACAO_SVG_20ZE.json')
     $dirFolders = Join-Path $destino 'memoria_pastas_20zd'
     New-Item -ItemType Directory -Path $dirFolders -Force | Out-Null
     & $app --save-folder-20zd-test '-' $dirFolders
