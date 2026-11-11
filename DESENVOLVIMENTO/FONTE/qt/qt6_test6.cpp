@@ -837,20 +837,43 @@ class QtEditorLab final:public QGraphicsView{
    if(meta.group>0&&groups.count(meta.group))ids.insert(id);
   return {ids.begin(),ids.end()};
  }
+ bool nativeEditable(Key key)const{
+  if(!nativeSession_)return false;
+  const auto* curve=findNativeCurve(nativeSession_->committed(),key);
+  if(!curve)return false;
+  const auto layer=editor.state().layers.find(curve->layer);
+  return layer!=editor.state().layers.end()&&layer->second.visible&&!layer->second.locked;
+ }
+ std::vector<Key> expandedNativeSelection()const{
+  return {selectedNative_.begin(),selectedNative_.end()};
+ }
+ size_t totalSelectionCount()const{return selected.size()+selectedNative_.size();}
  std::optional<QRectF> selectedBounds()const{
-  if(selected.empty()||tool!=Tool::Select||nativeMode_)return {};
+  if(totalSelectionCount()==0||tool!=Tool::Select||nativeEditHandles_)return {};
   const auto ids=expandedSelection();
   const std::set<int> idsSet(ids.begin(),ids.end());
   double minX=0.,minY=0.,maxX=0.,maxY=0.;bool has=false;
+  auto include=[&](const QRectF& rect){
+   if(rect.isEmpty()||!std::isfinite(rect.left())||!std::isfinite(rect.top())||
+      !std::isfinite(rect.right())||!std::isfinite(rect.bottom()))return;
+   if(!has){minX=rect.left();minY=rect.top();maxX=rect.right();maxY=rect.bottom();has=true;}
+   else{minX=std::min(minX,rect.left());minY=std::min(minY,rect.top());
+        maxX=std::max(maxX,rect.right());maxY=std::max(maxY,rect.bottom());}
+  };
   for(const auto& c:editor.state().doc.contours){
-   if(!idsSet.count(c.key.object))continue;
-   if(!editable(editor.state(),c.key.object))continue;
+   if(!idsSet.count(c.key.object)||!editable(editor.state(),c.key.object))continue;
    for(const auto& node:c.nodes){
     const Pt p=node.p;
     if(!has){minX=maxX=p.x;minY=maxY=p.y;has=true;}
     else{minX=std::min(minX,p.x);minY=std::min(minY,p.y);
          maxX=std::max(maxX,p.x);maxY=std::max(maxY,p.y);}
    }
+  }
+  for(const Key key:selectedNative_){
+   if(!nativeEditable(key))continue;
+   const auto item=nativeItems_.find(key);
+   if(item==nativeItems_.end()||!item->second->isVisible())continue;
+   include(item->second->mapToScene(item->second->path()).boundingRect());
   }
   if(!has)return {};
   return QRectF(QPointF(minX,minY),QPointF(maxX,maxY));
@@ -861,17 +884,13 @@ class QtEditorLab final:public QGraphicsView{
    return shapePreviewBounds_->translated(shapePreviewDelta_);
   if(transformDragging_)
    return selectionPreviewTransform_.mapRect(transformBounds_);
-  if(nativeMode_&&!nativeEditHandles_&&nativeSession_&&nativeSession_->selected()){
-   const auto it=nativeItems_.find(*nativeSession_->selected());
-   if(it!=nativeItems_.end())return it->second->path().boundingRect();
-  }
   return selectedBounds();
  }
  static std::array<QPointF,4> quadFromRect(const QRectF& r){
   return {r.topLeft(),r.topRight(),r.bottomRight(),r.bottomLeft()};
  }
  bool orientedFrameValid()const{
-  return !nativeMode_&&orientedFrame_&&orientedFrameIds_==selected&&
+  return selectedNative_.empty()&&!nativeMode_&&orientedFrame_&&orientedFrameIds_==selected&&
          orientedFrameGeneration_==editor.geometryGeneration;
  }
  std::optional<std::array<QPointF,4>> selectionQuadScene()const{
@@ -880,17 +899,13 @@ class QtEditorLab final:public QGraphicsView{
    for(auto& p:points)p=selectionPreviewTransform_.map(p);
    return points;
   }
-  if(nativeMode_&&!nativeEditHandles_&&nativeSession_&&nativeSession_->selected()){
-   const auto it=nativeItems_.find(*nativeSession_->selected());
-   if(it!=nativeItems_.end())return quadFromRect(it->second->path().boundingRect());
-  }
   if(shapeDragging_&&cachedDragOverlay199_&&dragOverlayBaseQuad199_&&
      shouldUseLocalDragOverlay199()){
    auto cached=*dragOverlayBaseQuad199_;
    for(auto& p:cached)p+=shapePreviewDelta_;
    return cached;
   }
-  if(selected.empty()||tool!=Tool::Select)return {};
+  if(totalSelectionCount()==0||tool!=Tool::Select||nativeEditHandles_)return {};
   std::optional<std::array<QPointF,4>> points;
   if(orientedFrameValid())points=*orientedFrame_;
   else if(const auto bounds=selectedBounds())points=quadFromRect(*bounds);
