@@ -382,6 +382,22 @@ public:
   index_.reset();
   return true;
  }
+ // Remove multiple native contours in ONE native-history entry.
+ bool deleteContours(const std::vector<Key>& keys){
+  if(dragging()||keys.empty())return false;
+  const std::set<Key> wanted(keys.begin(),keys.end());
+  for(const Key key:wanted)
+   if(std::none_of(committed().contours.begin(),committed().contours.end(),
+      [&](const CurveContour& contour){return contour.key==key;}))
+    throw std::runtime_error("native delete target missing");
+  history_.change([&](CurveDocument& doc){
+   doc.contours.erase(std::remove_if(doc.contours.begin(),doc.contours.end(),
+     [&](const CurveContour& contour){return wanted.count(contour.key)>0;}),
+     doc.contours.end());
+  });
+  if(selected_&&wanted.count(*selected_))selected_.reset();
+  index_.reset();return true;
+ }
  // Translate multiple native contours with independent offsets in ONE history entry.
  // Anchors and both handles move together; cubic topology and edge kinds are untouched.
  bool moveContoursBy(const std::map<Key,Pt>& moves){
