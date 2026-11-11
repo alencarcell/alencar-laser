@@ -117,6 +117,8 @@ inline void appendContour(ImportResult& out,CurveContour contour,const Matrix& t
   throw std::runtime_error("SVG: contorno fechado degenerado");
  if(out.curves.contours.size()>=50000)
   throw std::runtime_error("SVG: limite de 50 mil contornos excedido");
+ if(contour.nodes.size()>1000000-out.anchors)
+  throw std::runtime_error("SVG: limite de um milhao de ancoras excedido");
  for(auto& node:contour.nodes){
   for(Pt* p:{&node.anchor,&node.handleIn,&node.handleOut}){
    *p=transform.map(*p);
@@ -205,10 +207,14 @@ public:
  void lineTo(Pt p){
   ensure();
   if(dist(point_,p)<1e-10)return;
+  if(current_.nodes.size()>=20000)
+   throw std::runtime_error("SVG: contorno excede 20 mil ancoras");
   current_.edgeKind.push_back(0);current_.nodes.push_back(node(p));point_=p;
  }
  void cubicTo(Pt c1,Pt c2,Pt p){
   ensure();
+  if(current_.nodes.size()>=20000)
+   throw std::runtime_error("SVG: contorno excede 20 mil ancoras");
   current_.nodes.back().handleOut=c1;
   CurveNode next=node(p);next.handleIn=c2;
   current_.edgeKind.push_back(1);current_.nodes.push_back(next);point_=p;
@@ -381,8 +387,8 @@ inline void checkNoClip(const QXmlStreamAttributes& a){
 }
 inline void appendPoints(const std::vector<double>& values,bool closed,
                          const Matrix& transform,ImportResult& output){
- if(values.size()%2!=0||values.size()<(closed?6u:4u))
-  throw std::runtime_error("SVG: lista de pontos incompleta");
+ if(values.size()%2!=0||values.size()<(closed?6u:4u)||values.size()/2>20000)
+  throw std::runtime_error("SVG: lista de pontos incompleta ou acima de 20 mil ancoras");
  CurveContour contour;contour.closed=closed;
  for(std::size_t i=0;i<values.size();i+=2)
   contour.nodes.push_back({0,{values[i],values[i+1]},
