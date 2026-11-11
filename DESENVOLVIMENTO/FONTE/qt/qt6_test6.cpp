@@ -2278,7 +2278,7 @@ public:
   }
  }
  void clearSelection(){
-  if(!active_&&selected.empty())return;
+  if(!active_&&selected.empty()&&styledObjects_.empty())return;
   const QRect before=foregroundOverlayDirtyRect20zb();
   active_.reset();selected.clear();applySelectionStyles();
   repaintForegroundChange20zb(before,{});
