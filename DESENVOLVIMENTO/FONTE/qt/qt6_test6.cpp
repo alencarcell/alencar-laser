@@ -1330,6 +1330,12 @@ private:
    item->setAcceptedMouseButtons(Qt::NoButton);
    nativeItems_[c.key]=item;
   }
+  for(auto it=selectedNative_.begin();it!=selectedNative_.end();){
+   if(!nativeItems_.count(*it))it=selectedNative_.erase(it);else ++it;
+  }
+  if(activeNative_&&!selectedNative_.count(*activeNative_))activeNative_.reset();
+  if(nativeSession_&&activeNative_)nativeSession_->select(*activeNative_);
+  else if(nativeSession_)nativeSession_->clearSelection();
   updateNativePaths(true);
  }
  void nativeMousePress(QMouseEvent* e){
@@ -1375,6 +1381,8 @@ private:
    // Primeira acao escolhe o contorno correto; nunca insere em objeto diferente.
    if(!nativeSession_->selected()||*nativeSession_->selected()!=hit.key){
     nativeSession_->select(hit.key);nativeSelectedPart_.reset();
+    selected.clear();selectedNative_.clear();selectedNative_.insert(hit.key);
+    active_.reset();activeNative_=hit.key;applySelectionStyles();
    }else{
     // Evita criar pontos quase coincidentes com as ancoras de extremidade.
     if(hit.t>=0.015&&hit.t<=0.985){
@@ -1387,6 +1395,8 @@ private:
    }
   }else{
    nativeSession_->select(hit.key);nativeSelectedPart_.reset();
+   selected.clear();selectedNative_.clear();selectedNative_.insert(hit.key);
+   active_.reset();activeNative_=hit.key;applySelectionStyles();
   }
   // At most the selected contour changed when inserting an anchor.
   // Pure selection never rebuilds all native paths unless A/B rollback is enabled.
@@ -1655,6 +1665,10 @@ public:
   if(!nativeSession_->cutContourAtEdge(*picked,next))return false;
   const Key cutKey=picked->key;
   const int cutEdge=picked->edge;
+  if(!findNativeCurve(nativeSession_->committed(),cutKey)){
+   selectedNative_.erase(cutKey);
+   if(activeNative_&&*activeNative_==cutKey)activeNative_.reset();
+  }
   clearScissorHover(); // Remove orange preview together with actual edge.
   // Remain in Scissors tool, do not silently switch into selection.
   nativeMode_=false;nativeEditHandles_=false;
@@ -1701,7 +1715,8 @@ public:
   if(!nativeSession_||nativePressing_||nativeContourPressing_||!nativeSession_->selected())return false;
   if(!nativeSession_->deleteSelectedContour())return false;
   lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
-  nativeSelectedPart_.reset();createNativeItems();
+  if(activeNative_)selectedNative_.erase(*activeNative_);
+  activeNative_.reset();nativeSelectedPart_.reset();createNativeItems();
   if(diagnosticEvent)diagnosticEvent("bezier_contour_deleted",1);
   if(stateChanged)stateChanged();return true;
  }
