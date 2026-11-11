@@ -6129,7 +6129,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(view.busy())throw std::runtime_error("Finalize o gesto antes de exportar SVG.");
   QSettings settings("AlencarLaser","DesktopBeta");
   const QString preferred=alaser::svg20zc::initialSavePath(settings,
-     projectPath.isEmpty()?"Alencar_Laser.svg":
+     projectPath.isEmpty()?QStringLiteral("Alencar_Laser.svg"):
        QFileInfo(projectPath).completeBaseName()+".svg",projectPath);
   const QString chosen=QFileDialog::getSaveFileName(this,
      "Exportar SVG vetorial (milímetros)",preferred,"Imagem vetorial SVG (*.svg)");
@@ -9679,7 +9679,10 @@ static QJsonObject svgExport20zcTest(const QString& directory){
  // Real output for optional visual inspection of an original generated gear.
  QDir().mkpath(directory);
  const QString sample=QDir(directory).filePath("GEAR_SVG_20ZC_TEST.svg");
- (void)alaser::svg20zc::saveSvg(sample,testEditor.state(),CurveDocument{});
+ const auto gearOnly=alaser::svg20zc::saveSvg(sample,testEditor.state(),CurveDocument{});
+ check(std::abs(gearOnly.widthMm-2.*generated.outerRadius)<1.0&&
+       std::abs(gearOnly.heightMm-2.*generated.outerRadius)<1.0,
+       "20zc: dimensoes reais da engrenagem foram alteradas no SVG");
  return {{"status","PASS"},{"saved_directory_after_restart",true},
          {"svg_xml_valid",true},{"physical_dimensions_mm",true},
          {"closed_gear_with_bore",true},{"native_bezier_cubic",true},
