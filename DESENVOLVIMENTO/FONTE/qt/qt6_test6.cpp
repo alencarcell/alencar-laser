@@ -9786,11 +9786,21 @@ static QJsonObject saveFolderPersistence20zdTest(const QString& outputDirectory)
  check(reopenedDialogSeen,"20zd: Save As dialog did not open after restart");
  check(reopenedDialogDirectory==QDir(folder).canonicalPath(),
        "20zd: reopened Save As dialog did not start in the last saved folder");
+ QSettings afterCancel(prefs,QSettings::IniFormat);
+ afterCancel.sync();
+ check(alaser::svg20zc::normalizedExistingDirectory(
+       afterCancel.value(alaser::svg20zc::kSaveDirectoryKey).toString())==
+       QDir(folder).canonicalPath(),
+       "20zd: canceling Save As changed the remembered directory");
+ check(reopened.projectPath.isEmpty(),
+       "20zd: canceled Save As unexpectedly assigned a project path");
  reopened.close();QApplication::processEvents();
  QDir().mkpath(outputDirectory);
  return {{"status","PASS"},{"actual_save_as_dialog_exercised",true},
          {"file_written",true},{"settings_read_back_after_new_instance",true},
          {"reopened_save_as_initial_directory_matches",true},
+         {"cancel_keeps_previous_directory",true},
+         {"cancel_does_not_assign_project_path",true},
          {"machine_commands_sent",false}};
 }
 static QJsonObject gearGenerator199Test(){
