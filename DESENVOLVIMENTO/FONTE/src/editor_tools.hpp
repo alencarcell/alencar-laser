@@ -471,6 +471,52 @@ public:
   std::vector<Pt> p;for(int i=0;i<sides;i++){double a=2*std::numbers::pi*i/sides;p.push_back({center.x+radius*std::cos(a),center.y+radius*std::sin(a)});}return addContour(std::move(p),true,layer);
  }
  void moveObjects(std::vector<int> ids,Pt delta){change([&](EditorState& s){apply(s,ids,[&](Pt p){return p+delta;});});}
+ // Apply independent translations in ONE editor-history transaction.
+ // The caller expands selected groups and supplies one identical delta per member.
+ void moveObjectsBy(const std::map<int,Pt>& requested){
+  if(requested.empty())return;
+  bool any=false;
+  for(const auto& [id,delta]:requested){
+   (void)id;
+   if(!std::isfinite(delta.x)||!std::isfinite(delta.y))
+    throw std::runtime_error("invalid object translation");
+   any=any||std::hypot(delta.x,delta.y)>1e-12;
+  }
+  if(!any)return;
+  change([&](EditorState& s){
+   std::map<int,Pt> expanded=requested,groupDelta;
+   for(const auto& [id,delta]:requested){
+    const auto it=s.objects.find(id);
+    if(it==s.objects.end()||!editable(s,id))
+     throw std::runtime_error("object missing, locked or hidden");
+    if(it->second.group>0){
+     auto [g,inserted]=groupDelta.emplace(it->second.group,delta);
+     if(!inserted&&std::hypot(g->second.x-delta.x,g->second.y-delta.y)>1e-9)
+      throw std::runtime_error("a group cannot receive different translations");
+    }
+   }
+   for(const auto& [id,meta]:s.objects){
+    if(meta.group<=0)continue;
+    const auto group=groupDelta.find(meta.group);
+    if(group!=groupDelta.end()){
+     auto [entry,inserted]=expanded.emplace(id,group->second);
+     if(!inserted&&std::hypot(entry->second.x-group->second.x,
+                              entry->second.y-group->second.y)>1e-9)
+      throw std::runtime_error("conflicting translations inside a group");
+    }
+   }
+   for(const auto& [id,delta]:expanded){
+    if(!editable(s,id))throw std::runtime_error("group member locked or hidden");
+    if(!std::isfinite(delta.x)||!std::isfinite(delta.y))
+     throw std::runtime_error("invalid expanded translation");
+   }
+   for(auto& contour:s.doc.contours){
+    const auto delta=expanded.find(contour.key.object);
+    if(delta==expanded.end())continue;
+    for(auto& node:contour.nodes)node.p=node.p+delta->second;
+   }
+  });
+ }
  // Exclusão atômica de formas inteiras, com expansão dos agrupamentos.
  // Camadas bloqueadas/invisíveis nunca são alteradas por uma seleção parcial.
  void deleteObjects(std::vector<int> ids){
