@@ -28,6 +28,7 @@
 #include "escapement_study_dialog_20s.hpp"
 #include "gear_compound_dialog_19_9.hpp"
 #include "svg_export_20zc.hpp"
+#include "svg_import_20ze.hpp"
 #include "mechanism_studio_dialog_19_9.hpp"
 #include <QApplication>
 #include <QGraphicsView>
@@ -5315,6 +5316,14 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     &QAction::triggered,this,[this]{
     if(auto* button=findChild<QPushButton*>("open_image_for_trace"))button->click();
   });
+  auto* importSvgAction=fileMenu->addAction("Importar SVG vetorial...");
+  importSvgAction->setObjectName("import_svg_20ze");
+  importSvgAction->setToolTip("Adiciona os caminhos do SVG ao desenho atual, preservando curvas Bézier. Não importa parâmetros de máquina.");
+  connect(importSvgAction,&QAction::triggered,this,[this]{
+   const QString path=QFileDialog::getOpenFileName(this,"Importar SVG vetorial",{},
+      "SVG vetorial (*.svg)");
+   if(!path.isEmpty())run([this,path]{importSvgFromFile(path);});
+  });
   connect(fileMenu->addAction("Abrir último projeto (manual)"),&QAction::triggered,this,[this]{
    run([this]{
     const QString path=QSettings("AlencarLaser","DesktopBeta").value("files/lastProject").toString();
@@ -5793,7 +5802,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(!mime||!mime->hasUrls()||mime->urls().size()!=1){e->ignore();return;}
   const QUrl url=mime->urls().first();
   const QString suffix=QFileInfo(url.toLocalFile()).suffix().toLower();
-  if(url.isLocalFile()&&(suffix=="alaser"||suffix=="lbrn2"||suffix=="png"||suffix=="jpg"||suffix=="jpeg"||suffix=="bmp"||suffix=="webp"))
+  if(url.isLocalFile()&&(suffix=="alaser"||suffix=="lbrn2"||suffix=="svg"||suffix=="png"||suffix=="jpg"||suffix=="jpeg"||suffix=="bmp"||suffix=="webp"))
    e->acceptProposedAction();
   else e->ignore();
  }
@@ -5802,11 +5811,11 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(!mime||!mime->hasUrls()||mime->urls().size()!=1){e->ignore();return;}
   const QUrl url=mime->urls().first();
   const QString suffix=QFileInfo(url.toLocalFile()).suffix().toLower();
-  if(!url.isLocalFile()||(suffix!="alaser"&&suffix!="lbrn2"&&suffix!="png"&&
+  if(!url.isLocalFile()||(suffix!="alaser"&&suffix!="lbrn2"&&suffix!="svg"&&suffix!="png"&&
     suffix!="jpg"&&suffix!="jpeg"&&suffix!="bmp"&&suffix!="webp")){e->ignore();return;}
   e->acceptProposedAction();
   try{
-   if(suffix=="alaser"||suffix=="lbrn2")openFilePath(url.toLocalFile());
+   if(suffix=="alaser"||suffix=="lbrn2"||suffix=="svg")openFilePath(url.toLocalFile());
    else{
     loadRasterFromFile(url.toLocalFile());
     QTimer::singleShot(0,this,[this]{traceImageDialog();});
@@ -5814,7 +5823,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }
   catch(const std::exception& error){
    QMessageBox::warning(this,"Arquivo nao importado",QString::fromUtf8(error.what())+
-      "\n\nO desenho anterior foi preservado. Use Referencias para inspecionar o .lbrn2.");
+      "\n\nO desenho atual foi preservado. SVGs incompatíveis não são importados parcialmente.");
   }
  }
  std::vector<int> selection()const{return {view.selected.begin(),view.selected.end()};}
@@ -6235,7 +6244,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
      const auto urls=drag->mimeData()->urls();
      if(urls.size()==1&&urls.first().isLocalFile()){
       const QString suffix=QFileInfo(urls.first().toLocalFile()).suffix().toLower();
-      if(QStringList{"alaser","lbrn2","png","jpg","jpeg","bmp","webp"}.contains(suffix)){
+      if(QStringList{"alaser","lbrn2","svg","png","jpg","jpeg","bmp","webp"}.contains(suffix)){
        drag->acceptProposedAction();return true;
       }
      }
@@ -6547,7 +6556,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
  }
  void openOther(){
   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
-   projectPath,"Projetos de desenho (*.alaser *.lbrn2);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2)");
+   projectPath,"Projetos e vetores (*.alaser *.lbrn2 *.svg);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2);;SVG vetorial (*.svg)");
   if(!chosen.isEmpty())openFilePath(chosen);
  }
  void ensureSafeToReplace(){
@@ -6615,6 +6624,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
 
  void openFilePath(const QString& path){
   const QString suffix=QFileInfo(path).suffix().toLower();
+  if(suffix=="svg"){
+   importSvgFromFile(path);return;
+  }
   if(suffix=="alaser"){
    ensureSafeToReplace();
    const QString previous=projectPath;projectPath=path;
@@ -6693,10 +6705,11 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
  }
  void open(){
   if(projectPath.isEmpty()){
-   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir projeto",{},
-    "Projetos (*.alaser *.lbrn2);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2)");
+   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir projeto ou importar vetor",{},
+    "Projetos e vetores (*.alaser *.lbrn2 *.svg);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2);;SVG vetorial (*.svg)");
    if(chosen.isEmpty())return;
-   if(QFileInfo(chosen).suffix().compare("lbrn2",Qt::CaseInsensitive)==0){
+   const QString suffix=QFileInfo(chosen).suffix().toLower();
+   if(suffix=="lbrn2"||suffix=="svg"){
     openFilePath(chosen);return;
    }
    projectPath=chosen;
