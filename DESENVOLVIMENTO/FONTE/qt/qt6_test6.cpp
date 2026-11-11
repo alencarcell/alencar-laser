@@ -42,6 +42,7 @@
 #include <QSlider>
 #include <QContextMenuEvent>
 #include <array>
+#include <iterator>
 #include <tuple>
 #include <QPainter>
 #include <QPainterPath>
