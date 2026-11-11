@@ -231,6 +231,11 @@ public:
 inline Pt relativePoint(double x,double y,bool relative,Pt current){
  return relative?Pt{current.x+x,current.y+y}:Pt{x,y};
 }
+inline Pt readPoint(PathScanner& scanner,bool relative,Pt current){
+ const double x=scanner.number();
+ const double y=scanner.number();
+ return relativePoint(x,y,relative,current);
+}
 inline void arcTo(PathBuilder& builder,double rx,double ry,double rotation,
                   bool largeArc,bool sweep,Pt end){
  Pt start=builder.point();
@@ -294,10 +299,10 @@ inline void parsePath(const QString& data,const Matrix& transform,ImportResult& 
   }
   if(op=='M'){
    if(!scanner.hasNumber())throw std::runtime_error("SVG path: M sem coordenadas");
-   const Pt p=relativePoint(scanner.number(),scanner.number(),relative,builder.point());
+   const Pt p=readPoint(scanner,relative,builder.point());
    builder.moveTo(p);
    while(scanner.hasNumber()){
-    const Pt q=relativePoint(scanner.number(),scanner.number(),relative,builder.point());
+    const Pt q=readPoint(scanner,relative,builder.point());
     builder.lineTo(q);
    }
    command=relative?QLatin1Char('l'):QLatin1Char('L');
@@ -307,24 +312,24 @@ inline void parsePath(const QString& data,const Matrix& transform,ImportResult& 
   while(scanner.hasNumber()){
    const Pt current=builder.point();
    if(op=='L'){
-    builder.lineTo(relativePoint(scanner.number(),scanner.number(),relative,current));
+    builder.lineTo(readPoint(scanner,relative,current));
    }else if(op=='H'){
     const double x=scanner.number();builder.lineTo({relative?current.x+x:x,current.y});
    }else if(op=='V'){
     const double y=scanner.number();builder.lineTo({current.x,relative?current.y+y:y});
    }else if(op=='C'){
-    const Pt c1=relativePoint(scanner.number(),scanner.number(),relative,current);
-    const Pt c2=relativePoint(scanner.number(),scanner.number(),relative,current);
-    const Pt end=relativePoint(scanner.number(),scanner.number(),relative,current);
+    const Pt c1=readPoint(scanner,relative,current);
+    const Pt c2=readPoint(scanner,relative,current);
+    const Pt end=readPoint(scanner,relative,current);
     builder.cubicTo(c1,c2,end);cubicControl=c2;
    }else if(op=='S'){
     const Pt c1=(previous=='C'||previous=='S')?current*2.-cubicControl:current;
-    const Pt c2=relativePoint(scanner.number(),scanner.number(),relative,current);
-    const Pt end=relativePoint(scanner.number(),scanner.number(),relative,current);
+    const Pt c2=readPoint(scanner,relative,current);
+    const Pt end=readPoint(scanner,relative,current);
     builder.cubicTo(c1,c2,end);cubicControl=c2;
    }else if(op=='Q'){
-    const Pt q=relativePoint(scanner.number(),scanner.number(),relative,current);
-    const Pt end=relativePoint(scanner.number(),scanner.number(),relative,current);
+    const Pt q=readPoint(scanner,relative,current);
+    const Pt end=readPoint(scanner,relative,current);
     const Pt c1=current+(q-current)*(2./3.),c2=end+(q-end)*(2./3.);
     builder.cubicTo(c1,c2,end);quadControl=q;
    }else if(op=='T'){
@@ -337,7 +342,7 @@ inline void parsePath(const QString& data,const Matrix& transform,ImportResult& 
     const double large=scanner.number(),sweep=scanner.number();
     if((large!=0.&&large!=1.)||(sweep!=0.&&sweep!=1.))
      throw std::runtime_error("SVG path: flags de arco invalidas");
-    const Pt end=relativePoint(scanner.number(),scanner.number(),relative,current);
+    const Pt end=readPoint(scanner,relative,current);
     arcTo(builder,rx,ry,rotation,large==1.,sweep==1.,end);
    }else throw std::runtime_error("SVG path: comando nao suportado");
    ++groups;
@@ -360,7 +365,7 @@ inline double attrNumber(const QXmlStreamAttributes& a,const char* key,double fa
 inline bool hiddenElement(const QXmlStreamAttributes& a){
  const QString display=a.value(QLatin1String("display")).toString().trimmed().toLower();
  const QString visibility=a.value(QLatin1String("visibility")).toString().trimmed().toLower();
- const QString style=a.value(QLatin1String("style")).toString().toLower().remove(' ');
+ const QString style=a.value(QLatin1String("style")).toString().toLower().remove(QLatin1Char(' '));
  return display=="none"||visibility=="hidden"||
         style.contains("display:none")||style.contains("visibility:hidden");
 }
