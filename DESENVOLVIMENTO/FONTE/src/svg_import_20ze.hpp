@@ -334,12 +334,15 @@ inline void parsePath(const QString& data,const Matrix& transform,ImportResult& 
     builder.cubicTo(c1,c2,end);quadControl=q;
    }else if(op=='T'){
     const Pt q=(previous=='Q'||previous=='T')?current*2.-quadControl:current;
-    const Pt end=relativePoint(scanner.number(),scanner.number(),relative,current);
+    const Pt end=readPoint(scanner,relative,current);
     const Pt c1=current+(q-current)*(2./3.),c2=end+(q-end)*(2./3.);
     builder.cubicTo(c1,c2,end);quadControl=q;
    }else if(op=='A'){
-    const double rx=scanner.number(),ry=scanner.number(),rotation=scanner.number();
-    const double large=scanner.number(),sweep=scanner.number();
+    const double rx=scanner.number();
+    const double ry=scanner.number();
+    const double rotation=scanner.number();
+    const double large=scanner.number();
+    const double sweep=scanner.number();
     if((large!=0.&&large!=1.)||(sweep!=0.&&sweep!=1.))
      throw std::runtime_error("SVG path: flags de arco invalidas");
     const Pt end=readPoint(scanner,relative,current);
