@@ -5172,7 +5172,10 @@ public:
    view.rebuild();captureEvent("groups_ungrouped",count);
    QTimer::singleShot(0,this,[this]{if(buttons.count("scissors"))buttons.at("scissors")->click();});
   });
-  addVertical(inspector,"move","Mover +1 mm",[this]{view.editor.moveObjects(selection(),{1,0});view.rebuild();captureEvent("shapes_moved",int(selection().size()));});
+  addVertical(inspector,"move","Mover +1 mm",[this]{
+   const bool moved=view.moveSelectionBy({1,0});
+   if(moved){view.rebuild();captureEvent("shapes_moved",int(view.selectionCount()));}
+  });
   addVertical(inspector,"delete_shapes","Excluir formas selecionadas",[this]{
    if(view.nativeModeActive()){
     check(view.nativeDeleteContour(),"Selecione uma curva Bézier para excluir.");
@@ -5184,7 +5187,7 @@ public:
    check(bezierToolActive_,"Ative o modo Bézier e selecione uma curva.");
    check(view.nativeDeleteContour(),"Selecione um contorno Bézier.");
   });
-inspector->addSpacing(10);inspector->addWidget(titleLabel("TRANSFORMAÇÕES — POLILINHAS"));
+inspector->addSpacing(10);inspector->addWidget(titleLabel("TRANSFORMAÇÕES — VETORES"));
 addVertical(inspector,"duplicate_obj","Duplicar (+3 mm)",[this]{
  if(bezierToolActive_)throw std::runtime_error("Duplicar: selecione antes a ferramenta Selecionar (polilinhas).");
  const auto ids=selection();check(!ids.empty(),"Duplicar: selecione formas.");
@@ -5193,23 +5196,13 @@ addVertical(inspector,"duplicate_obj","Duplicar (+3 mm)",[this]{
  if(!copies.empty())view.activate({copies.front(),0},false);
 });
 addVertical(inspector,"mirror_horiz","Espelhar horizontal ↔",[this]{
- if(bezierToolActive_)throw std::runtime_error("Espelhar: somente polilinhas nesta beta.");
- const auto ids=selection();check(!ids.empty(),"Espelhar: selecione um objeto.");
- const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
- view.editor.mirrorX(ids,(lo.x+hi.x)/2.0);view.rebuild();
+ view.mirrorSelection(true);
 });
 addVertical(inspector,"mirror_vertical","Espelhar vertical ↕",[this]{
- if(bezierToolActive_)throw std::runtime_error("Espelhar: selecione polilinhas nesta beta.");
- const auto ids=selection();check(!ids.empty(),"Espelhar: selecione um objeto.");
- const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
- view.editor.mirrorY(ids,(lo.y+hi.y)/2.0);view.rebuild();
+ view.mirrorSelection(false);
 });
 addVertical(inspector,"rotate_90","Girar 90°",[this]{
- if(bezierToolActive_)throw std::runtime_error("Girar: somente polilinhas nesta beta.");
- const auto ids=selection();check(!ids.empty(),"Girar: selecione um objeto.");
- const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
- view.editor.rotateObjects(ids,{(lo.x+hi.x)/2.0,(lo.y+hi.y)/2.0},90.0);
- view.rebuild();
+ view.rotateSelection(90.0);
 });
 inspector->addStretch();
 auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponíveis nesta beta");
@@ -5254,31 +5247,23 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   auto* exactAngle=new QPushButton("Girar seleção por ângulo...");
   exactAngle->setObjectName("rotate_exact_195");objectsRotate20z_=exactAngle;
   connect(exactAngle,&QPushButton::clicked,this,[this]{run([this]{
-   check(!bezierToolActive_,"Girar exige modo Seleção de polilinhas.");
-   const auto ids=selection();check(!ids.empty(),"Selecione formas editáveis.");
+   if(view.selectionCount()==0)throw std::runtime_error("Selecione formas editáveis.");
    bool ok=false;const double angle=QInputDialog::getDouble(this,"Rotação","Ângulo em graus:",0,-360,360,2,&ok);
    if(!ok)return;
-   const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
-   view.editor.rotateObjects(ids,{(lo.x+hi.x)/2.,(lo.y+hi.y)/2.},angle);view.rebuild();
+   view.rotateSelection(angle);
   });});properties->addWidget(exactAngle);
   auto* scaleExact=new QPushButton("Escalar seleção proporcionalmente...");
   scaleExact->setObjectName("scale_exact_195");objectsScale20z_=scaleExact;
   connect(scaleExact,&QPushButton::clicked,this,[this]{run([this]{
-   check(!bezierToolActive_,"Escalar exige modo Seleção de polilinhas.");
-   const auto ids=selection();check(!ids.empty(),"Selecione formas editáveis.");
+   if(view.selectionCount()==0)throw std::runtime_error("Selecione formas editáveis.");
    bool ok=false;const double factor=QInputDialog::getDouble(this,"Escala","Escala (%):",100,1,1000,1,&ok);
    if(!ok)return;
-   const auto [lo,hi]=boundsOf(view.editor.state().doc,ids);
-   view.editor.scaleObjects(ids,{(lo.x+hi.x)/2.,(lo.y+hi.y)/2.},factor/100.,factor/100.);view.rebuild();
+   view.scaleSelection(factor/100.);
   });});properties->addWidget(scaleExact);
   auto* alignLeftBtn=new QPushButton("Alinhar à esquerda (2+ objetos)");
   alignLeftBtn->setObjectName("align_left_195");objectsAlignLeft20z_=alignLeftBtn;
   connect(alignLeftBtn,&QPushButton::clicked,this,[this]{run([this]{
-   check(!bezierToolActive_,"Alinhar exige modo Seleção de polilinhas.");
-   const auto ids=selection();
-   for(const int id:ids)if(view.editor.state().objects.at(id).group!=0)
-    throw std::runtime_error("Alinhamento de grupos exige desagrupar primeiro.");
-   view.editor.alignLeft(ids);view.rebuild();
+   view.alignSelection(0);
   });});properties->addWidget(alignLeftBtn);
   auto* alignmentSection=new QGroupBox("Alinhamento (2 ou mais)");
   alignmentSection->setObjectName("objects_alignment_group_20z");
@@ -6312,7 +6297,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const size_t count=regularCount+nativeCount;
   const bool nativeEditing=view.nativeModeActive()&&view.nativeSelected().has_value();
   const bool single= count==1&&nativeCount==0;
-  const bool some=regularCount>0&&nativeCount==0;
+  const bool some=count>0;
   const bool multi=count>=2;
   if(nativeEditing&&regularCount==0)objectsSummary20z_->setText(
    "Curva Bézier em edição. Âncoras e alças permanecem nativas.");
