@@ -967,7 +967,7 @@ class QtEditorLab final:public QGraphicsView{
   }else{
    for(auto* item:transformItems_)item->setTransform(QTransform());
   }
-  transformItems_.clear();transformIds_.clear();
+  transformItems_.clear();transformIds_.clear();transformNativeKeys_.clear();
   transformDragging_=false;transformHandle_=-1;
   nativeTransformDragging_=false;nativeTransformKey_={};
   transformSx_=transformSy_=1.;transformAngle_=0.;transformMoveDelta_={};
@@ -977,9 +977,8 @@ class QtEditorLab final:public QGraphicsView{
   viewport()->update();
  }
  bool beginSelectionTransform(QPointF position){
-  if(tool!=Tool::Select||busy()||nativeEditHandles_)return false;
-  const bool native=nativeMode_&&nativeSession_&&nativeSession_->selected();
-  if(!native&&(nativeMode_||selected.empty()))return false;
+  if(tool!=Tool::Select||busy()||nativeEditHandles_||
+     (selected.empty()&&selectedNative_.empty()))return false;
   const auto bounds=selectionDisplayBounds();if(!bounds)return false;
   const auto quad=selectionQuadScene();
   if(!quad)return false;
@@ -992,30 +991,29 @@ class QtEditorLab final:public QGraphicsView{
    if(d<distance){h=i;distance=d;}
   }
   if(h<0)return false;
-  if(native){
-   nativeTransformKey_=*nativeSession_->selected();
-   const auto it=nativeItems_.find(nativeTransformKey_);
-   if(it==nativeItems_.end())return false;
-   nativeTransformDragging_=true;
-   transformItems_.push_back(it->second);
-  }else{
   transformIds_=expandedSelection();
+  transformNativeKeys_=expandedNativeSelection();
   for(int id:transformIds_){
    if(!editable(editor.state(),id)){cancelSelectionTransform();return false;}
    auto found=itemsByObject_.find(id);
    if(found!=itemsByObject_.end())
     transformItems_.insert(transformItems_.end(),found->second.begin(),found->second.end());
   }
+  for(const Key key:transformNativeKeys_){
+   if(!nativeEditable(key)){cancelSelectionTransform();return false;}
+   const auto found=nativeItems_.find(key);
+   if(found==nativeItems_.end()){cancelSelectionTransform();return false;}
+   transformItems_.push_back(found->second);
   }
+  nativeTransformDragging_=!transformNativeKeys_.empty();
   if(transformItems_.empty()){cancelSelectionTransform();return false;}
   transformDragging_=true;transformHandle_=h;transformBounds_=*bounds;
   transformQuad_=*quad;
   transformAnchor_=h>=8?middle((*quad)[0],(*quad)[2]):QPointF{};
   transformSx_=transformSy_=1.;transformAngle_=0.;
-  // Real operator sessions commonly move multi-selection using center handle.
-  // Keep native Bezier and rotate/scale on the established path; only
-  // translation (h=12) uses one temporary Qt parent for >=32 items.
-  if(!native&&h==12&&transformItems_.size()>=kGroupedDragThreshold&&
+  // One preview parent may contain both conventional and native paths.
+  // Canonical documents remain untouched until the mouse is released.
+  if(h==12&&transformItems_.size()>=kGroupedDragThreshold&&
      !qEnvironmentVariableIsSet("ALENCAR_DISABLE_GROUPED_DRAG")){
    QList<QGraphicsItem*> members;
    members.reserve(qsizetype(transformItems_.size()));
@@ -1120,43 +1118,31 @@ class QtEditorLab final:public QGraphicsView{
   if(!transformDragging_)return;
   const int h=transformHandle_;
   const auto ids=transformIds_;
+  const auto nativeKeys=transformNativeKeys_;
   const QPointF pivot=h>=8?middle(transformQuad_[0],transformQuad_[2]):transformAnchor_;
   const double sx=transformSx_,sy=transformSy_,angle=transformAngle_;
-  const double a=transformAffineA_,b=transformAffineB_,
-               c=transformAffineC_,d=transformAffineD_;
+  double a=1.,b=0.,c=0.,d=1.;
+  if(h>=8){
+   const double radians=angle*std::numbers::pi/180.;
+   a=std::cos(radians);b=-std::sin(radians);
+   c=std::sin(radians);d=std::cos(radians);
+  }else if(h<8){
+   a=transformAffineA_;b=transformAffineB_;
+   c=transformAffineC_;d=transformAffineD_;
+  }
   const QPointF move=transformMoveDelta_;
-  const bool native=nativeTransformDragging_;
-  const Key nativeKey=nativeTransformKey_;
   const auto finishedQuad=selectionQuadScene();
   cancelSelectionTransform();
-  if(native){
-   if(!nativeSession_||!nativeSession_->selected()||*nativeSession_->selected()!=nativeKey)return;
-   const bool changed=nativeSession_->transformSelectedContour(fromQt(pivot),sx,sy,angle,fromQt(move));
-   if(changed){
-    lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
-    updateNativePaths(true);
-    if(diagnosticEvent)diagnosticEvent(h==12?"bezier_contour_moved":h>=8?"bezier_contour_rotated":"bezier_contour_scaled",1);
-    if(stateChanged)stateChanged();
-   }
-   return;
-  }
-  if(h==12){
-   if(QLineF(QPointF{},move).length()<1e-8)return;
-   editor.moveObjects(ids,fromQt(move));
-  }else if(h>=8){
-   if(std::abs(angle)<.01)return;
-   editor.rotateObjects(ids,fromQt(pivot),angle);
-  }else{
-   if(std::abs(sx-1.)<1e-5&&std::abs(sy-1.)<1e-5)return;
-   editor.affineObjects(ids,fromQt(pivot),a,b,c,d);
-  }
-  if(finishedQuad){
+  const bool changed=applySelectionAffine(ids,nativeKeys,fromQt(pivot),a,b,c,d,fromQt(move));
+  if(!changed)return;
+  if(nativeKeys.empty()&&finishedQuad){
    orientedFrame_=*finishedQuad;
    orientedFrameIds_=selected;
    orientedFrameGeneration_=editor.geometryGeneration;
   }
   rebuild();
-  if(diagnosticEvent)diagnosticEvent(h==12?"shapes_moved":h>=8?"selection_rotated":"selection_scaled",int(ids.size()));
+  const int count=int(ids.size()+nativeKeys.size());
+  if(diagnosticEvent)diagnosticEvent(h==12?"shapes_moved":h>=8?"selection_rotated":"selection_scaled",count);
   if(stateChanged)stateChanged();
  }
  void clearShapePreview(){
