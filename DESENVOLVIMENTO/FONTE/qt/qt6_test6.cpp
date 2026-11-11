@@ -2046,6 +2046,16 @@ public:
    if(hit.segment<0||hit.segment>=edges)continue;
    chosen=hit;break;
   }
+  // Keep the same visual markers while hovering along the SAME edge;
+  // avoid rebuilding up to 50 Qt items on every mouse-move event.
+  if(chosen&&edgeTrimHover20z_&&edgeTrimPreview20z_&&
+     chosen->key==edgeTrimHover20z_->key&&
+     chosen->segment==edgeTrimHover20z_->segment&&
+     edgeTrimGeneration20z_==editor.generation&&
+     edgeTrimViewportTransform20z_==viewportTransform()){
+   edgeTrimPosition20z_=at;
+   return;
+  }
   clearEdgeTrimHover20z();
   if(!chosen){
    viewport()->setToolTip("Entre nós: SEM CIANO = sem aresta livre sob o mouse. Camadas bloqueadas/grupos não são cortados.");
