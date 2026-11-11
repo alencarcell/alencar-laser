@@ -10770,13 +10770,38 @@ static QJsonObject mixedSelection20zeTest(){
        dist(w.curves->committed().contours.front().nodes.front().anchor,
             alignedNative.anchor+Pt{5.,-3.})<1e-8,
        "20ze mixed selection: one Redo did not restore both documents");
+ const Pt beforeRotationRegular=w.view.editor.state().doc.contours.front().nodes.front().p;
+ const Pt beforeRotationNative=w.curves->committed().contours.front().nodes.front().anchor;
  check(w.view.rotateSelection(30.),
        "20ze mixed selection: rotation did not affect both object types");
+ const Pt afterRotationRegular=w.view.editor.state().doc.contours.front().nodes.front().p;
+ const Pt afterRotationNative=w.curves->committed().contours.front().nodes.front().anchor;
+ check(dist(afterRotationRegular,beforeRotationRegular)>1e-5&&
+       dist(afterRotationNative,beforeRotationNative)>1e-5,
+       "20ze mixed selection: rotation did not transform both documents");
  check(w.curves->committed().contours.front().edgeKind==std::vector<uint8_t>{1}&&
        w.curves->committed().contours.front().nodes.size()==2,
        "20ze mixed selection: rotation flattened or changed cubic topology");
  check(w.view.scaleSelection(1.25),
        "20ze mixed selection: proportional scale did not affect both object types");
+ const Pt afterScaleRegular=w.view.editor.state().doc.contours.front().nodes.front().p;
+ const Pt afterScaleNative=w.curves->committed().contours.front().nodes.front().anchor;
+ w.view.history(false);
+ check(dist(w.view.editor.state().doc.contours.front().nodes.front().p,afterRotationRegular)<1e-8&&
+       dist(w.curves->committed().contours.front().nodes.front().anchor,afterRotationNative)<1e-8,
+       "20ze mixed selection: first Undo did not revert only the scale transaction");
+ w.view.history(false);
+ check(dist(w.view.editor.state().doc.contours.front().nodes.front().p,beforeRotationRegular)<1e-8&&
+       dist(w.curves->committed().contours.front().nodes.front().anchor,beforeRotationNative)<1e-8,
+       "20ze mixed selection: second Undo did not revert the earlier rotation transaction");
+ w.view.history(true);
+ check(dist(w.view.editor.state().doc.contours.front().nodes.front().p,afterRotationRegular)<1e-8&&
+       dist(w.curves->committed().contours.front().nodes.front().anchor,afterRotationNative)<1e-8,
+       "20ze mixed selection: first Redo did not restore rotation");
+ w.view.history(true);
+ check(dist(w.view.editor.state().doc.contours.front().nodes.front().p,afterScaleRegular)<1e-8&&
+       dist(w.curves->committed().contours.front().nodes.front().anchor,afterScaleNative)<1e-8,
+       "20ze mixed selection: second Redo did not restore scale");
  check(w.view.centerSelectionOnBed(400.,300.),
        "20ze mixed selection: bed centering did not move the mixed selection");
  const auto centered=w.view.selectionPreviewRect();
