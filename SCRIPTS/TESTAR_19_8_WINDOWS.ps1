@@ -1,7 +1,7 @@
 # Alencar Laser 19.8 — build de desenvolvimento Windows
 # Executar na raiz do repositorio:
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\SCRIPTS\TESTAR_19_8_WINDOWS.ps1 -Abrir
-param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteSvg, [switch]$SomentePastas, [switch]$SomenteIcones, [switch]$SomenteHistorico, [switch]$SomenteFluidez, [switch]$SomenteImportacaoSegura, [switch]$SomenteBezierNativo, [switch]$SomenteBezierNativoUI, [string]$ArquivoLbrn2 = "")
+param([switch]$Abrir, [switch]$SomenteMarca, [switch]$SomenteTesoura, [switch]$SomenteImportacao, [switch]$SomenteFerramentas, [switch]$SomenteEdicao, [switch]$SomenteInteracao, [switch]$SomenteCamadas, [switch]$SomenteCasoReal, [switch]$SomenteRefino, [switch]$SomenteRaster, [switch]$SomenteDesenho, [switch]$SomenteSimulacao, [switch]$SomenteEngrenagens, [switch]$SomenteSvg, [switch]$SomentePastas, [switch]$SomenteSelecaoMista, [switch]$SomenteIcones, [switch]$SomenteHistorico, [switch]$SomenteFluidez, [switch]$SomenteImportacaoSegura, [switch]$SomenteBezierNativo, [switch]$SomenteBezierNativoUI, [string]$ArquivoLbrn2 = "")
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -212,6 +212,17 @@ try {
         & $app --svg-import-20ze-test '-' $destino
         Checar-ResultadoQt 'SVG 20ze: importacao, arrastar/soltar e round-trip' (Join-Path $destino 'RESULTADO_IMPORTACAO_SVG_20ZE.json')
         Write-Host '20zc exportacao + 20ze importacao SVG: PASS automatizado; teste manual no aplicativo ainda necessario.' -ForegroundColor Green
+        return
+    }
+    if ($SomenteSelecaoMista) {
+        Write-Host '20ze: selecao mista SVG/Bezier/polilinhas, alinhamento e historico coordenado; sem hardware.' -ForegroundColor Cyan
+        Compilar-QtComDiagnostico
+        $app = Join-Path $build 'alencar_test7_qt6.exe'
+        $destino = Join-Path $raiz 'RELATORIOS\AUDITORIAS\GITHUB_19_8\selecao_mista_20ze'
+        New-Item -ItemType Directory -Path $destino -Force | Out-Null
+        & $app --mixed-selection-20ze-test '-' $destino
+        Checar-ResultadoQt 'Selecao mista, alinhamento, transformacoes e Undo/Redo' (Join-Path $destino 'RESULTADO_SELECAO_MISTA_20ZE.json')
+        Write-Host '20ze: teste sintetico de selecao mista PASS. A homologacao visual no Windows ainda e necessaria.' -ForegroundColor Green
         return
     }
     if ($SomentePastas) {
