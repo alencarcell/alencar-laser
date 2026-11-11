@@ -14,31 +14,86 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
 namespace alaser::svg20zc {
 inline constexpr const char* kSaveDirectoryKey="files/lastSaveDirectory";
 
+// The save-folder preference has its own INI-backed UserScope store.
+// This avoids depending on the editor's recovery/UI-persistence switch and
+// makes the file location explicit and independently verifiable on Windows.
+inline std::unique_ptr<QSettings> saveLocationSettings(){
+ const QString overrideFile=qEnvironmentVariable("ALENCAR_SAVE_LOCATIONS_TEST_FILE_20ZD");
+ if(!overrideFile.isEmpty())
+  return std::make_unique<QSettings>(overrideFile,QSettings::IniFormat);
+ return std::make_unique<QSettings>(QSettings::IniFormat,QSettings::UserScope,
+                                    "AlencarLaser","DesktopBeta");
+}
+inline QString normalizedExistingDirectory(QString directory){
+ if(directory.isEmpty())return {};
+ QDir candidate(directory);
+ if(!candidate.exists())return {};
+ QString canonical=candidate.canonicalPath();
+ if(canonical.isEmpty())canonical=candidate.absolutePath();
+ return QDir::cleanPath(canonical);
+}
 inline QString initialSavePath(QSettings& settings,const QString& name,
-                               const QString& fallbackFile={}){
- QString directory=settings.value(kSaveDirectoryKey).toString();
- if(directory.isEmpty()||!QDir(directory).exists()){
+                               const QString& fallbackFile={},bool migrateLegacy=true){
+ settings.setFallbacksEnabled(false);
+ settings.sync();
+ QString directory=normalizedExistingDirectory(settings.value(kSaveDirectoryKey).toString());
+ // Migrate the 20zc native QSettings key to the dedicated UserScope INI store.
+ if(directory.isEmpty()&&migrateLegacy){
+  QSettings legacy("AlencarLaser","DesktopBeta");
+  legacy.sync();
+  const QString oldDirectory=normalizedExistingDirectory(
+      legacy.value(kSaveDirectoryKey).toString());
+  if(!oldDirectory.isEmpty()){
+   settings.setValue(kSaveDirectoryKey,oldDirectory);
+   settings.sync();
+   if(settings.status()==QSettings::NoError)
+    directory=normalizedExistingDirectory(settings.value(kSaveDirectoryKey).toString());
+  }
+ }
+ if(directory.isEmpty()){
   const QFileInfo prior(fallbackFile);
   if(!fallbackFile.isEmpty()&&prior.absoluteDir().exists())
-   directory=prior.absolutePath();
-  else directory=QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+   directory=normalizedExistingDirectory(prior.absolutePath());
+  else directory=normalizedExistingDirectory(
+      QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
  }
- if(directory.isEmpty()||!QDir(directory).exists())directory=QDir::homePath();
+ if(directory.isEmpty())directory=QDir::homePath();
  const QString basename=QFileInfo(name).fileName();
  return QDir(directory).filePath(basename.isEmpty()?"Alencar_Laser.svg":basename);
 }
-inline void rememberSaveDirectory(QSettings& settings,const QString& savedPath){
- if(savedPath.isEmpty())return;
+inline bool rememberSaveDirectory(QSettings& settings,const QString& savedPath,
+                                  QString* error=nullptr){
+ const auto fail=[&](const QString& why){if(error)*error=why;return false;};
+ if(savedPath.isEmpty())return fail("caminho vazio");
  const QFileInfo chosen(savedPath);
- if(!chosen.isAbsolute()||!chosen.absoluteDir().exists())return;
- settings.setValue(kSaveDirectoryKey,chosen.absolutePath());
+ if(!chosen.isAbsolute()||!chosen.absoluteDir().exists())
+  return fail("pasta escolhida nao existe ou caminho nao e absoluto");
+ QString directory=normalizedExistingDirectory(chosen.absolutePath());
+ if(directory.isEmpty())return fail("nao foi possivel resolver a pasta escolhida");
+ settings.setFallbacksEnabled(false);
+ settings.setValue(kSaveDirectoryKey,directory);
  settings.sync();
+ if(settings.status()!=QSettings::NoError)
+  return fail("QSettings nao conseguiu gravar a preferencia");
+ // Verify through a NEW settings object, simulating application restart.
+ QSettings verify(settings.fileName(),settings.format());
+ verify.setFallbacksEnabled(false);
+ verify.sync();
+ const QString readBack=normalizedExistingDirectory(verify.value(kSaveDirectoryKey).toString());
+ if(verify.status()!=QSettings::NoError||readBack!=directory)
+  return fail("a preferencia nao passou na verificacao de leitura");
+ // Keep the old native key synchronized for compatibility with 20zc builds.
+ QSettings legacy("AlencarLaser","DesktopBeta");
+ legacy.setValue(kSaveDirectoryKey,directory);
+ legacy.sync();
+ return true;
 }
 
 struct Summary {
