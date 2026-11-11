@@ -1449,7 +1449,10 @@ public:
  bool busy()const{return draggingNode_.has_value()||shapeDragging_||transformDragging_||strokeDrawing_||polylineDrawing_||bezierDrawing_||marqueeActive_||nativePressing_||nativeContourPressing_;}
  bool nativeMode()const{return nativeMode_;}
  bool hasNativeDocument()const{return nativeSession_&&!nativeSession_->committed().contours.empty();}
- std::optional<Key> nativeSelected()const{return nativeSession_?nativeSession_->selected():std::nullopt;}
+ std::optional<Key> nativeSelected()const{return activeNative_?activeNative_:
+      (nativeSession_?nativeSession_->selected():std::nullopt);}
+ const std::set<Key>& nativeSelectedKeys()const{return selectedNative_;}
+ std::optional<Key> activeNativeKey()const{return activeNative_;}
  std::optional<int64_t> nativeSelectedNode()const{
   if(!nativeSelectedPart_||nativeSelectedPart_->part==CurvePart::Edge)return {};
   return nativeSelectedPart_->nodeId;
@@ -1553,6 +1556,8 @@ public:
   nativePressing_=false;nativeContourPressing_=false;nativeMode_=false;
   nativeEditHandles_=false;
   clearNativeItems();nativeSession_=session;
+  selectedNative_.clear();activeNative_.reset();
+  mixedActionApplied_=mixedActionUndone_=false;
   lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
   createNativeItems();
  }
@@ -1597,17 +1602,42 @@ public:
   }
   return lastNativeAction_&&nativeHistoryAvailable(redo);
  }
- bool selectNativeAt(Pt click,bool startMove){
+ bool selectNativeAt(Pt click,bool startMove,
+                       Qt::KeyboardModifiers modifiers=Qt::NoModifier){
+  (void)startMove; // Drag preview is started by the unified selection path.
   if(!nativeSession_||!hasNativeDocument())return false;
   const auto matches=nativeSession_->pickEdges(click,nativePxPerMm(),viewport()->devicePixelRatioF(),8);
-  if(matches.empty())return false;
-  nativeSession_->select(matches.front().key);
-  nativeMode_=true;nativeEditHandles_=false;tool=Tool::Select;
-  active_.reset();selected.clear();applySelectionStyles();
-  if(startMove){
-   nativeContourPressing_=nativeSession_->startContourMove(matches.front().key,click);
+  std::vector<Key> eligible;
+  for(const auto& hit:matches)if(nativeEditable(hit.key))eligible.push_back(hit.key);
+  if(eligible.empty())return false;
+  Key key=eligible.front();
+  if(modifiers.testFlag(Qt::AltModifier)&&activeNative_){
+   const auto current=std::find(eligible.begin(),eligible.end(),*activeNative_);
+   if(current!=eligible.end())key=eligible[(size_t(current-eligible.begin())+1)%eligible.size()];
   }
-  updateNativeSelection199();
+  const bool control=modifiers.testFlag(Qt::ControlModifier);
+  const bool shift=modifiers.testFlag(Qt::ShiftModifier);
+  if(control){
+   if(selectedNative_.erase(key)){
+    if(activeNative_&&*activeNative_==key)activeNative_.reset();
+   }else selectedNative_.insert(key);
+  }else if(shift){
+   selectedNative_.insert(key);
+  }else{
+   const bool keep=selectedNative_.count(key)>0&&totalSelectionCount()>1;
+   if(!keep){
+    selected.clear();selectedNative_.clear();active_.reset();
+   }
+   selectedNative_.insert(key);
+  }
+  activeNative_=selectedNative_.count(key)?std::optional<Key>{key}:std::nullopt;
+  active_.reset();
+  if(activeNative_)nativeSession_->select(*activeNative_);
+  else if(!selectedNative_.empty()){
+   activeNative_=*selectedNative_.rbegin();nativeSession_->select(*activeNative_);
+  }else nativeSession_->clearSelection();
+  nativeMode_=false;nativeEditHandles_=false;tool=Tool::Select;
+  applySelectionStyles();updateNativeSelection199();
   if(stateChanged)stateChanged();
   return true;
  }
@@ -2004,12 +2034,14 @@ public:
  quint64 overlayFullUpdates20zb()const{return overlayFullUpdates20zb_;}
  int activeObjectId()const{return active_?active_->object:0;}
  void activate(Key key,bool replace=true){
-  const bool changedActive=!active_||*active_!=key;
+  const bool changedActive=!active_||*active_!=key||activeNative_.has_value();
   const bool changedSelection=replace&&
-     (selected.size()!=1||selected.count(key.object)==0);
+     (selected.size()!=1||selected.count(key.object)==0||!selectedNative_.empty());
   const QRect before=foregroundOverlayDirtyRect20zb();
-  active_=key;if(replace){selected.clear();selected.insert(key.object);}
-  applySelectionStyles();
+  active_=key;activeNative_.reset();
+  if(replace){selected.clear();selectedNative_.clear();selected.insert(key.object);}
+  if(nativeSession_)nativeSession_->clearSelection();
+  applySelectionStyles();updateNativeSelection199();
   if(changedActive||changedSelection)
    repaintForegroundChange20zb(before,foregroundOverlayDirtyRect20zb());
  }
