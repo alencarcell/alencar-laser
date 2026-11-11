@@ -5723,11 +5723,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    action->setObjectName(QString("align_action_%1_19_8").arg(mode));
    connect(action,&QAction::triggered,this,[this,mode]{
     run([this,mode]{
-     const auto ids=selection();
-     const int active=view.activeObjectId();
-     const int ref=std::find(ids.begin(),ids.end(),active)!=ids.end()?active:
-                   (ids.empty()?0:ids.back());
-     view.editor.alignObjects(ids,mode,ref);view.rebuild();
+     view.alignSelection(mode);
      captureEvent("objects_aligned");
     });
    });
