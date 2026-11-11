@@ -486,6 +486,8 @@ class QtEditorLab final:public QGraphicsView{
  std::optional<Hit> edgeTrimHover20z_;
  std::optional<QPoint> edgeTrimPosition20z_;
  QGraphicsPathItem* edgeTrimPreview20z_=nullptr;
+ // 20za: visual-only, zoom-stable node markers; never part of the document.
+ std::vector<QGraphicsEllipseItem*> edgeTrimNodeMarkers20za_;
  uint64_t edgeTrimGeneration20z_=std::numeric_limits<uint64_t>::max();
  QTransform edgeTrimViewportTransform20z_;
  // TESTE_12: caminho continuo e o modo seguro padrao.
@@ -2011,6 +2013,18 @@ public:
    scene_.removeItem(edgeTrimPreview20z_);
    delete edgeTrimPreview20z_;edgeTrimPreview20z_=nullptr;
   }
+  for(auto* marker:edgeTrimNodeMarkers20za_){
+   scene_.removeItem(marker);delete marker;
+  }
+  edgeTrimNodeMarkers20za_.clear();
+ }
+ // For tests: marker count and whether the two active endpoint dots exist.
+ size_t edgeTrimNodeMarkerCount20za()const{return edgeTrimNodeMarkers20za_.size();}
+ bool edgeTrimNodeMarkerSizesFixed20za()const{
+  return std::all_of(edgeTrimNodeMarkers20za_.begin(),edgeTrimNodeMarkers20za_.end(),
+   [](const QGraphicsEllipseItem* item){
+    return item->flags().testFlag(QGraphicsItem::ItemIgnoresTransformations);
+   });
  }
  bool edgeTrimCurrent20z(QPoint at)const{
   return tool==Tool::EdgeTrim&&!nativeMode_&&!busy()&&
@@ -2047,10 +2061,40 @@ public:
   edgeTrimPreview20z_=scene_.addPath(segment,pen);
   edgeTrimPreview20z_->setZValue(46);
   edgeTrimPreview20z_->setAcceptedMouseButtons(Qt::NoButton);
+  // 20za: modest halos for surrounding canonical nodes, bright circles
+  // at BOTH ends of the one edge to be cut. Items ignore view scaling.
+  auto marker20za=[&](int index,bool endpoint){
+   QPen border(endpoint?QColor("#F8FAFC"):QColor(135,166,188,160),endpoint?1.5:1.);
+   border.setCosmetic(true);
+   const double radius=endpoint?5.0:2.8; // screen pixels
+   const QColor fill=endpoint?QColor("#22D3EE"):QColor(104,149,176,90);
+   auto* marker=scene_.addEllipse(QRectF(-radius,-radius,2*radius,2*radius),
+                                  border,QBrush(fill));
+   marker->setPos(toQt(c->nodes[size_t(index)].p));
+   marker->setFlag(QGraphicsItem::ItemIgnoresTransformations,true);
+   marker->setAcceptedMouseButtons(Qt::NoButton);
+   marker->setZValue(endpoint?48:47);
+   edgeTrimNodeMarkers20za_.push_back(marker);
+  };
+  // Limit clutter and per-hover work on imported contours with many nodes.
+  // Small contours display every node; dense ones show a local neighborhood.
+  if(n<=50){
+   for(int j=0;j<n;++j)
+    if(j!=i&&j!=(i+1)%n)marker20za(j,false);
+  }else{
+   for(int offset=-24;offset<=24;++offset){
+    int j=i+offset;
+    if(c->closed)j=(j%n+n)%n;
+    if(j<0||j>=n||j==i||j==(i+1)%n)continue;
+    marker20za(j,false);
+   }
+  }
+  marker20za(i,true);
+  marker20za((i+1)%n,true);
   edgeTrimHover20z_=*chosen;edgeTrimPosition20z_=at;
   edgeTrimGeneration20z_=editor.generation;
   edgeTrimViewportTransform20z_=viewportTransform();
-  viewport()->setToolTip("Entre nós: a aresta CIANO entre 2 nós será removida. Ctrl+Z desfaz.");
+  viewport()->setToolTip("Entre nós (J): 2 nós CIANO/BRANCO delimitam a aresta cortável; nós discretos mostram o caminho. Ctrl+Z desfaz.");
   viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
  }
  void updateScissorHover(QPoint where){
