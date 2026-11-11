@@ -3673,18 +3673,22 @@ public:
    {"privacy","Opt-in, memory only, manual JSON export; no paths, device identifiers, raw machine messages or design coordinates."}};
  }
  void exportCapture(){
-  QSettings settings("AlencarLaser","DesktopBeta");
-  const QString initial=alaser::svg20zc::initialSavePath(settings,
+  auto settings=alaser::svg20zc::saveLocationSettings();
+  const QString initial=alaser::svg20zc::initialSavePath(*settings,
      "Alencar_Laser_Diagnostico_TESTE_19_7.json",projectPath);
-  const QString path=QFileDialog::getSaveFileName(this,"Exportar diagnóstico local",
+  const QString path=chooseSaveFileName20zd("Exportar diagnóstico local",
      initial,"JSON (*.json)");
   if(path.isEmpty())return;
   QSaveFile file(path);
   if(!file.open(QIODevice::WriteOnly))throw std::runtime_error("cannot open diagnostics destination");
   const QByteArray content=QJsonDocument(captureDocument()).toJson(QJsonDocument::Indented);
   if(file.write(content)!=content.size()||!file.commit())throw std::runtime_error("cannot save diagnostics file");
-  if(uiPersistenceEnabled_)alaser::svg20zc::rememberSaveDirectory(settings,path);
-  status->setText("Diagnóstico JSON exportado localmente. Nenhum dado enviado pela rede.");
+  QString persistenceError;
+  const bool remembered=!saveLocationPersistenceEnabled()||
+      alaser::svg20zc::rememberSaveDirectory(*settings,path,&persistenceError);
+  status->setText(remembered
+    ?"Diagnóstico JSON exportado localmente. Nenhum dado enviado pela rede."
+    :"Diagnóstico exportado, mas a pasta não foi memorizada: "+persistenceError);
  }
  static quint64 readResidentMemory(){
 #ifdef Q_OS_WIN
@@ -3732,6 +3736,23 @@ public:
  static bool isInteractive(){
   const auto args=QCoreApplication::arguments();
   return args.size()==1||args.value(1)=="--interactive";
+ }
+ static bool saveLocationPersistenceEnabled(){
+  return isInteractive()||qEnvironmentVariable("ALENCAR_TEST_SAVE_FOLDER_20ZD")=="1";
+ }
+ QString chooseSaveFileName20zd(const QString& title,const QString& initial,
+                                const QString& filter){
+  // The test-only non-native dialog makes the real Save As workflow
+  // automatable without changing the normal Windows native dialog.
+  if(qEnvironmentVariable("ALENCAR_TEST_SAVE_DIALOG_20ZD")=="1"){
+   QFileDialog dialog(this,title,initial,filter);
+   dialog.setOption(QFileDialog::DontUseNativeDialog,true);
+   dialog.setAcceptMode(QFileDialog::AcceptSave);
+   dialog.setFileMode(QFileDialog::AnyFile);
+   if(dialog.exec()!=QDialog::Accepted)return {};
+   return dialog.selectedFiles().value(0);
+  }
+  return QFileDialog::getSaveFileName(this,title,initial,filter);
  }
  void loadWorkspaceSettings(){
   QSettings settings("AlencarLaser","DesktopBeta");
@@ -6127,19 +6148,24 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
  }
  void exportSvg(){
   if(view.busy())throw std::runtime_error("Finalize o gesto antes de exportar SVG.");
-  QSettings settings("AlencarLaser","DesktopBeta");
-  const QString preferred=alaser::svg20zc::initialSavePath(settings,
+  auto settings=alaser::svg20zc::saveLocationSettings();
+  const QString preferred=alaser::svg20zc::initialSavePath(*settings,
      projectPath.isEmpty()?QStringLiteral("Alencar_Laser.svg"):
        QFileInfo(projectPath).completeBaseName()+".svg",projectPath);
-  const QString chosen=QFileDialog::getSaveFileName(this,
-     "Exportar SVG vetorial (milímetros)",preferred,"Imagem vetorial SVG (*.svg)");
+  const QString chosen=chooseSaveFileName20zd("Exportar SVG vetorial (milímetros)",
+     preferred,"Imagem vetorial SVG (*.svg)");
   if(chosen.isEmpty())return;
   const alaser::CurveDocument natives=curves?curves->committed():CurveDocument{};
   const auto report=alaser::svg20zc::saveSvg(chosen,view.editor.state(),natives);
-  if(uiPersistenceEnabled_)alaser::svg20zc::rememberSaveDirectory(settings,chosen);
-  status->setText(QString("SVG exportado: %1 caminhos, %2 × %3 mm. Nenhuma operação de laser.")
+  QString persistenceError;
+  const bool remembered=!saveLocationPersistenceEnabled()||
+      alaser::svg20zc::rememberSaveDirectory(*settings,chosen,&persistenceError);
+  status->setText(QString("SVG exportado: %1 caminhos, %2 × %3 mm. %4")
     .arg(report.polylinePaths+report.bezierPaths)
-    .arg(report.widthMm,0,'f',3).arg(report.heightMm,0,'f',3));
+    .arg(report.widthMm,0,'f',3)
+    .arg(report.heightMm,0,'f',3)
+    .arg(remembered?"Pasta memorizada. Nenhuma operação de laser.":
+      "Pasta NÃO memorizada: "+persistenceError));
   if(view.hasRasterImage())
    QMessageBox::information(this,"SVG vetorial",
       "O SVG contém apenas contornos vetoriais; a imagem bitmap original não foi incluída. "
@@ -6147,9 +6173,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
  }
  void save(){
   if(projectPath.isEmpty()){
-   QSettings settings("AlencarLaser","DesktopBeta");
-   projectPath=QFileDialog::getSaveFileName(this,"Salvar projeto",
-      alaser::svg20zc::initialSavePath(settings,"Alencar_Laser.alaser"),
+   auto locations=alaser::svg20zc::saveLocationSettings();
+   const QString initial=alaser::svg20zc::initialSavePath(*locations,
+      "Alencar_Laser.alaser",projectPath);
+   projectPath=chooseSaveFileName20zd("Salvar projeto",initial,
       "Alencar Laser (*.alaser)");
   }
   if(projectPath.isEmpty())return;
@@ -6162,17 +6189,26 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(uiPersistenceEnabled_){
    QSettings settings("AlencarLaser","DesktopBeta");
    settings.setValue("files/lastProject",projectPath);
-   alaser::svg20zc::rememberSaveDirectory(settings,projectPath);
+   settings.sync();
+  }
+  QString persistenceError;
+  bool folderRemembered=true;
+  if(saveLocationPersistenceEnabled()){
+   auto locations=alaser::svg20zc::saveLocationSettings();
+   folderRemembered=alaser::svg20zc::rememberSaveDirectory(*locations,projectPath,&persistenceError);
   }
   captureEvent("project_saved");
-  status->setText(QString("Salvo v5: %1 (curvas nativas: %2)").arg(projectPath).arg(cd.contours.size()));
+  status->setText(QString("Salvo v5: %1 (curvas nativas: %2)%3")
+    .arg(projectPath).arg(cd.contours.size())
+    .arg(folderRemembered?QString{}:
+      QString(" | AVISO: pasta não memorizada (%1)").arg(persistenceError)));
  }
  void saveAs(){
-  QSettings settings("AlencarLaser","DesktopBeta");
+  auto settings=alaser::svg20zc::saveLocationSettings();
   const QString suggested=projectPath.isEmpty()?"Alencar_Laser.alaser":
      QFileInfo(projectPath).fileName();
-  const QString initial=alaser::svg20zc::initialSavePath(settings,suggested,projectPath);
-  const QString chosen=QFileDialog::getSaveFileName(this,"Salvar projeto como",initial,
+  const QString initial=alaser::svg20zc::initialSavePath(*settings,suggested,projectPath);
+  const QString chosen=chooseSaveFileName20zd("Salvar projeto como",initial,
      "Alencar Laser (*.alaser)");
   if(chosen.isEmpty())return;
   const QString previous=projectPath;projectPath=chosen;
