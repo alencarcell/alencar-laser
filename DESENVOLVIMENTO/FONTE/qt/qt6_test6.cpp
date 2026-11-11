@@ -467,11 +467,13 @@ class QtEditorLab final:public QGraphicsView{
  bool nativeContourPressing_=false;
  bool nativeTransformDragging_=false;
  Key nativeTransformKey_{}; // legacy single-contour diagnostic only
- // Cross-document Undo/Redo lease for one mixed selection transform.
- bool mixedActionApplied_=false,mixedActionUndone_=false;
- uint64_t mixedEditorGeneration_=0;
- size_t mixedEditorUndoCount_=0,mixedEditorRedoCount_=0;
- size_t mixedNativeUndoCount_=0,mixedNativeRedoCount_=0;
+ // Cross-document Undo/Redo markers. A mixed operation contributes one
+ // entry to each document history but is exposed as one logical user action.
+ struct MixedHistoryMarker{
+  bool applied=true;
+  size_t editorUndo=0,editorRedo=0,nativeUndo=0,nativeRedo=0;
+ };
+ std::vector<MixedHistoryMarker> mixedHistoryMarkers_;
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
  std::vector<Pt> pencilPoints_;
  bool bezierDrawing_=false,bezierPressed_=false;
@@ -1596,7 +1598,7 @@ public:
   nativeEditHandles_=false;
   clearNativeItems();nativeSession_=session;
   selectedNative_.clear();activeNative_.reset();
-  mixedActionApplied_=mixedActionUndone_=false;
+  mixedHistoryMarkers_.clear();
   lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
   createNativeItems();
  }
