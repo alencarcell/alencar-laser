@@ -32,6 +32,7 @@
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QGraphicsPathItem>
+#include <QGraphicsEllipseItem>
 #include <QGraphicsItemGroup>
 #include <QGraphicsRectItem>
 #include <QGraphicsPixmapItem>
@@ -486,6 +487,8 @@ class QtEditorLab final:public QGraphicsView{
  std::optional<Hit> edgeTrimHover20z_;
  std::optional<QPoint> edgeTrimPosition20z_;
  QGraphicsPathItem* edgeTrimPreview20z_=nullptr;
+ // 20za: visual-only, zoom-stable node markers; never part of the document.
+ std::vector<QGraphicsEllipseItem*> edgeTrimNodeMarkers20za_;
  uint64_t edgeTrimGeneration20z_=std::numeric_limits<uint64_t>::max();
  QTransform edgeTrimViewportTransform20z_;
  // TESTE_12: caminho continuo e o modo seguro padrao.
@@ -2011,6 +2014,18 @@ public:
    scene_.removeItem(edgeTrimPreview20z_);
    delete edgeTrimPreview20z_;edgeTrimPreview20z_=nullptr;
   }
+  for(auto* marker:edgeTrimNodeMarkers20za_){
+   scene_.removeItem(marker);delete marker;
+  }
+  edgeTrimNodeMarkers20za_.clear();
+ }
+ // For tests: marker count and whether the two active endpoint dots exist.
+ size_t edgeTrimNodeMarkerCount20za()const{return edgeTrimNodeMarkers20za_.size();}
+ bool edgeTrimNodeMarkerSizesFixed20za()const{
+  return std::all_of(edgeTrimNodeMarkers20za_.begin(),edgeTrimNodeMarkers20za_.end(),
+   [](const QGraphicsEllipseItem* item){
+    return item->flags().testFlag(QGraphicsItem::ItemIgnoresTransformations);
+   });
  }
  bool edgeTrimCurrent20z(QPoint at)const{
   return tool==Tool::EdgeTrim&&!nativeMode_&&!busy()&&
@@ -2032,6 +2047,16 @@ public:
    if(hit.segment<0||hit.segment>=edges)continue;
    chosen=hit;break;
   }
+  // Keep the same visual markers while hovering along the SAME edge;
+  // avoid rebuilding up to 50 Qt items on every mouse-move event.
+  if(chosen&&edgeTrimHover20z_&&edgeTrimPreview20z_&&
+     chosen->key==edgeTrimHover20z_->key&&
+     chosen->segment==edgeTrimHover20z_->segment&&
+     edgeTrimGeneration20z_==editor.generation&&
+     edgeTrimViewportTransform20z_==viewportTransform()){
+   edgeTrimPosition20z_=at;
+   return;
+  }
   clearEdgeTrimHover20z();
   if(!chosen){
    viewport()->setToolTip("Entre nós: SEM CIANO = sem aresta livre sob o mouse. Camadas bloqueadas/grupos não são cortados.");
@@ -2047,10 +2072,40 @@ public:
   edgeTrimPreview20z_=scene_.addPath(segment,pen);
   edgeTrimPreview20z_->setZValue(46);
   edgeTrimPreview20z_->setAcceptedMouseButtons(Qt::NoButton);
+  // 20za: modest halos for surrounding canonical nodes, bright circles
+  // at BOTH ends of the one edge to be cut. Items ignore view scaling.
+  auto marker20za=[&](int index,bool endpoint){
+   QPen border(endpoint?QColor("#F8FAFC"):QColor(135,166,188,160),endpoint?1.5:1.);
+   border.setCosmetic(true);
+   const double radius=endpoint?5.0:2.8; // screen pixels
+   const QColor fill=endpoint?QColor("#22D3EE"):QColor(104,149,176,90);
+   auto* marker=scene_.addEllipse(QRectF(-radius,-radius,2*radius,2*radius),
+                                  border,QBrush(fill));
+   marker->setPos(toQt(c->nodes[size_t(index)].p));
+   marker->setFlag(QGraphicsItem::ItemIgnoresTransformations,true);
+   marker->setAcceptedMouseButtons(Qt::NoButton);
+   marker->setZValue(endpoint?48:47);
+   edgeTrimNodeMarkers20za_.push_back(marker);
+  };
+  // Limit clutter and per-hover work on imported contours with many nodes.
+  // Small contours display every node; dense ones show a local neighborhood.
+  if(n<=50){
+   for(int j=0;j<n;++j)
+    if(j!=i&&j!=(i+1)%n)marker20za(j,false);
+  }else{
+   for(int offset=-24;offset<=24;++offset){
+    int j=i+offset;
+    if(c->closed)j=(j%n+n)%n;
+    if(j<0||j>=n||j==i||j==(i+1)%n)continue;
+    marker20za(j,false);
+   }
+  }
+  marker20za(i,true);
+  marker20za((i+1)%n,true);
   edgeTrimHover20z_=*chosen;edgeTrimPosition20z_=at;
   edgeTrimGeneration20z_=editor.generation;
   edgeTrimViewportTransform20z_=viewportTransform();
-  viewport()->setToolTip("Entre nós: a aresta CIANO entre 2 nós será removida. Ctrl+Z desfaz.");
+  viewport()->setToolTip("Entre nós (J): 2 nós CIANO/BRANCO delimitam a aresta cortável; nós discretos mostram o caminho. Ctrl+Z desfaz.");
   viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
  }
  void updateScissorHover(QPoint where){
@@ -2211,6 +2266,12 @@ public:
  }
  int lastCreated()const{return lastCreated_;}
 protected:
+ bool viewportEvent(QEvent* e)override{
+  // Mouse-leave is delivered to QGraphicsView's viewport widget.
+  if(e->type()==QEvent::Leave&&tool==Tool::EdgeTrim)
+   clearEdgeTrimHover20z();
+  return QGraphicsView::viewportEvent(e);
+ }
  // TESTE_19.1: zoom ancorado no cursor, independente da ferramenta ativa.
  // Nao altera pontos, IDs, historico ou o documento canonico.
  void wheelEvent(QWheelEvent* e)override{
@@ -7059,6 +7120,30 @@ static QJsonObject editTools197Test(const QString& directory){
  }
  check(ev.edgeTrimPreviewVisible20z()&&ev.edgeTrimCurrent20z(edgePoint),
        "20z: hover did not highlight the exact edge");
+ check(ev.edgeTrimNodeMarkerCount20za()==4&&
+       ev.edgeTrimNodeMarkerSizesFixed20za(),
+       "20za: expected 2 highlighted endpoints + 2 subtle nodes, stable in pixels");
+ const QPoint nextPoint=ev.mapFromScene({135,100});
+ const QPointF nextLocal(nextPoint),nextGlobal(ev.viewport()->mapToGlobal(nextPoint));
+ QMouseEvent stableMove(QEvent::MouseMove,nextLocal,nextGlobal,
+                        Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+ QApplication::sendEvent(ev.viewport(),&stableMove);
+ QApplication::processEvents();
+ check(ev.edgeTrimNodeMarkerCount20za()==4&&
+       ev.edgeTrimCurrent20z(nextPoint),
+       "20za: moving along same edge lost or duplicated node markers");
+ QEvent leaveViewport(QEvent::Leave);
+ QApplication::sendEvent(ev.viewport(),&leaveViewport);
+ check(!ev.edgeTrimPreviewVisible20z()&&
+       ev.edgeTrimNodeMarkerCount20za()==0,
+       "20za: hover nodes remained visible after pointer left viewport");
+ const QPointF backLocal(edgePoint),backGlobal(ev.viewport()->mapToGlobal(edgePoint));
+ QMouseEvent returnToEdge(QEvent::MouseMove,backLocal,backGlobal,
+                          Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+ QApplication::sendEvent(ev.viewport(),&returnToEdge);
+ QApplication::processEvents();
+ check(ev.edgeTrimNodeMarkerCount20za()==4&&ev.edgeTrimCurrent20z(edgePoint),
+       "20za: node markers failed to restore on new valid hover");
  const Document edgeOriginal=ev.editor.state().doc;
  const size_t edgeUndo=ev.editor.undoCount();
  QTest::mouseClick(ev.viewport(),Qt::LeftButton,Qt::NoModifier,edgePoint);
@@ -7066,6 +7151,8 @@ static QJsonObject editTools197Test(const QString& directory){
  check(ev.editor.state().doc.contours.size()==2&&
        ev.editor.undoCount()==edgeUndo+1,
        "20z: mouse cut did not split one edge in one Undo");
+ check(ev.edgeTrimNodeMarkerCount20za()==0,
+       "20za: old node markers survived the cut/rebuild");
  const Contour* edgeLeft=get(ev.editor.state().doc,{edgeObject,0});
  check(edgeLeft&&edgeLeft->nodes.size()==2,
        "20z: wrong side was removed by mouse");
@@ -7084,7 +7171,7 @@ static QJsonObject editTools197Test(const QString& directory){
        "20z: Ctrl+Z did not restore exact contour in GUI");
  w.grab().save(directory+"/TESTE_19_7_FERRAMENTAS.png");
  return {{"status","PASS"},{"selection_esc",true},{"selection_v",true},
-   {"scissors_k",true},{"scissors_mouse",true},{"edge_between_nodes_20z",true},{"objects_inspector_context_20z",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"scissors_isolated_circle",true},{"scissors_isolated_rectangle",true},{"undo_scissors",true},
+   {"scissors_k",true},{"scissors_mouse",true},{"edge_between_nodes_20z",true},{"edge_nodes_visible_20za",true},{"objects_inspector_context_20z",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"scissors_isolated_circle",true},{"scissors_isolated_rectangle",true},{"undo_scissors",true},
    {"hover_delivery",usedViewportEventFallback?"viewport_synthetic_mouse_move":"qtest_mouse_move"},
    {"hardware_hover_verified",false},
    {"ctrl_r_rectangle",true},{"ctrl_e_ellipse",true},{"shift_square_circle",true},{"create_layer_by_palette",true},
