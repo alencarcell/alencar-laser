@@ -875,7 +875,9 @@ class QtEditorLab final:public QGraphicsView{
   const std::set<int> idsSet(ids.begin(),ids.end());
   double minX=0.,minY=0.,maxX=0.,maxY=0.;bool has=false;
   auto include=[&](const QRectF& rect){
-   if(rect.isEmpty()||!std::isfinite(rect.left())||!std::isfinite(rect.top())||
+   if(rect.width()<0.||rect.height()<0.||
+      (rect.width()<1e-12&&rect.height()<1e-12)||
+      !std::isfinite(rect.left())||!std::isfinite(rect.top())||
       !std::isfinite(rect.right())||!std::isfinite(rect.bottom()))return;
    if(!has){minX=rect.left();minY=rect.top();maxX=rect.right();maxY=rect.bottom();has=true;}
    else{minX=std::min(minX,rect.left());minY=std::min(minY,rect.top());
@@ -905,6 +907,11 @@ class QtEditorLab final:public QGraphicsView{
    return shapePreviewBounds_->translated(shapePreviewDelta_);
   if(transformDragging_)
    return selectionPreviewTransform_.mapRect(transformBounds_);
+  if(nativeEditHandles_&&activeNative_){
+   const auto item=nativeItems_.find(*activeNative_);
+   if(item!=nativeItems_.end())
+    return item->second->mapToScene(item->second->path()).boundingRect();
+  }
   return selectedBounds();
  }
  static std::array<QPointF,4> quadFromRect(const QRectF& r){
