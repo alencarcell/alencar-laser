@@ -1770,9 +1770,9 @@ public:
  // The real operator report contains one 575-object deletion.
  std::function<bool(int)> approveBulkDeletion;
  bool deleteSelectedShapes(){
-  if(nativeMode_||busy()||selected.empty())return false;
+  if(nativeMode_||busy()||totalSelectionCount()==0)return false;
   // deleteObjects expands grouped selections. Confirm the actual number of
-  // affected objects, even if the UI currently holds only one group member.
+  // affected objects, including native contours in a mixed selection.
   std::set<int> affected=selected,groups;
   for(int id:selected){
    const auto it=editor.state().objects.find(id);
@@ -1781,15 +1781,32 @@ public:
   }
   for(const auto& [id,meta]:editor.state().objects)
    if(meta.group>0&&groups.count(meta.group))affected.insert(id);
-  const int count=int(affected.size());
+  const int count=int(affected.size()+selectedNative_.size());
   if(count>=25&&(!approveBulkDeletion||!approveBulkDeletion(count))){
    if(toolWarning)toolWarning("Exclusão de muitas formas cancelada; nenhum objeto removido.");
    return false;
   }
-  editor.deleteObjects({selected.begin(),selected.end()});
-  selected.clear();active_.reset();rebuild();
+  const auto nativeKeys=expandedNativeSelection();
+  const bool hasRegular=!selected.empty(),hasNative=!nativeKeys.empty();
+  if(hasNative){
+   if(!nativeSession_)throw std::runtime_error("native selection session unavailable");
+   for(const Key key:nativeKeys)
+    if(!nativeEditable(key))throw std::runtime_error("Bezier layer locked or hidden");
+  }
+  if(hasRegular)editor.deleteObjects({selected.begin(),selected.end()});
+  bool nativeChanged=false;
+  if(hasNative)nativeChanged=nativeSession_->deleteContours(nativeKeys);
+  if(hasRegular&&nativeChanged)captureMixedHistorySnapshot();
+  else{
+   mixedActionApplied_=mixedActionUndone_=false;
+   lastNativeAction_=nativeChanged;lastEditorGenerationSeen_=editor.generation;
+  }
+  selected.clear();selectedNative_.clear();active_.reset();activeNative_.reset();
+  nativeSelectedPart_.reset();
+  if(nativeSession_)nativeSession_->clearSelection();
+  rebuild();
   if(diagnosticEvent)diagnosticEvent("shapes_deleted",count);
-  return true;
+  return hasRegular||nativeChanged;
  }
 
  int frameUpdates=0,fullRebuilds=0,toolCreates=0;
