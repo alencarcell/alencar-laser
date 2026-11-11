@@ -11488,6 +11488,18 @@ int main(int argc,char** argv){
    file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
    return pass?0:1;
   }
+  if(mode=="--mixed-selection-20ze-test"){
+   QDir().mkpath(out);QJsonObject report;bool pass=true;
+   try{report=mixedSelection20zeTest();}
+   catch(const std::exception& e){
+    pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())},
+                      {"machine_commands_sent",false}};
+   }
+   QFile file(out+"/RESULTADO_SELECAO_MISTA_20ZE.json");
+   if(!file.open(QIODevice::WriteOnly))return 2;
+   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+   return pass?0:1;
+  }
   if(mode=="--gear-generator-19-9-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=gearGenerator199Test();}
