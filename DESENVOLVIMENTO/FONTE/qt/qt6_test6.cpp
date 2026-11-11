@@ -9699,10 +9699,11 @@ static QJsonObject svgExport20zcTest(const QString& directory){
        "20zc: exportacao alterou arquivo canonico ou historico");
  // Persistence only after a successful save; a fresh QSettings instance
  // simulates closing and reopening the editor.
- alaser::svg20zc::rememberSaveDirectory(first,target);
+ check(alaser::svg20zc::rememberSaveDirectory(first,target),
+       "20zc: helper nao confirmou a gravacao da pasta");
  QSettings restarted(prefsPath,QSettings::IniFormat);
  const QString remembered=alaser::svg20zc::initialSavePath(restarted,
-    "outra_peca.svg",previous);
+    "outra_peca.svg",previous,false);
  check(QFileInfo(remembered).absolutePath()==exportFolder&&
        QFileInfo(remembered).fileName()=="outra_peca.svg",
        "20zc: pasta nao persistiu apos reinicio");
