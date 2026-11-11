@@ -117,6 +117,7 @@
 #include <QCryptographicHash>
 #include <QSet>
 #include <QFileDialog>
+#include <QXmlStreamReader>
 #include <QSysInfo>
 #include <QLineF>
 #include <numbers>
@@ -9605,6 +9606,89 @@ static QJsonObject duplicateBatch20cRegression(){
  return {{"status","PASS"},{"multi_duplicate",true},{"large_batch_2300",true},
          {"undo_redo",true},{"machine_commands_sent",false}};
 }
+static QJsonObject svgExport20zcTest(const QString& directory){
+ QTemporaryDir isolated;
+ check(isolated.isValid(),"20zc: pasta temporaria indisponivel");
+ const QString prefsPath=isolated.filePath("prefs.ini");
+ const QString previous=isolated.filePath("projeto_anterior.alaser");
+ QSettings first(prefsPath,QSettings::IniFormat);
+ const QString defaultPath=alaser::svg20zc::initialSavePath(first,"Desenho.svg",previous);
+ check(QFileInfo(defaultPath).absolutePath()==isolated.path()&&
+       QFileInfo(defaultPath).fileName()=="Desenho.svg",
+       "20zc: diretorio inicial nao seguiu o local anterior");
+ const QString exportFolder=isolated.filePath("exportacao");
+ check(QDir().mkpath(exportFolder),"20zc: nao criou pasta de exportacao");
+ // Insert the ACTUAL gear contours: perimeter and central hole, both closed.
+ const alaser::gear::Result generated=alaser::gear::generate(alaser::gear::Parameters{});
+ Editor testEditor(Document{});
+ std::vector<std::vector<Pt>> polys;
+ for(const auto* polygon:{&generated.outer,&generated.bore}){
+  if(polygon->empty())continue;
+  std::vector<Pt> points;
+  for(const auto& p:*polygon)points.push_back({150.+p.x,150.-p.y});
+  polys.push_back(std::move(points));
+ }
+ const auto ids=testEditor.addContours(std::move(polys),true,0,true);
+ check(ids.size()==2,"20zc: engrenagem gerada sem coroa e furo");
+ const auto canonical=stateText(testEditor.state());
+ const size_t history=testEditor.undoCount();
+ // Also include a cubic in the same exported drawing, with exact SVG C data.
+ CurveDocument curves;
+ CurveContour native;
+ native.key={999,0};native.layer=0;native.closed=false;
+ native.nodes={
+   {1,{0.,0.},{0.,0.},{10.,0.}},
+   {2,{30.,0.},{20.,0.},{30.,0.}}
+ };
+ native.edgeKind={1};
+ curves.contours.push_back(native);curves.nextId=3;
+ const QString target=QDir(exportFolder).filePath("engrenagem_e_bezier.svg");
+ const auto summary=alaser::svg20zc::saveSvg(target,testEditor.state(),curves);
+ check(summary.polylinePaths==2&&summary.bezierPaths==1&&summary.segments>200,
+       "20zc: exportador omitiu coroa, furo ou Bezier");
+ check(summary.widthMm>100.&&summary.heightMm>60.&&summary.heightMm<200.,
+       "20zc: limites fisicos do SVG incorretos");
+ QFile output(target);
+ check(output.open(QIODevice::ReadOnly),"20zc: arquivo SVG nao existe");
+ const QString xml=QString::fromUtf8(output.readAll());
+ check(xml.contains("xmlns=\"http://www.w3.org/2000/svg\"")&&
+       xml.contains("mm\"")&&xml.contains("viewBox=")&&
+       xml.count("<path")==3&&xml.contains(" C ")&&xml.contains(" Z"),
+       "20zc: SVG sem unidades, paths fechados ou curvas nativas");
+ QXmlStreamReader reader(xml);
+ while(!reader.atEnd())reader.readNext();
+ check(!reader.hasError(),"20zc: XML do SVG nao e valido");
+ check(stateText(testEditor.state())==canonical&&
+       testEditor.undoCount()==history,
+       "20zc: exportacao alterou arquivo canonico ou historico");
+ // Persistence only after a successful save; a fresh QSettings instance
+ // simulates closing and reopening the editor.
+ alaser::svg20zc::rememberSaveDirectory(first,target);
+ QSettings restarted(prefsPath,QSettings::IniFormat);
+ const QString remembered=alaser::svg20zc::initialSavePath(restarted,
+    "outra_peca.svg",previous);
+ check(QFileInfo(remembered).absolutePath()==exportFolder&&
+       QFileInfo(remembered).fileName()=="outra_peca.svg",
+       "20zc: pasta nao persistiu apos reinicio");
+ bool rejectedExtension=false;
+ try{(void)alaser::svg20zc::saveSvg(isolated.filePath("invalido.txt"),
+       testEditor.state(),curves);}
+ catch(const std::exception&){rejectedExtension=true;}
+ check(rejectedExtension&&!QFile::exists(isolated.filePath("invalido.txt")),
+       "20zc: extensao invalida alterou filesystem");
+ // Real output for optional visual inspection of an original generated gear.
+ QDir().mkpath(directory);
+ const QString sample=QDir(directory).filePath("GEAR_SVG_20ZC_TEST.svg");
+ (void)alaser::svg20zc::saveSvg(sample,testEditor.state(),CurveDocument{});
+ return {{"status","PASS"},{"saved_directory_after_restart",true},
+         {"svg_xml_valid",true},{"physical_dimensions_mm",true},
+         {"closed_gear_with_bore",true},{"native_bezier_cubic",true},
+         {"canonical_state_and_undo_unchanged",true},
+         {"safe_extension_rejection",true},
+         {"paths",summary.polylinePaths+summary.bezierPaths},
+         {"width_mm",summary.widthMm},{"height_mm",summary.heightMm},
+         {"sample_file",sample},{"hardware_commands_sent",false}};
+}
 static QJsonObject gearGenerator199Test(){
  // No device, connection, G-code or physical action is involved.
  alaser::gear::GearDialog dialog(400.,400.);
@@ -10615,7 +10699,18 @@ int main(int argc,char** argv){
   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
   return pass?0:1;
  }
- if(mode=="--gear-generator-19-9-test"){
+ if(mode=="--svg-export-20zc-test"){
+   QDir().mkpath(out);QJsonObject report;bool pass=true;
+   try{report=svgExport20zcTest(out);}
+   catch(const std::exception& e){
+    pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
+   }
+   QFile file(out+"/RESULTADO_EXPORTACAO_SVG_20ZC.json");
+   if(!file.open(QIODevice::WriteOnly))return 2;
+   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+   return pass?0:1;
+  }
+  if(mode=="--gear-generator-19-9-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=gearGenerator199Test();}
   catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}
