@@ -27,6 +27,7 @@
 #include "gear_dialog_19_9.hpp"
 #include "escapement_study_dialog_20s.hpp"
 #include "gear_compound_dialog_19_9.hpp"
+#include "svg_export_20zc.hpp"
 #include "mechanism_studio_dialog_19_9.hpp"
 #include <QApplication>
 #include <QGraphicsView>
@@ -3671,13 +3672,17 @@ public:
    {"privacy","Opt-in, memory only, manual JSON export; no paths, device identifiers, raw machine messages or design coordinates."}};
  }
  void exportCapture(){
-  const QString path=QFileDialog::getSaveFileName(this,"Exportar diagnóstico local", 
-   "Alencar_Laser_Diagnostico_TESTE_19_7.json","JSON (*.json)");
+  QSettings settings("AlencarLaser","DesktopBeta");
+  const QString initial=alaser::svg20zc::initialSavePath(settings,
+     "Alencar_Laser_Diagnostico_TESTE_19_7.json",projectPath);
+  const QString path=QFileDialog::getSaveFileName(this,"Exportar diagnóstico local",
+     initial,"JSON (*.json)");
   if(path.isEmpty())return;
   QSaveFile file(path);
   if(!file.open(QIODevice::WriteOnly))throw std::runtime_error("cannot open diagnostics destination");
   const QByteArray content=QJsonDocument(captureDocument()).toJson(QJsonDocument::Indented);
   if(file.write(content)!=content.size()||!file.commit())throw std::runtime_error("cannot save diagnostics file");
+  if(uiPersistenceEnabled_)alaser::svg20zc::rememberSaveDirectory(settings,path);
   status->setText("Diagnóstico JSON exportado localmente. Nenhum dado enviado pela rede.");
  }
  static quint64 readResidentMemory(){
@@ -5298,6 +5303,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    });
   });
   command(fileMenu,"Salvar","save");command(fileMenu,"Salvar como...","save_as");
+  auto* exportSvgAction=fileMenu->addAction("Exportar desenho vetorial em SVG...");
+  exportSvgAction->setObjectName("export_svg_20zc");
+  exportSvgAction->setToolTip("Contornos visíveis em mm, incluindo engrenagens e curvas Bézier; não exporta imagem bitmap ou G-code.");
+  connect(exportSvgAction,&QAction::triggered,this,[this]{run([this]{exportSvg();});});
   auto* editMenu=mainMenu->addMenu("Editar");
   command(editMenu,"Desfazer","undo");command(editMenu,"Refazer","redo");command(editMenu,"Duplicar seleção","duplicate_obj");
   command(editMenu,"Excluir formas selecionadas","delete_shapes");
@@ -5466,6 +5475,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
 
   gearsMenu->addSeparator();
+  auto* exportGearSvg=gearsMenu->addAction("Exportar engrenagens/desenho atual em SVG...");
+  exportGearSvg->setObjectName("export_gears_svg_20zc");
+  exportGearSvg->setToolTip("Exporta os contornos vetoriais visíveis do desenho, incluindo engrenagens, furos, pares e cremalheiras.");
+  connect(exportGearSvg,&QAction::triggered,this,[this]{run([this]{exportSvg();});});
   auto* studio=gearsMenu->addAction("Oficina de Mecanismos — simulação e biblioteca (OFFLINE)...");
   studio->setObjectName("open_mechanism_studio_19_9");
   studio->setIcon(alaser::toolGlyph("mechanism"));
@@ -5697,6 +5710,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   shortcut("Ctrl+Shift+Z",[this]{view.history(true);});
   shortcut("Ctrl+S",[this]{save();});shortcut("Ctrl+O",[this]{open();});
   shortcut("Ctrl+Shift+S",[this]{saveAs();});shortcut("Ctrl+Shift+O",[this]{openOther();});
+   shortcut("Ctrl+Shift+E",[this]{exportSvg();});
   shortcut("Delete",[this]{
    if(view.nativeEditingMode())view.nativeDeleteSelected();
    else if(view.nativeSelectionMode())view.nativeDeleteContour();
@@ -6110,8 +6124,33 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
       .arg(workspaceCfg_.drawingWidth,0,'f',0).arg(workspaceCfg_.drawingHeight,0,'f',0)
       .arg(workspaceCfg_.machineWidth,0,'f',0).arg(workspaceCfg_.machineHeight,0,'f',0));
  }
+ void exportSvg(){
+  if(view.busy())throw std::runtime_error("Finalize o gesto antes de exportar SVG.");
+  QSettings settings("AlencarLaser","DesktopBeta");
+  const QString preferred=alaser::svg20zc::initialSavePath(settings,
+     projectPath.isEmpty()?"Alencar_Laser.svg":
+       QFileInfo(projectPath).completeBaseName()+".svg",projectPath);
+  const QString chosen=QFileDialog::getSaveFileName(this,
+     "Exportar SVG vetorial (milímetros)",preferred,"Imagem vetorial SVG (*.svg)");
+  if(chosen.isEmpty())return;
+  const alaser::CurveDocument natives=curves?curves->committed():CurveDocument{};
+  const auto report=alaser::svg20zc::saveSvg(chosen,view.editor.state(),natives);
+  if(uiPersistenceEnabled_)alaser::svg20zc::rememberSaveDirectory(settings,chosen);
+  status->setText(QString("SVG exportado: %1 caminhos, %2 × %3 mm. Nenhuma operação de laser.")
+    .arg(report.polylinePaths+report.bezierPaths)
+    .arg(report.widthMm,0,'f',3).arg(report.heightMm,0,'f',3));
+  if(view.hasRasterImage())
+   QMessageBox::information(this,"SVG vetorial",
+      "O SVG contém apenas contornos vetoriais; a imagem bitmap original não foi incluída. "
+      "Use Traçar imagem para converter seus contornos antes de exportar.");
+ }
  void save(){
-  if(projectPath.isEmpty())projectPath=QFileDialog::getSaveFileName(this,"Salvar projeto",{},"Alencar Laser (*.alaser)");
+  if(projectPath.isEmpty()){
+   QSettings settings("AlencarLaser","DesktopBeta");
+   projectPath=QFileDialog::getSaveFileName(this,"Salvar projeto",
+      alaser::svg20zc::initialSavePath(settings,"Alencar_Laser.alaser"),
+      "Alencar Laser (*.alaser)");
+  }
   if(projectPath.isEmpty())return;
   CurveDocument cd=curves?curves->committed():CurveDocument{};
   loadedProject_=saveNative(projectPath,view.editor.state(),cd,
@@ -6122,12 +6161,18 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(uiPersistenceEnabled_){
    QSettings settings("AlencarLaser","DesktopBeta");
    settings.setValue("files/lastProject",projectPath);
+   alaser::svg20zc::rememberSaveDirectory(settings,projectPath);
   }
   captureEvent("project_saved");
   status->setText(QString("Salvo v5: %1 (curvas nativas: %2)").arg(projectPath).arg(cd.contours.size()));
  }
  void saveAs(){
-  const QString chosen=QFileDialog::getSaveFileName(this,"Salvar projeto como",projectPath,"Alencar Laser (*.alaser)");
+  QSettings settings("AlencarLaser","DesktopBeta");
+  const QString suggested=projectPath.isEmpty()?"Alencar_Laser.alaser":
+     QFileInfo(projectPath).fileName();
+  const QString initial=alaser::svg20zc::initialSavePath(settings,suggested,projectPath);
+  const QString chosen=QFileDialog::getSaveFileName(this,"Salvar projeto como",initial,
+     "Alencar Laser (*.alaser)");
   if(chosen.isEmpty())return;
   const QString previous=projectPath;projectPath=chosen;
   try{save();}catch(...){projectPath=previous;throw;}
