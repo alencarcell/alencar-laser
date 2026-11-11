@@ -2477,6 +2477,7 @@ public:
   return regularChanged||nativeChanged;
  }
  bool moveSelectionBy(Pt delta){
+  if(nativeMode_){nativeMode_=false;nativeEditHandles_=false;nativeSelectedPart_.reset();}
   if(!std::isfinite(delta.x)||!std::isfinite(delta.y))
    throw std::runtime_error("invalid selection translation");
   if(std::hypot(delta.x,delta.y)<=1e-12)return false;
@@ -2485,6 +2486,42 @@ public:
   std::map<Key,Pt> curves;
   for(const Key key:selectedNative_)curves[key]=delta;
   return applySelectionMoves(objects,curves);
+ }
+ bool rotateSelection(double angle){
+  if(nativeMode_){nativeMode_=false;nativeEditHandles_=false;nativeSelectedPart_.reset();}
+  if(!std::isfinite(angle))throw std::runtime_error("invalid rotation angle");
+  const auto bounds=selectedBounds();
+  if(!bounds||totalSelectionCount()==0)throw std::runtime_error("select vector objects to rotate");
+  if(std::abs(angle)<1e-9)return false;
+  const double radians=angle*std::numbers::pi/180.;
+  const double a=std::cos(radians),b=-std::sin(radians);
+  const double c=std::sin(radians),d=std::cos(radians);
+  const bool changed=applySelectionAffine(expandedSelection(),expandedNativeSelection(),
+      fromQt(bounds->center()),a,b,c,d,{});
+  if(changed)rebuild();
+  return changed;
+ }
+ bool scaleSelection(double factor){
+  if(nativeMode_){nativeMode_=false;nativeEditHandles_=false;nativeSelectedPart_.reset();}
+  if(!std::isfinite(factor)||factor<=0.||factor>100.)
+   throw std::runtime_error("scale factor outside safe range");
+  const auto bounds=selectedBounds();
+  if(!bounds||totalSelectionCount()==0)throw std::runtime_error("select vector objects to scale");
+  if(std::abs(factor-1.)<1e-9)return false;
+  const bool changed=applySelectionAffine(expandedSelection(),expandedNativeSelection(),
+      fromQt(bounds->center()),factor,0.,0.,factor,{});
+  if(changed)rebuild();
+  return changed;
+ }
+ bool mirrorSelection(bool horizontal){
+  if(nativeMode_){nativeMode_=false;nativeEditHandles_=false;nativeSelectedPart_.reset();}
+  const auto bounds=selectedBounds();
+  if(!bounds||totalSelectionCount()==0)throw std::runtime_error("select vector objects to mirror");
+  const double a=horizontal?-1.:1.,d=horizontal?1.:-1.;
+  const bool changed=applySelectionAffine(expandedSelection(),expandedNativeSelection(),
+      fromQt(bounds->center()),a,0.,0.,d,{});
+  if(changed)rebuild();
+  return changed;
  }
  bool alignSelection(int mode){
   if(nativeMode_){nativeMode_=false;nativeEditHandles_=false;nativeSelectedPart_.reset();}
