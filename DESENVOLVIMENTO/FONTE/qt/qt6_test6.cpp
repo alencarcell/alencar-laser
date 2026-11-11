@@ -1551,6 +1551,11 @@ public:
   updateNativeSelection199();
   if(stateChanged)stateChanged();
  }
+ void markNativeHistoryAction(){
+  if(!nativeSession_)return;
+  lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
+  if(stateChanged)stateChanged();
+ }
  bool nativeModeActive()const{return nativeMode_;}
  bool nativeHistoryAvailable(bool redo)const{
   return nativeSession_&&(redo?nativeSession_->redoCount():nativeSession_->undoCount())>0;
@@ -6467,6 +6472,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }
   view.attachNative(curves.get());
   view.enableNative(false);
+  view.markNativeHistoryAction();
   bezierToolActive_=false;
   view.setTool(QtEditorLab::Tool::Select);
   view.clearSelection();view.invalidateSelectionCache();
@@ -9865,10 +9871,12 @@ static QJsonObject svgImport20zeTest(const QString& outputDirectory){
        "20ze: SVG import replaced existing polygon artwork instead of appending");
  check(window.curves->undoCount()==1,
        "20ze: imported SVG batch did not create one atomic undo entry");
- check(window.curves->undo()&&window.curves->committed().contours.empty(),
-       "20ze: one Undo did not remove the imported SVG batch");
- check(window.curves->redo()&&window.curves->committed().contours.size()==3,
-       "20ze: Redo did not restore the imported SVG batch");
+ pressKey(window,Qt::Key_Z,Qt::ControlModifier);
+ check(window.curves->committed().contours.empty(),
+       "20ze: Ctrl+Z did not remove the imported SVG batch");
+ pressKey(window,Qt::Key_Y,Qt::ControlModifier);
+ check(window.curves->committed().contours.size()==3,
+       "20ze: Ctrl+Y did not restore the imported SVG batch");
  window.view.attachNative(window.curves.get());
  QFile after(sample);
  check(after.open(QIODevice::ReadOnly),"20ze: source SVG disappeared after import");
