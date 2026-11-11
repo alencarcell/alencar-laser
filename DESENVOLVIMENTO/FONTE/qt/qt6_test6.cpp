@@ -9793,6 +9793,106 @@ static QJsonObject svgExport20zcTest(const QString& directory){
          {"width_mm",summary.widthMm},{"height_mm",summary.heightMm},
          {"sample_file",sample},{"hardware_commands_sent",false}};
 }
+static QJsonObject svgImport20zeTest(const QString& outputDirectory){
+ struct RestoreEnv{
+  const char* key;QByteArray old;bool existed;
+  explicit RestoreEnv(const char* k):key(k),old(qgetenv(k)),existed(qEnvironmentVariableIsSet(k)){}
+  ~RestoreEnv(){if(existed)qputenv(key,old);else qunsetenv(key);}
+ };
+ RestoreEnv acceptEnv("ALENCAR_TEST_SVG_IMPORT_ACCEPT_20ZE");
+ RestoreEnv modalEnv("ALENCAR_TEST_SVG_IMPORT_NO_MODAL_20ZE");
+ qputenv("ALENCAR_TEST_SVG_IMPORT_ACCEPT_20ZE","1");
+ qputenv("ALENCAR_TEST_SVG_IMPORT_NO_MODAL_20ZE","1");
+ QTemporaryDir isolated;
+ check(isolated.isValid(),"20ze: temporary directory unavailable");
+ const auto generated=alaser::gear::generate(alaser::gear::Parameters{});
+ Editor source(Document{});
+ std::vector<std::vector<Pt>> polygons;
+ for(const auto* polygon:{&generated.outer,&generated.bore}){
+  if(polygon->empty())continue;
+  std::vector<Pt> points;
+  for(const auto& p:*polygon)points.push_back({150.+p.x,150.-p.y});
+  polygons.push_back(std::move(points));
+ }
+ source.addContours(std::move(polygons),true,0,true);
+ CurveDocument sourceCurves;
+ CurveContour cubic;cubic.key={900,0};cubic.layer=0;
+ cubic.nodes={{1,{10,10},{10,10},{20,5}},
+              {2,{40,10},{30,5},{40,10}}};
+ cubic.edgeKind={1};sourceCurves.contours.push_back(cubic);sourceCurves.nextId=3;
+ const QString sample=isolated.filePath("roundtrip.svg");
+ const auto exported=alaser::svg20zc::saveSvg(sample,source.state(),sourceCurves);
+ QFile original(sample);
+ check(original.open(QIODevice::ReadOnly),"20ze: exported SVG unavailable");
+ const QByteArray originalBytes=original.readAll();original.close();
+ const QByteArray originalHash=QCryptographicHash::hash(originalBytes,QCryptographicHash::Sha256);
+ const auto parsed=alaser::svg20ze::readSvgGeometry(sample);
+ check(parsed.curves.contours.size()==3&&parsed.curves.contours[0].closed&&
+       parsed.curves.contours[1].closed&&!parsed.curves.contours[2].closed,
+       "20ze: round-trip lost gear rings or open Bezier path");
+ check(parsed.cubicSegments==1&&parsed.curves.contours[2].edgeKind.size()==1&&
+       parsed.curves.contours[2].edgeKind[0]==1,
+       "20ze: native cubic was not preserved");
+ check(std::abs(parsed.widthMm-exported.widthMm)<1e-6&&
+       std::abs(parsed.heightMm-exported.heightMm)<1e-6,
+       "20ze: physical millimetre dimensions changed on import");
+ const auto& roundTripCubic=parsed.curves.contours[2];
+ check(dist(roundTripCubic.nodes[0].anchor,{10,10})<1e-7&&
+       dist(roundTripCubic.nodes[0].handleOut,{20,5})<1e-7&&
+       dist(roundTripCubic.nodes[1].handleIn,{30,5})<1e-7&&
+       dist(roundTripCubic.nodes[1].anchor,{40,10})<1e-7,
+       "20ze: cubic anchors/handles changed on round-trip");
+
+ LabWindow window(Document{});
+ window.view.editor.rectangle({300,300},20,20);
+ window.view.rebuild();
+ window.show();QApplication::processEvents();
+ QMimeData mime;mime.setUrls({QUrl::fromLocalFile(sample)});
+ QDragEnterEvent enter(QPoint(40,40),Qt::CopyAction,&mime,
+                       Qt::LeftButton,Qt::NoModifier);
+ QApplication::sendEvent(window.view.viewport(),&enter);
+ check(enter.isAccepted(),"20ze: SVG drag-enter was rejected by the canvas");
+ QDropEvent drop(QPointF(40,40),Qt::CopyAction,&mime,
+                 Qt::LeftButton,Qt::NoModifier);
+ QApplication::sendEvent(window.view.viewport(),&drop);
+ check(drop.isAccepted(),"20ze: SVG drop was not accepted");
+ check(window.curves&&window.curves->committed().contours.size()==3,
+       "20ze: drag-and-drop did not append all SVG contours");
+ check(window.view.editor.state().doc.contours.size()==1,
+       "20ze: SVG import replaced existing polygon artwork instead of appending");
+ check(window.curves->undoCount()==1,
+       "20ze: imported SVG batch did not create one atomic undo entry");
+ check(window.curves->undo()&&window.curves->committed().contours.empty(),
+       "20ze: one Undo did not remove the imported SVG batch");
+ check(window.curves->redo()&&window.curves->committed().contours.size()==3,
+       "20ze: Redo did not restore the imported SVG batch");
+ window.view.attachNative(window.curves.get());
+ QFile after(sample);
+ check(after.open(QIODevice::ReadOnly),"20ze: source SVG disappeared after import");
+ check(QCryptographicHash::hash(after.readAll(),QCryptographicHash::Sha256)==originalHash,
+       "20ze: import modified the source SVG");
+
+ const QString unsupported=isolated.filePath("unsupported.svg");
+ QFile bad(unsupported);check(bad.open(QIODevice::WriteOnly),"20ze: cannot create negative fixture");
+ bad.write("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10mm\" height=\"10mm\" viewBox=\"0 0 10 10\"><text x=\"1\" y=\"5\">X</text></svg>");
+ bad.close();
+ bool rejected=false;
+ try{(void)alaser::svg20ze::readSvgGeometry(unsupported);}
+ catch(const std::exception&){rejected=true;}
+ check(rejected,"20ze: unsupported text was silently imported as empty geometry");
+ QDir().mkpath(outputDirectory);
+ return {{"status","PASS"},{"svg_drag_enter_drop",true},
+         {"appends_without_replacing_current_drawing",true},
+         {"gear_rings_and_bezier_preserved",true},
+         {"physical_dimensions_mm",true},{"atomic_undo_redo",true},
+         {"source_file_unchanged",true},{"unsupported_text_rejected",true},
+         {"contours",int(parsed.curves.contours.size())},
+         {"anchors",double(parsed.anchors)},
+         {"cubic_segments",double(parsed.cubicSegments)},
+         {"width_mm",parsed.widthMm},{"height_mm",parsed.heightMm},
+         {"machine_commands_sent",false}};
+}
+
 static QJsonObject saveFolderPersistence20zdTest(const QString& outputDirectory){
  struct RestoreEnv{
   const char* key;QByteArray old;bool existed;
