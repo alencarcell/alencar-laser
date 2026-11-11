@@ -9758,7 +9758,11 @@ static QJsonObject saveFolderPersistence20zdTest(const QString& outputDirectory)
   firstDialogSeen=true;
   dialog->setDirectory(folder);
   dialog->selectFile(target);
-  dialog->accept();
+  // QFileDialog narrows its accept() override to protected. Call the
+  // public QDialog slot through the base-class interface; virtual dispatch
+  // still reaches QFileDialog's implementation.
+  QDialog* dialogBase=dialog;
+  dialogBase->accept();
  });
  first.saveAs();
  check(firstDialogSeen,"20zd: Save As first dialog was not intercepted");
