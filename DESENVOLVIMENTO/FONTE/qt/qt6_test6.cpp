@@ -2472,33 +2472,72 @@ public:
  // its Undo/Redo must still target the native history, not polylines.
  void history(bool redo){
   if(busy())return;
+  if((!redo&&mixedActionApplied_)||(redo&&mixedActionUndone_)){
+   if(mixedHistorySnapshotMatches()){
+    if(!redo){
+     if(editor.undo()&&nativeSession_->undo()){
+      mixedActionApplied_=false;mixedActionUndone_=true;
+     }
+    }else{
+     if(editor.redo()&&nativeSession_->redo()){
+      mixedActionApplied_=true;mixedActionUndone_=false;
+     }
+    }
+    mixedEditorGeneration_=editor.generation;
+    mixedEditorUndoCount_=editor.undoCount();mixedEditorRedoCount_=editor.redoCount();
+    mixedNativeUndoCount_=nativeSession_->undoCount();
+    mixedNativeRedoCount_=nativeSession_->redoCount();
+    lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
+    rebuild();
+    if(diagnosticEvent)diagnosticEvent(redo?"redo_mixed_selection":"undo_mixed_selection",1);
+    return;
+   }
+   mixedActionApplied_=mixedActionUndone_=false;
+  }
   if(shouldUseNativeHistory(redo)){nativeHistory(redo);return;}
   if(redo?editor.redo():editor.undo()){
    lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
-   active_.reset();selected.clear();rebuild();
+   active_.reset();selected.clear();selectedNative_.clear();activeNative_.reset();
+   if(nativeSession_)nativeSession_->clearSelection();
+   rebuild();
    if(diagnosticEvent)diagnosticEvent(redo?"redo":"undo",1);
   }
  }
  void clearSelection(){
-  if(!active_&&selected.empty()&&styledObjects_.empty())return;
+  if(!active_&&selected.empty()&&selectedNative_.empty()&&styledObjects_.empty()&&styledNativeKeys_.empty())return;
   const QRect before=foregroundOverlayDirtyRect20zb();
-  active_.reset();selected.clear();applySelectionStyles();
+  active_.reset();activeNative_.reset();selected.clear();selectedNative_.clear();
+  if(nativeSession_)nativeSession_->clearSelection();
+  applySelectionStyles();updateNativeSelection199();
   repaintForegroundChange20zb(before,{});
  }
  void selectAllVisible(){
-  if(nativeMode_||busy())return;
-  selected.clear();active_.reset();
+  if(busy())return;
+  nativeMode_=false;nativeEditHandles_=false;
+  selected.clear();selectedNative_.clear();active_.reset();activeNative_.reset();
+  if(nativeSession_)nativeSession_->clearSelection();
   for(const auto& [id,meta]:editor.state().objects)
    if(editable(editor.state(),id))selected.insert(id);
-  applySelectionStyles();viewport()->update();
+  if(nativeSession_)for(const auto& contour:nativeSession_->committed().contours)
+   if(nativeEditable(contour.key))selectedNative_.insert(contour.key);
+  applySelectionStyles();updateNativeSelection199();viewport()->update();
   if(stateChanged)stateChanged();
  }
  void invertSelection(){
-  if(nativeMode_||busy())return;
+  if(busy())return;
+  nativeMode_=false;nativeEditHandles_=false;
   std::set<int> inverted;
   for(const auto& [id,meta]:editor.state().objects)
    if(editable(editor.state(),id)&&!selected.count(id))inverted.insert(id);
-  selected=std::move(inverted);active_.reset();applySelectionStyles();viewport()->update();
+  selected=std::move(inverted);
+  std::set<Key> invertedNative;
+  if(nativeSession_)for(const auto& contour:nativeSession_->committed().contours)
+   if(nativeEditable(contour.key)&&!selectedNative_.count(contour.key))
+    invertedNative.insert(contour.key);
+  selectedNative_=std::move(invertedNative);
+  active_.reset();activeNative_.reset();
+  if(nativeSession_)nativeSession_->clearSelection();
+  applySelectionStyles();updateNativeSelection199();viewport()->update();
   if(stateChanged)stateChanged();
  }
  bool isMarqueeActive()const{return marqueeActive_;}
