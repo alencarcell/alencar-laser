@@ -7132,6 +7132,18 @@ static QJsonObject editTools197Test(const QString& directory){
  check(ev.edgeTrimNodeMarkerCount20za()==4&&
        ev.edgeTrimCurrent20z(nextPoint),
        "20za: moving along same edge lost or duplicated node markers");
+ QEvent leaveViewport(QEvent::Leave);
+ QApplication::sendEvent(ev.viewport(),&leaveViewport);
+ check(!ev.edgeTrimPreviewVisible20z()&&
+       ev.edgeTrimNodeMarkerCount20za()==0,
+       "20za: hover nodes remained visible after pointer left viewport");
+ const QPointF backLocal(edgePoint),backGlobal(ev.viewport()->mapToGlobal(edgePoint));
+ QMouseEvent returnToEdge(QEvent::MouseMove,backLocal,backGlobal,
+                          Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+ QApplication::sendEvent(ev.viewport(),&returnToEdge);
+ QApplication::processEvents();
+ check(ev.edgeTrimNodeMarkerCount20za()==4&&ev.edgeTrimCurrent20z(edgePoint),
+       "20za: node markers failed to restore on new valid hover");
  const Document edgeOriginal=ev.editor.state().doc;
  const size_t edgeUndo=ev.editor.undoCount();
  QTest::mouseClick(ev.viewport(),Qt::LeftButton,Qt::NoModifier,edgePoint);
