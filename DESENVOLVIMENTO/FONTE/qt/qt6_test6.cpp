@@ -5822,7 +5822,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    }
   }
   catch(const std::exception& error){
-   QMessageBox::warning(this,"Arquivo nao importado",QString::fromUtf8(error.what())+
+   status->setText(QString("Arquivo nao importado: %1").arg(QString::fromUtf8(error.what())));
+   if(qEnvironmentVariable("ALENCAR_TEST_SVG_IMPORT_NO_MODAL_20ZE")!="1")
+    QMessageBox::warning(this,"Arquivo nao importado",status->text()+
       "\n\nO desenho atual foi preservado. SVGs incompatíveis não são importados parcialmente.");
   }
  }
@@ -6434,6 +6436,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   check(layer!=view.editor.state().layers.end()&&layer->second.visible&&!layer->second.locked,
         "A camada ativa esta oculta ou bloqueada. Escolha uma camada visivel e desbloqueada.");
   const int contourCount=int(imported.curves.contours.size());
+  const QString layerName=QString::fromStdString(layer->second.name);
   check(contourCount>0,"SVG sem contornos importaveis.");
   if(qEnvironmentVariable("ALENCAR_TEST_SVG_IMPORT_ACCEPT_20ZE")!="1"){
    const auto answer=QMessageBox::question(this,"Importar SVG vetorial",
@@ -6442,9 +6445,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
             "Adicionar os vetores ao desenho atual, na camada %6?\n"
             "O desenho existente e o arquivo SVG original serao preservados.\n"
             "Texto, imagens e parametros de maquina nao sao importados.")
-      .arg(contourCount).arg(imported.anchors).arg(imported.cubicSegments)
+      .arg(contourCount).arg(qulonglong(imported.anchors)).arg(qulonglong(imported.cubicSegments))
       .arg(imported.widthMm,0,'f',3).arg(imported.heightMm,0,'f',3)
-      .arg(QString::fromStdString(layer->second.name)),
+      .arg(layerName),
     QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
    if(answer!=QMessageBox::Yes)return;
   }
@@ -6473,8 +6476,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   view.setFocus();
   status->setText(QString("SVG importado: %1 contornos, %2 ancoras, %3 curvas Bezier. "
       "Adicionado a camada %4. Salve o projeto .alaser; nenhum parametro ou comando de laser foi importado.")
-    .arg(contourCount).arg(imported.anchors).arg(imported.cubicSegments)
-    .arg(QString::fromStdString(layer->second.name)));
+    .arg(contourCount).arg(qulonglong(imported.anchors)).arg(qulonglong(imported.cubicSegments))
+    .arg(layerName));
  }
  void traceImageDialog(){
   if(!view.hasRasterImage()){status->setText("Importe uma imagem primeiro.");return;}
@@ -11000,6 +11003,18 @@ int main(int argc,char** argv){
     pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
    }
    QFile file(out+"/RESULTADO_EXPORTACAO_SVG_20ZC.json");
+   if(!file.open(QIODevice::WriteOnly))return 2;
+   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+   return pass?0:1;
+  }
+  if(mode=="--svg-import-20ze-test"){
+   QDir().mkpath(out);QJsonObject report;bool pass=true;
+   try{report=svgImport20zeTest(out);}
+   catch(const std::exception& e){
+    pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())},
+                      {"machine_commands_sent",false}};
+   }
+   QFile file(out+"/RESULTADO_IMPORTACAO_SVG_20ZE.json");
    if(!file.open(QIODevice::WriteOnly))return 2;
    file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
    return pass?0:1;
