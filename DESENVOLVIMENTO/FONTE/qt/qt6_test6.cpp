@@ -6297,7 +6297,6 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(!selectionContextBar_)return;
   const size_t nativeCount=view.nativeSelectedKeys().size();
   const bool nativeEditing=view.nativeModeActive()&&view.nativeSelected().has_value();
-  const bool nativeSelected=nativeCount>0;
   const bool rasterSelected=view.rasterSelectionActive();
   const bool polyline=view.tool==QtEditorLab::Tool::Select&&!view.nativeModeActive()&&
        !rasterSelected&&view.selectionCount()>0;
