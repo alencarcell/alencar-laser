@@ -4547,12 +4547,13 @@ public:
              "Centralizar a seleção inteira na mesa física configurada (sem redimensionar); objetos não selecionados permanecem no lugar",
              [this]{
               if(view.nativeModeActive())view.enableNative(false);
-              check(view.centerSelectionOnBed(workspaceCfg_.machineWidth,
-                                                workspaceCfg_.machineHeight),
-                    "Seleção já está centralizada na mesa configurada.");
-              recoveryPolicy_.edited();
-              captureEvent("selection_centered_on_bed");
-              status->setText("Seleção centralizada na mesa configurada. Outras formas preservadas.");
+              const bool moved=view.centerSelectionOnBed(workspaceCfg_.machineWidth,
+                                                          workspaceCfg_.machineHeight);
+              if(moved){
+               recoveryPolicy_.edited();
+               captureEvent("selection_centered_on_bed");
+               status->setText("Seleção centralizada na mesa configurada. Outras formas preservadas.");
+              }else status->setText("A seleção já está centralizada na mesa configurada.");
              });
   iconRow->addSpacing(4);
   iconButton("quick_flip_horizontal","flip_h","Espelhar horizontalmente — seleção",
