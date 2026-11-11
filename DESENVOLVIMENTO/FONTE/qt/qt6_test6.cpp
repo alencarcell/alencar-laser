@@ -7113,6 +7113,18 @@ static QJsonObject editTools197Test(const QString& directory){
  }
  check(ev.edgeTrimPreviewVisible20z()&&ev.edgeTrimCurrent20z(edgePoint),
        "20z: hover did not highlight the exact edge");
+ check(ev.edgeTrimNodeMarkerCount20za()==4&&
+       ev.edgeTrimNodeMarkerSizesFixed20za(),
+       "20za: expected 2 highlighted endpoints + 2 subtle nodes, stable in pixels");
+ const QPoint nextPoint=ev.mapFromScene({135,100});
+ const QPointF nextLocal(nextPoint),nextGlobal(ev.viewport()->mapToGlobal(nextPoint));
+ QMouseEvent stableMove(QEvent::MouseMove,nextLocal,nextGlobal,
+                        Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+ QApplication::sendEvent(ev.viewport(),&stableMove);
+ QApplication::processEvents();
+ check(ev.edgeTrimNodeMarkerCount20za()==4&&
+       ev.edgeTrimCurrent20z(nextPoint),
+       "20za: moving along same edge lost or duplicated node markers");
  const Document edgeOriginal=ev.editor.state().doc;
  const size_t edgeUndo=ev.editor.undoCount();
  QTest::mouseClick(ev.viewport(),Qt::LeftButton,Qt::NoModifier,edgePoint);
@@ -7120,6 +7132,8 @@ static QJsonObject editTools197Test(const QString& directory){
  check(ev.editor.state().doc.contours.size()==2&&
        ev.editor.undoCount()==edgeUndo+1,
        "20z: mouse cut did not split one edge in one Undo");
+ check(ev.edgeTrimNodeMarkerCount20za()==0,
+       "20za: old node markers survived the cut/rebuild");
  const Contour* edgeLeft=get(ev.editor.state().doc,{edgeObject,0});
  check(edgeLeft&&edgeLeft->nodes.size()==2,
        "20z: wrong side was removed by mouse");
@@ -7138,7 +7152,7 @@ static QJsonObject editTools197Test(const QString& directory){
        "20z: Ctrl+Z did not restore exact contour in GUI");
  w.grab().save(directory+"/TESTE_19_7_FERRAMENTAS.png");
  return {{"status","PASS"},{"selection_esc",true},{"selection_v",true},
-   {"scissors_k",true},{"scissors_mouse",true},{"edge_between_nodes_20z",true},{"objects_inspector_context_20z",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"scissors_isolated_circle",true},{"scissors_isolated_rectangle",true},{"undo_scissors",true},
+   {"scissors_k",true},{"scissors_mouse",true},{"edge_between_nodes_20z",true},{"edge_nodes_visible_20za",true},{"objects_inspector_context_20z",true},{"scissors_continuous_span_preview",true},{"scissors_cursor_conditional",true},{"scissors_isolated_circle",true},{"scissors_isolated_rectangle",true},{"undo_scissors",true},
    {"hover_delivery",usedViewportEventFallback?"viewport_synthetic_mouse_move":"qtest_mouse_move"},
    {"hardware_hover_verified",false},
    {"ctrl_r_rectangle",true},{"ctrl_e_ellipse",true},{"shift_square_circle",true},{"create_layer_by_palette",true},
