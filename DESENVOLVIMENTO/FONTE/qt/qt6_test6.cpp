@@ -666,6 +666,7 @@ class QtEditorLab final:public QGraphicsView{
   const bool crossing=pointer.x()<start.x();
   const QRectF area=QRectF(mapToScene(start.toPoint()),mapToScene(pointer.toPoint())).normalized();
   std::set<int> found;
+  std::set<Key> foundNative;
   std::map<int,std::set<int>> groupMembers;
   std::map<int,bool> groupInside,groupCross;
   const auto& state=editor.state();
@@ -695,16 +696,36 @@ class QtEditorLab final:public QGraphicsView{
   for(const auto& [group,ids]:groupMembers)
    if(crossing?groupCross[group]:groupInside[group])
     found.insert(ids.begin(),ids.end());
+  if(nativeSession_)for(const auto& contour:nativeSession_->committed().contours){
+   if(!nativeEditable(contour.key))continue;
+   const auto item=nativeItems_.find(contour.key);
+   if(item==nativeItems_.end()||!item->second->isVisible())continue;
+   const QRectF bounds=item->second->sceneBoundingRect();
+   const bool inside=area.contains(bounds);
+   const bool cross=area.intersects(bounds)&&
+       (item->second->mapToScene(item->second->path()).intersects(area)||area.contains(bounds));
+   if(crossing?cross:inside)foundNative.insert(contour.key);
+  }
   const bool shift=mods.testFlag(Qt::ShiftModifier);
   const bool ctrl=mods.testFlag(Qt::ControlModifier);
-  if(!shift&&!ctrl)selected=std::move(found);
-  else for(int id:found){
-   if(shift&&ctrl)selected.erase(id);
-   else if(ctrl){if(!selected.erase(id))selected.insert(id);}
-   else selected.insert(id);
+  if(!shift&&!ctrl){
+   selected=std::move(found);selectedNative_=std::move(foundNative);
+  }else{
+   for(int id:found){
+    if(shift&&ctrl)selected.erase(id);
+    else if(ctrl){if(!selected.erase(id))selected.insert(id);}
+    else selected.insert(id);
+   }
+   for(const Key key:foundNative){
+    if(shift&&ctrl)selectedNative_.erase(key);
+    else if(ctrl){if(!selectedNative_.erase(key))selectedNative_.insert(key);}
+    else selectedNative_.insert(key);
+   }
   }
-  active_.reset();applySelectionStyles();viewport()->update();
-  if(diagnosticEvent)diagnosticEvent("marquee_selected",int(selected.size()));
+  active_.reset();activeNative_.reset();
+  if(nativeSession_)nativeSession_->clearSelection();
+  applySelectionStyles();updateNativeSelection199();viewport()->update();
+  if(diagnosticEvent)diagnosticEvent("marquee_selected",int(totalSelectionCount()));
   if(stateChanged)stateChanged();
  }
  void clearPolyline(){
