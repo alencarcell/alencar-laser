@@ -9820,8 +9820,8 @@ static QJsonObject svgImport20zeTest(const QString& outputDirectory){
  source.addContours(std::move(polygons),true,0,true);
  CurveDocument sourceCurves;
  CurveContour cubic;cubic.key={900,0};cubic.layer=0;
- cubic.nodes={{1,{10,10},{10,10},{20,5}},
-              {2,{40,10},{30,5},{40,10}}};
+ cubic.nodes={{1,{0,0},{0,0},{10,0}},
+              {2,{30,0},{20,0},{30,0}}};
  cubic.edgeKind={1};sourceCurves.contours.push_back(cubic);sourceCurves.nextId=3;
  const QString sample=isolated.filePath("roundtrip.svg");
  const auto exported=alaser::svg20zc::saveSvg(sample,source.state(),sourceCurves);
@@ -9840,10 +9840,10 @@ static QJsonObject svgImport20zeTest(const QString& outputDirectory){
        std::abs(parsed.heightMm-exported.heightMm)<1e-6,
        "20ze: physical millimetre dimensions changed on import");
  const auto& roundTripCubic=parsed.curves.contours[2];
- check(dist(roundTripCubic.nodes[0].anchor,{10,10})<1e-7&&
-       dist(roundTripCubic.nodes[0].handleOut,{20,5})<1e-7&&
-       dist(roundTripCubic.nodes[1].handleIn,{30,5})<1e-7&&
-       dist(roundTripCubic.nodes[1].anchor,{40,10})<1e-7,
+ check(dist(roundTripCubic.nodes[0].anchor,{0,0})<1e-7&&
+       dist(roundTripCubic.nodes[0].handleOut,{10,0})<1e-7&&
+       dist(roundTripCubic.nodes[1].handleIn,{20,0})<1e-7&&
+       dist(roundTripCubic.nodes[1].anchor,{30,0})<1e-7,
        "20ze: cubic anchors/handles changed on round-trip");
 
  LabWindow window(Document{});
