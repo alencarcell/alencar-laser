@@ -6229,15 +6229,21 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
  }
  void updateObjectsInspector20z(){
   if(!objectsSummary20z_)return;
-  const size_t count=view.selected.size();
-  const bool native=view.nativeModeActive()&&view.nativeSelected().has_value();
-  const bool single=count==1&&!native;
-  const bool some=count>0&&!native;
-  const bool multi=count>=2&&!native;
-  if(native)objectsSummary20z_->setText(
-   "Curva Bézier selecionada. Use Tesoura (K) para remover sua aresta nativa.");
+  const size_t regularCount=view.selected.size();
+  const size_t nativeCount=view.nativeSelectedKeys().size();
+  const size_t count=regularCount+nativeCount;
+  const bool nativeEditing=view.nativeModeActive()&&view.nativeSelected().has_value();
+  const bool single= count==1&&nativeCount==0;
+  const bool some=regularCount>0&&nativeCount==0;
+  const bool multi=count>=2;
+  if(nativeEditing&&regularCount==0)objectsSummary20z_->setText(
+   "Curva Bézier em edição. Âncoras e alças permanecem nativas.");
   else if(!count)objectsSummary20z_->setText(
    "Nenhuma forma selecionada. Selecione (V) ou use Entre nós (J) diretamente sobre uma polilinha.");
+  else if(nativeCount>0&&regularCount>0)objectsSummary20z_->setText(
+   QString("%1 forma(s) + %2 curva(s) Bézier selecionadas.").arg(regularCount).arg(nativeCount));
+  else if(nativeCount>0)objectsSummary20z_->setText(
+   QString("%1 curva(s) Bézier selecionada(s).").arg(nativeCount));
   else if(single){
    const int id=*view.selected.begin();
    const auto it=view.editor.state().objects.find(id);
@@ -6261,11 +6267,13 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
  void updateSelectionContext(){
   updateObjectsInspector20z();
   if(!selectionContextBar_)return;
-  const bool nativeSelected=view.nativeSelected().has_value()&&view.nativeModeActive();
+  const size_t nativeCount=view.nativeSelectedKeys().size();
+  const bool nativeEditing=view.nativeModeActive()&&view.nativeSelected().has_value();
+  const bool nativeSelected=nativeCount>0;
   const bool rasterSelected=view.rasterSelectionActive();
   const bool polyline=view.tool==QtEditorLab::Tool::Select&&!view.nativeModeActive()&&
-       !rasterSelected&&!view.selected.empty();
-  const bool show=nativeSelected||polyline||rasterSelected;
+       !rasterSelected&&view.totalSelectionCount()>0;
+  const bool show=nativeEditing||polyline||rasterSelected;
   // Selection updates data; never switches tabs or changes canvas dimensions.
   if(!show){
    selectionContextSummary_->setText("Nenhuma forma selecionada. Clique em uma forma na mesa.");
@@ -6290,8 +6298,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const auto bounds=rasterSelected?std::optional<QRectF>(view.rasterBounds()):
                                     view.selectionPreviewRect();
   std::set<int> groupIds,textRoots;
-  bool allText=polyline;
-  bool editableSelection=polyline;
+  bool allText=polyline&&nativeCount==0;
+  bool editableSelection=polyline&&nativeCount==0;
   bool groupedObject=false;
   if(polyline)for(int id:view.selected){
    auto it=view.editor.state().objects.find(id);
@@ -6305,7 +6313,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   }
   const bool textOnly=allText&&textRoots.size()==1;
   const QString prefix=rasterSelected?QString("Imagem raster selecionada"):
-     nativeSelected?QString("Curva Bézier selecionada"):
+     nativeEditing&&view.selected.empty()?QString("Curva Bézier em edição"):
+     nativeCount>0&&view.selected.empty()?QString("%1 curva(s) Bézier").arg(nativeCount):
+     nativeCount>0?QString("%1 forma(s) + %2 curva(s) Bézier")
+                       .arg(view.selected.size()).arg(nativeCount):
      textOnly?QString("Texto editável selecionado"):
      QString("%1 forma(s)%2").arg(view.selected.size()).arg(
        groupedObject?" · grupo":"");
@@ -6319,7 +6330,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   selectionContextGroup_->setEnabled(editableSelection&&groupIds.size()>=2);
   selectionContextUngroup_->setEnabled(editableSelection&&groupedObject);
   selectionContextDuplicate_->setEnabled(editableSelection&&!view.selected.empty());
-  selectionContextDelete_->setEnabled(nativeSelected||editableSelection);
+  selectionContextDelete_->setEnabled(nativeEditing||editableSelection);
   if(selectionContextTextEdit_){
    selectionContextTextEdit_->setVisible(textOnly);
    selectionContextTextEdit_->setEnabled(textOnly&&editableSelection);
@@ -6353,7 +6364,8 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
      width>1e-8&&height>1e-8);
   selectionContextSummary_->setToolTip(numericEnabled?
     "Grade laranja define referencia para X/Y e dimensoes. Enter confirma, Ctrl+Z desfaz.":
-    "Somente leitura para texto editavel, Bezier nativa, imagens, camadas bloqueadas.");
+    nativeCount>0?"Seleção mista: mover, girar, redimensionar e alinhar preservam as curvas Bézier nativas.":
+    "Somente leitura para texto editavel, imagens e camadas bloqueadas.");
  }
  void refresh(){
   int current=layers->currentData().toInt();refreshing=true;layers->clear();for(const auto& [id,l]:view.editor.state().layers)layers->addItem(QString::fromStdString(l.name),id);
