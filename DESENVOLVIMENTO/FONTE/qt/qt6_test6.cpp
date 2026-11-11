@@ -1800,7 +1800,6 @@ public:
   if(hasNative)nativeChanged=nativeSession_->deleteContours(nativeKeys);
   if(hasRegular&&nativeChanged)captureMixedHistorySnapshot();
   else{
-   mixedActionApplied_=mixedActionUndone_=false;
    lastNativeAction_=nativeChanged;lastEditorGenerationSeen_=editor.generation;
   }
   selected.clear();selectedNative_.clear();active_.reset();activeNative_.reset();
@@ -2416,18 +2415,30 @@ public:
   if(marqueeActive_)clearMarquee();
  }
  void captureMixedHistorySnapshot(){
-  mixedActionApplied_=true;mixedActionUndone_=false;
-  mixedEditorGeneration_=editor.generation;
-  mixedEditorUndoCount_=editor.undoCount();mixedEditorRedoCount_=editor.redoCount();
-  mixedNativeUndoCount_=nativeSession_?nativeSession_->undoCount():0;
-  mixedNativeRedoCount_=nativeSession_?nativeSession_->redoCount():0;
+  if(!nativeSession_)return;
+  MixedHistoryMarker marker;
+  marker.applied=true;
+  marker.editorUndo=editor.undoCount();marker.editorRedo=editor.redoCount();
+  marker.nativeUndo=nativeSession_->undoCount();marker.nativeRedo=nativeSession_->redoCount();
+  mixedHistoryMarkers_.push_back(marker);
+  if(mixedHistoryMarkers_.size()>40)mixedHistoryMarkers_.erase(mixedHistoryMarkers_.begin());
   lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
  }
- bool mixedHistorySnapshotMatches()const{
-  return nativeSession_&&editor.generation==mixedEditorGeneration_&&
-    editor.undoCount()==mixedEditorUndoCount_&&editor.redoCount()==mixedEditorRedoCount_&&
-    nativeSession_->undoCount()==mixedNativeUndoCount_&&
-    nativeSession_->redoCount()==mixedNativeRedoCount_;
+ bool mixedMarkerCanUndo(const MixedHistoryMarker& marker)const{
+  return nativeSession_&&marker.applied&&
+    editor.undoCount()==marker.editorUndo&&
+    nativeSession_->undoCount()==marker.nativeUndo;
+ }
+ bool mixedMarkerCanRedo(const MixedHistoryMarker& marker)const{
+  return nativeSession_&&!marker.applied&&
+    editor.undoCount()==marker.editorUndo&&editor.redoCount()==marker.editorRedo&&
+    nativeSession_->undoCount()==marker.nativeUndo&&
+    nativeSession_->redoCount()==marker.nativeRedo;
+ }
+ void refreshMixedHistoryMarker(MixedHistoryMarker& marker){
+  marker.editorUndo=editor.undoCount();marker.editorRedo=editor.redoCount();
+  marker.nativeUndo=nativeSession_?nativeSession_->undoCount():0;
+  marker.nativeRedo=nativeSession_?nativeSession_->redoCount():0;
  }
  bool applySelectionMoves(const std::map<int,Pt>& objectMoves,
                           const std::map<Key,Pt>& nativeMoves){
@@ -2443,7 +2454,6 @@ public:
   }
   if(regularChanged&&nativeChanged)captureMixedHistorySnapshot();
   else{
-   mixedActionApplied_=mixedActionUndone_=false;
    lastNativeAction_=nativeChanged;
    lastEditorGenerationSeen_=editor.generation;
   }
@@ -2623,27 +2633,37 @@ public:
  // its Undo/Redo must still target the native history, not polylines.
  void history(bool redo){
   if(busy())return;
-  if((!redo&&mixedActionApplied_)||(redo&&mixedActionUndone_)){
-   if(mixedHistorySnapshotMatches()){
-    if(!redo){
-     if(editor.undo()&&nativeSession_->undo()){
-      mixedActionApplied_=false;mixedActionUndone_=true;
+  if(nativeSession_){
+   for(auto it=mixedHistoryMarkers_.rbegin();it!=mixedHistoryMarkers_.rend();++it){
+    if(!redo&&mixedMarkerCanUndo(*it)){
+     if(editor.undoCount()==0||nativeSession_->undoCount()==0)return;
+     const bool regularUndone=editor.undo();
+     const bool nativeUndone=nativeSession_->undo();
+     if(!regularUndone||!nativeUndone){
+      qWarning()<<"Mixed selection Undo could not advance both document histories.";
+      return;
      }
-    }else{
-     if(editor.redo()&&nativeSession_->redo()){
-      mixedActionApplied_=true;mixedActionUndone_=false;
-     }
+     it->applied=false;refreshMixedHistoryMarker(*it);
+     lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
+     rebuild();
+     if(diagnosticEvent)diagnosticEvent("undo_mixed_selection",1);
+     return;
     }
-    mixedEditorGeneration_=editor.generation;
-    mixedEditorUndoCount_=editor.undoCount();mixedEditorRedoCount_=editor.redoCount();
-    mixedNativeUndoCount_=nativeSession_->undoCount();
-    mixedNativeRedoCount_=nativeSession_->redoCount();
-    lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
-    rebuild();
-    if(diagnosticEvent)diagnosticEvent(redo?"redo_mixed_selection":"undo_mixed_selection",1);
-    return;
+    if(redo&&mixedMarkerCanRedo(*it)){
+     if(editor.redoCount()==0||nativeSession_->redoCount()==0)return;
+     const bool regularRedone=editor.redo();
+     const bool nativeRedone=nativeSession_->redo();
+     if(!regularRedone||!nativeRedone){
+      qWarning()<<"Mixed selection Redo could not advance both document histories.";
+      return;
+     }
+     it->applied=true;refreshMixedHistoryMarker(*it);
+     lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
+     rebuild();
+     if(diagnosticEvent)diagnosticEvent("redo_mixed_selection",1);
+     return;
+    }
    }
-   mixedActionApplied_=mixedActionUndone_=false;
   }
   if(shouldUseNativeHistory(redo)){nativeHistory(redo);return;}
   if(redo?editor.redo():editor.undo()){
