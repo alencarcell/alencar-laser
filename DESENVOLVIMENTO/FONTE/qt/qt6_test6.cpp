@@ -10783,15 +10783,17 @@ static QJsonObject mixedSelection20zeTest(){
        "20ze mixed selection: combined selection center differs from bed center");
  check(w.view.deleteSelectedShapes(),
        "20ze mixed selection: deleting the mixed selection failed");
- check(w.view.editor.state().doc.contours.empty()&&
+ check(w.view.editor.state().doc.contours.size()==1&&
+       get(w.view.editor.state().doc,{second,0})&&
        w.curves->committed().contours.empty(),
-       "20ze mixed selection: delete did not remove both object types");
+       "20ze mixed selection: delete removed the bystander or missed a selected object");
  w.view.history(false);
  check(w.view.editor.state().doc.contours.size()==2&&
        w.curves->committed().contours.size()==1,
        "20ze mixed selection: one Undo did not restore mixed deletion");
  w.view.history(true);
- check(w.view.editor.state().doc.contours.empty()&&
+ check(w.view.editor.state().doc.contours.size()==1&&
+       get(w.view.editor.state().doc,{second,0})&&
        w.curves->committed().contours.empty(),
        "20ze mixed selection: one Redo did not repeat mixed deletion");
  return QJsonObject{{"status","PASS"},{"ctrl_a_selects_both_models",true},
