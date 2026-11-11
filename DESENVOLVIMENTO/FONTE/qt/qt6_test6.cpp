@@ -2303,6 +2303,170 @@ public:
   if(bezierDrawing_)clearBezierDraft();
   if(marqueeActive_)clearMarquee();
  }
+ void captureMixedHistorySnapshot(){
+  mixedActionApplied_=true;mixedActionUndone_=false;
+  mixedEditorGeneration_=editor.generation;
+  mixedEditorUndoCount_=editor.undoCount();mixedEditorRedoCount_=editor.redoCount();
+  mixedNativeUndoCount_=nativeSession_?nativeSession_->undoCount():0;
+  mixedNativeRedoCount_=nativeSession_?nativeSession_->redoCount():0;
+  lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
+ }
+ bool mixedHistorySnapshotMatches()const{
+  return nativeSession_&&editor.generation==mixedEditorGeneration_&&
+    editor.undoCount()==mixedEditorUndoCount_&&editor.redoCount()==mixedEditorRedoCount_&&
+    nativeSession_->undoCount()==mixedNativeUndoCount_&&
+    nativeSession_->redoCount()==mixedNativeRedoCount_;
+ }
+ bool applySelectionMoves(const std::map<int,Pt>& objectMoves,
+                          const std::map<Key,Pt>& nativeMoves){
+  if(objectMoves.empty()&&nativeMoves.empty())return false;
+  bool regularChanged=false,nativeChanged=false;
+  if(!objectMoves.empty()){
+   editor.moveObjectsBy(objectMoves);
+   regularChanged=true;
+  }
+  if(!nativeMoves.empty()){
+   if(!nativeSession_)throw std::runtime_error("native selection session unavailable");
+   nativeChanged=nativeSession_->moveContoursBy(nativeMoves);
+  }
+  if(regularChanged&&nativeChanged)captureMixedHistorySnapshot();
+  else{
+   mixedActionApplied_=mixedActionUndone_=false;
+   lastNativeAction_=nativeChanged;
+   lastEditorGenerationSeen_=editor.generation;
+  }
+  return regularChanged||nativeChanged;
+ }
+ bool applySelectionAffine(const std::vector<int>& ids,const std::vector<Key>& nativeKeys,
+                           Pt pivot,double a,double b,double c,double d,Pt offset){
+  const double determinant=a*d-b*c;
+  if(!std::isfinite(pivot.x)||!std::isfinite(pivot.y)||
+     !std::isfinite(a)||!std::isfinite(b)||!std::isfinite(c)||!std::isfinite(d)||
+     !std::isfinite(determinant)||std::abs(determinant)<1e-9||
+     !std::isfinite(offset.x)||!std::isfinite(offset.y))
+   throw std::runtime_error("invalid mixed selection transform");
+  const bool identity=std::abs(a-1.)<1e-12&&std::abs(b)<1e-12&&
+    std::abs(c)<1e-12&&std::abs(d-1.)<1e-12;
+  const bool translated=std::hypot(offset.x,offset.y)>1e-12;
+  if(identity&&!translated)return false;
+  bool regularChanged=false,nativeChanged=false;
+  if(!ids.empty()){
+   editor.affineObjects(ids,pivot,a,b,c,d,offset);
+   regularChanged=true;
+  }
+  if(!nativeKeys.empty()){
+   if(!nativeSession_)throw std::runtime_error("native selection session unavailable");
+   nativeChanged=nativeSession_->transformContoursAffine(nativeKeys,pivot,a,b,c,d,offset);
+  }
+  if(regularChanged&&nativeChanged)captureMixedHistorySnapshot();
+  else{
+   mixedActionApplied_=mixedActionUndone_=false;
+   lastNativeAction_=nativeChanged;
+   lastEditorGenerationSeen_=editor.generation;
+  }
+  return regularChanged||nativeChanged;
+ }
+ bool moveSelectionBy(Pt delta){
+  if(!std::isfinite(delta.x)||!std::isfinite(delta.y))
+   throw std::runtime_error("invalid selection translation");
+  if(std::hypot(delta.x,delta.y)<=1e-12)return false;
+  std::map<int,Pt> objects;
+  for(int id:expandedSelection())objects[id]=delta;
+  std::map<Key,Pt> curves;
+  for(const Key key:selectedNative_)curves[key]=delta;
+  return applySelectionMoves(objects,curves);
+ }
+ bool alignSelection(int mode){
+  if(mode<0||mode>6||totalSelectionCount()<2)
+   throw std::runtime_error("select at least two objects to align");
+  using UnitKey=std::tuple<int,int,int>; // kind, object/group id, group flag
+  struct Unit{std::vector<int> objects;std::optional<Key> native;QRectF bounds;};
+  std::map<UnitKey,Unit> units;
+  const auto& state=editor.state();
+  for(int id:selected){
+   const auto meta=state.objects.find(id);
+   if(meta==state.objects.end()||!editable(state,id))
+    throw std::runtime_error("selected object is missing, locked or hidden");
+   const bool grouped=meta->second.group>0;
+   const UnitKey key{0,grouped?meta->second.group:id,grouped?1:0};
+   auto& unit=units[key];
+   if(grouped){
+    for(const auto& [member,m]:state.objects)
+     if(m.group==meta->second.group){
+      if(!editable(state,member))throw std::runtime_error("alignment group locked or hidden");
+      unit.objects.push_back(member);
+     }
+   }else unit.objects.push_back(id);
+  }
+  for(const Key key:selectedNative_){
+   if(!nativeEditable(key))throw std::runtime_error("Bezier layer is locked or hidden");
+   const auto item=nativeItems_.find(key);
+   if(item==nativeItems_.end())throw std::runtime_error("selected Bezier contour missing");
+   Unit unit;unit.native=key;
+   unit.bounds=item->second->mapToScene(item->second->path()).boundingRect();
+   units.emplace(UnitKey{1,key.object,key.sub},std::move(unit));
+  }
+  for(auto& [key,unit]:units){
+   (void)key;
+   if(!unit.native){
+    if(unit.objects.empty())throw std::runtime_error("empty alignment unit");
+    const auto bounds=boundsOf(state.doc,unit.objects);
+    unit.bounds=QRectF(toQt(bounds.first),toQt(bounds.second)).normalized();
+   }
+  }
+  if(units.size()<2)throw std::runtime_error("choose two independent objects or groups");
+  std::optional<UnitKey> reference;
+  if(activeNative_&&selectedNative_.count(*activeNative_))
+   reference=UnitKey{1,activeNative_->object,activeNative_->sub};
+  else if(active_&&selected.count(active_->object)){
+   const auto meta=state.objects.find(active_->object);
+   if(meta!=state.objects.end()){
+    const bool grouped=meta->second.group>0;
+    reference=UnitKey{0,grouped?meta->second.group:active_->object,grouped?1:0};
+   }
+  }
+  if(!reference)reference=units.begin()->first;
+  const auto ref=units.find(*reference);
+  if(ref==units.end())throw std::runtime_error("active alignment reference is not selected");
+  const QRectF target=ref->second.bounds;
+  auto coordinate=[&](const QRectF& box){
+   if(mode==0)return box.left();
+   if(mode==1)return box.right();
+   if(mode==2)return box.top();
+   if(mode==3)return box.bottom();
+   if(mode==4)return box.center().x();
+   return box.center().y();
+  };
+  std::map<int,Pt> objectMoves;
+  std::map<Key,Pt> nativeMoves;
+  for(const auto& [key,unit]:units){
+   if(key==*reference)continue;
+   const QRectF box=unit.bounds;
+   Pt delta{};
+   if(mode==6){
+    delta={target.center().x()-box.center().x(),
+           target.center().y()-box.center().y()};
+   }else if(mode==0||mode==1||mode==4)delta.x=coordinate(target)-coordinate(box);
+   else delta.y=coordinate(target)-coordinate(box);
+   if(std::hypot(delta.x,delta.y)<=1e-12)continue;
+   if(unit.native)nativeMoves[*unit.native]=delta;
+   else for(int id:unit.objects)objectMoves[id]=delta;
+  }
+  const bool changed=applySelectionMoves(objectMoves,nativeMoves);
+  if(changed)rebuild();
+  return changed;
+ }
+ bool centerSelectionOnBed(double width,double height){
+  if(!std::isfinite(width)||!std::isfinite(height)||width<=0||height<=0)
+   throw std::runtime_error("invalid configured bed dimensions");
+  const auto bounds=selectedBounds();
+  if(!bounds)throw std::runtime_error("select editable vector objects first");
+  const QPointF center=bounds->center();
+  const Pt delta{width*.5-center.x(),height*.5-center.y()};
+  const bool changed=moveSelectionBy(delta);
+  if(changed)rebuild();
+  return changed;
+ }
  // One dispatch point for toolbar, shortcuts, viewport keys and context menu.
  // A scissors cut can remove the LAST native contour and leave nativeMode_ off;
  // its Undo/Redo must still target the native history, not polylines.
