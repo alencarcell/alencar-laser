@@ -388,6 +388,9 @@ class QtEditorLab final:public QGraphicsView{
  std::map<Key,QGraphicsPathItem*> nativeItems_;
  std::optional<CurveHit> nativeSelectedPart_;
  std::optional<Key> nativeStyledKey_;
+ // Unified selection: conventional object IDs plus native Bezier contour keys.
+ std::set<Key> selectedNative_,styledNativeKeys_;
+ std::optional<Key> activeNative_;
  // Diagnostics only: count QPainterPath constructions, not scene repaints.
  // No paths, coordinates, or project data leave the local process.
  quint64 nativeFullPathBuilds_=0,nativeSelectivePathBuilds_=0;
@@ -457,12 +460,18 @@ class QtEditorLab final:public QGraphicsView{
  double transformAffineA_=1.,transformAffineB_=0.,
         transformAffineC_=0.,transformAffineD_=1.;
  std::vector<int> transformIds_;
+ std::vector<Key> transformNativeKeys_;
  std::vector<QGraphicsPathItem*> transformItems_;
  QGraphicsItemGroup* transformPreviewGroup_=nullptr; // center-handle preview only
  int groupedTransformStarts_=0,groupedTransformFrameUpdates_=0;
  bool nativeContourPressing_=false;
  bool nativeTransformDragging_=false;
- Key nativeTransformKey_{};
+ Key nativeTransformKey_{}; // legacy single-contour diagnostic only
+ // Cross-document Undo/Redo lease for one mixed selection transform.
+ bool mixedActionApplied_=false,mixedActionUndone_=false;
+ uint64_t mixedEditorGeneration_=0;
+ size_t mixedEditorUndoCount_=0,mixedEditorRedoCount_=0;
+ size_t mixedNativeUndoCount_=0,mixedNativeRedoCount_=0;
  bool strokeDrawing_=false;QPointF drawStart_,drawCurrent_;
  std::vector<Pt> pencilPoints_;
  bool bezierDrawing_=false,bezierPressed_=false;
