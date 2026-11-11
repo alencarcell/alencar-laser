@@ -32,6 +32,7 @@
 #include <QGraphicsView>
 #include <QGraphicsScene>
 #include <QGraphicsPathItem>
+#include <QGraphicsEllipseItem>
 #include <QGraphicsItemGroup>
 #include <QGraphicsRectItem>
 #include <QGraphicsPixmapItem>
@@ -2265,6 +2266,12 @@ public:
  }
  int lastCreated()const{return lastCreated_;}
 protected:
+ bool viewportEvent(QEvent* e)override{
+  // Mouse-leave is delivered to QGraphicsView's viewport widget.
+  if(e->type()==QEvent::Leave&&tool==Tool::EdgeTrim)
+   clearEdgeTrimHover20z();
+  return QGraphicsView::viewportEvent(e);
+ }
  // TESTE_19.1: zoom ancorado no cursor, independente da ferramenta ativa.
  // Nao altera pontos, IDs, historico ou o documento canonico.
  void wheelEvent(QWheelEvent* e)override{
