@@ -887,8 +887,9 @@ class QtEditorLab final:public QGraphicsView{
  }
  std::optional<QRectF> combinedSelectionBounds()const{
   auto bounds=selectedBounds();
-  const auto nativeBounds=(nativeMode_&&!nativeEditHandles_)?nativeSelectedBounds():std::nullopt;
-  if(nativeBounds)bounds=bounds?bounds->united(*nativeBounds):nativeBounds;
+  std::optional<QRectF> nativeBounds;
+  if(nativeMode_&&!nativeEditHandles_)nativeBounds=nativeSelectedBounds();
+  if(nativeBounds)bounds=bounds?std::optional<QRectF>(bounds->united(*nativeBounds)):nativeBounds;
   return bounds;
  }
  // One visual frame for conventional editor objects and native Bezier contours.
