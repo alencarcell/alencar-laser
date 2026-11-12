@@ -1571,6 +1571,15 @@ public:
   }
   return lastNativeAction_&&nativeHistoryAvailable(redo);
  }
+ bool selectAllNativeContours(){
+  if(!nativeSession_||!hasNativeDocument()||busy())return false;
+  nativeSession_->selectAllContours();
+  nativeMode_=true;nativeEditHandles_=false;tool=Tool::Select;
+  active_.reset();selected.clear();applySelectionStyles();
+  updateNativeSelection199();
+  if(stateChanged)stateChanged();
+  return true;
+ }
  bool selectNativeAt(Pt click,bool startMove,bool additive=false){
   if(!nativeSession_||!hasNativeDocument())return false;
   const auto matches=nativeSession_->pickEdges(click,nativePxPerMm(),viewport()->devicePixelRatioF(),8);
@@ -3282,8 +3291,7 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    if(e->key()==Qt::Key_Y){history(true);e->accept();return;}
   }
   if(e->modifiers()==Qt::ControlModifier&&e->key()==Qt::Key_A&&tool==Tool::Select&&nativeMode_&&nativeSession_){
-   nativeSession_->selectAllContours();nativeEditHandles_=false;
-   updateNativeSelection199();if(stateChanged)stateChanged();e->accept();return;
+   selectAllNativeContours();e->accept();return;
   }
   if(e->modifiers()==Qt::ControlModifier&&e->key()==Qt::Key_A&&tool==Tool::Select&&!nativeMode_){
    selectAllVisible();e->accept();return;
@@ -10326,7 +10334,7 @@ QJsonObject nativeImportGui199Test(){
  check(w.curves->selectedKeys().size()==2,
        "native additive selection did not retain both contours");
  const auto buildsBeforeAll=w.view.nativeFullPathBuilds();
- w.curves->selectAllContours();w.view.updateNativeSelection199();
+ check(w.view.selectAllNativeContours(),"GUI Ctrl+A could not select all native contours");
  const auto allNativeKeys=w.curves->selectedKeys();
  check(allNativeKeys.size()==2&&
        std::find(allNativeKeys.begin(),allNativeKeys.end(),firstNative)!=allNativeKeys.end()&&
