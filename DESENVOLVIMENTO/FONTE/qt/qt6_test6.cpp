@@ -376,6 +376,9 @@ class QtEditorLab final:public QGraphicsView{
  bool nativeEditHandles_=false; // Select mode moves native contours; Bézier mode edits anchors/handles.
  bool nativeInsertArmed_=false; // Single click on selected Bezier edge adds anchor, menu-only action.
  bool lastNativeAction_=false;
+ bool lastMixedAction_=false;
+ uint64_t lastMixedEditorGenerationSeen_=0;
+ size_t lastMixedNativeUndoCount_=0,lastMixedNativeRedoCount_=0;
  uint64_t lastEditorGenerationSeen_=0;
  bool fillPreview_=false; // Editor LightBurn mostra linhas por padrao.
  std::set<int> hiddenTextEditingMembers_; // somente visual; geometria canonica intacta
@@ -851,7 +854,7 @@ class QtEditorLab final:public QGraphicsView{
   return {ids.begin(),ids.end()};
  }
  std::optional<QRectF> selectedBounds()const{
-  if(selected.empty()||tool!=Tool::Select||nativeMode_)return {};
+  if(selected.empty()||tool!=Tool::Select)return {};
   const auto ids=expandedSelection();
   const std::set<int> idsSet(ids.begin(),ids.end());
   double minX=0.,minY=0.,maxX=0.,maxY=0.;bool has=false;
@@ -882,15 +885,19 @@ class QtEditorLab final:public QGraphicsView{
   }
   return bounds;
  }
- // Mesmo preview visual dos itens: sem alteracao dos nos antes de mouseRelease.
+ std::optional<QRectF> combinedSelectionBounds()const{
+  auto bounds=selectedBounds();
+  const auto nativeBounds=(nativeMode_&&!nativeEditHandles_)?nativeSelectedBounds():std::nullopt;
+  if(nativeBounds)bounds=bounds?bounds->united(*nativeBounds):nativeBounds;
+  return bounds;
+ }
+ // One visual frame for conventional editor objects and native Bezier contours.
  std::optional<QRectF> selectionDisplayBounds()const{
   if(shapeDragging_&&shapePreviewBounds_)
    return shapePreviewBounds_->translated(shapePreviewDelta_);
   if(transformDragging_)
    return selectionPreviewTransform_.mapRect(transformBounds_);
-  if(nativeMode_&&!nativeEditHandles_&&nativeSession_&&nativeSession_->selected())
-   return nativeSelectedBounds();
-  return selectedBounds();
+  return combinedSelectionBounds();
  }
  static std::array<QPointF,4> quadFromRect(const QRectF& r){
   return {r.topLeft(),r.topRight(),r.bottomRight(),r.bottomLeft()};
@@ -906,7 +913,7 @@ class QtEditorLab final:public QGraphicsView{
    return points;
   }
   if(nativeMode_&&!nativeEditHandles_&&nativeSession_&&nativeSession_->selected()){
-   const auto bounds=nativeSelectedBounds();
+   const auto bounds=combinedSelectionBounds();
    if(bounds)return quadFromRect(*bounds);
   }
   if(shapeDragging_&&cachedDragOverlay199_&&dragOverlayBaseQuad199_&&
@@ -989,7 +996,8 @@ class QtEditorLab final:public QGraphicsView{
  bool beginSelectionTransform(QPointF position){
   if(tool!=Tool::Select||busy()||nativeEditHandles_)return false;
   const bool native=nativeMode_&&nativeSession_&&nativeSession_->selected();
-  if(!native&&(nativeMode_||selected.empty()))return false;
+  const auto ids=expandedSelection();
+  if(!native&&ids.empty())return false;
   const auto bounds=selectionDisplayBounds();if(!bounds)return false;
   const auto quad=selectionQuadScene();
   if(!quad)return false;
@@ -1010,24 +1018,21 @@ class QtEditorLab final:public QGraphicsView{
    }
    if(transformItems_.empty())return false;
    nativeTransformDragging_=true;
-  }else{
-  transformIds_=expandedSelection();
+  }
+  transformIds_=ids;
   for(int id:transformIds_){
    if(!editable(editor.state(),id)){cancelSelectionTransform();return false;}
    auto found=itemsByObject_.find(id);
    if(found!=itemsByObject_.end())
     transformItems_.insert(transformItems_.end(),found->second.begin(),found->second.end());
   }
-  }
   if(transformItems_.empty()){cancelSelectionTransform();return false;}
   transformDragging_=true;transformHandle_=h;transformBounds_=*bounds;
   transformQuad_=*quad;
   transformAnchor_=h>=8?middle((*quad)[0],(*quad)[2]):QPointF{};
   transformSx_=transformSy_=1.;transformAngle_=0.;
-  // Real operator sessions commonly move multi-selection using center handle.
-  // Keep native Bezier and rotate/scale on the established path; only
-  // translation (h=12) uses one temporary Qt parent for >=32 items.
-  if(!native&&h==12&&transformItems_.size()>=kGroupedDragThreshold&&
+  // One preview group may contain conventional and native paths together.
+  if(h==12&&transformItems_.size()>=kGroupedDragThreshold&&
      !qEnvironmentVariableIsSet("ALENCAR_DISABLE_GROUPED_DRAG")){
    QList<QGraphicsItem*> members;
    members.reserve(qsizetype(transformItems_.size()));
@@ -1141,36 +1146,65 @@ class QtEditorLab final:public QGraphicsView{
   const Key nativeKey=nativeTransformKey_;
   const auto finishedQuad=selectionQuadScene();
   cancelSelectionTransform();
+
+  const bool shapeChange=!ids.empty()&&
+    ((h==12&&QLineF(QPointF{},move).length()>=1e-8)||
+     (h>=8&&std::abs(angle)>=.01)||
+     (h<8&&(std::abs(sx-1.)>=1e-5||std::abs(sy-1.)>=1e-5)));
+  bool nativeChanged=false;
   if(native){
    if(!nativeSession_||!nativeSession_->selected())return;
    const auto keys=nativeSession_->selectedKeys();
    if(std::find(keys.begin(),keys.end(),nativeKey)==keys.end())return;
-   const bool changed=nativeSession_->transformSelectedContours(fromQt(pivot),sx,sy,angle,fromQt(move));
-   if(changed){
-    lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
-    updateNativePaths(true);
-    if(diagnosticEvent)diagnosticEvent(h==12?"bezier_contour_moved":h>=8?"bezier_contour_rotated":"bezier_contour_scaled",1);
-    if(stateChanged)stateChanged();
+  }
+  if(!native&&!shapeChange)return;
+  if(native&&!shapeChange&&std::abs(sx-1.)<1e-10&&std::abs(sy-1.)<1e-10&&
+     std::abs(angle)<1e-10&&QLineF(QPointF{},move).length()<1e-10)return;
+
+  try{
+   // Commit native first; roll it back if the conventional model rejects.
+   if(native)
+    nativeChanged=nativeSession_->transformSelectedContours(fromQt(pivot),sx,sy,angle,fromQt(move));
+   if(shapeChange){
+    if(h==12)editor.moveObjects(ids,fromQt(move));
+    else if(h>=8)editor.rotateObjects(ids,fromQt(pivot),angle);
+    else editor.affineObjects(ids,fromQt(pivot),a,b,c,d);
    }
+  }catch(const std::exception& ex){
+   if(nativeChanged&&nativeSession_)nativeSession_->undo();
+   updateNativePaths(true);rebuild();
+   if(toolWarning)toolWarning(QString("Transformacao mista cancelada: %1").arg(ex.what()));
    return;
   }
-  if(h==12){
-   if(QLineF(QPointF{},move).length()<1e-8)return;
-   editor.moveObjects(ids,fromQt(move));
-  }else if(h>=8){
-   if(std::abs(angle)<.01)return;
-   editor.rotateObjects(ids,fromQt(pivot),angle);
-  }else{
-   if(std::abs(sx-1.)<1e-5&&std::abs(sy-1.)<1e-5)return;
-   editor.affineObjects(ids,fromQt(pivot),a,b,c,d);
+  if(nativeChanged&&shapeChange){
+   lastMixedAction_=true;
+   lastMixedEditorGenerationSeen_=editor.generation;
+   lastMixedNativeUndoCount_=nativeSession_->undoCount();
+   lastMixedNativeRedoCount_=nativeSession_->redoCount();
+   lastNativeAction_=false;
+   lastEditorGenerationSeen_=editor.generation;
+  }else if(nativeChanged){
+   lastMixedAction_=false;
+   lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
+  }else if(shapeChange){
+   lastMixedAction_=false;
+   lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
   }
-  if(finishedQuad){
+  if(finishedQuad&&shapeChange){
    orientedFrame_=*finishedQuad;
    orientedFrameIds_=selected;
    orientedFrameGeneration_=editor.geometryGeneration;
   }
-  rebuild();
-  if(diagnosticEvent)diagnosticEvent(h==12?"shapes_moved":h>=8?"selection_rotated":"selection_scaled",int(ids.size()));
+  if(shapeChange)rebuild();
+  if(nativeChanged)updateNativePaths(true);
+  if(diagnosticEvent){
+   const QString event=nativeChanged&&shapeChange
+     ?(h==12?"mixed_objects_moved":h>=8?"mixed_selection_rotated":"mixed_selection_scaled")
+     :(h==12?(native?"bezier_contours_moved":"shapes_moved")
+       :h>=8?(native?"bezier_contours_rotated":"selection_rotated")
+             :(native?"bezier_contours_scaled":"selection_scaled"));
+   diagnosticEvent(event.toStdString(),int(ids.size()+(native?nativeSession_->selectedKeys().size():0)));
+  }
   if(stateChanged)stateChanged();
  }
  void clearShapePreview(){
@@ -1574,7 +1608,8 @@ public:
   nativePressing_=false;nativeContourPressing_=false;nativeMode_=false;
   nativeEditHandles_=false;
   clearNativeItems();nativeSession_=session;
-  lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
+  lastNativeAction_=false;lastMixedAction_=false;
+  lastEditorGenerationSeen_=editor.generation;
   createNativeItems();
  }
  void enableNative(bool enabled){
@@ -1617,6 +1652,12 @@ public:
    lastNativeAction_=false;
   }
   return lastNativeAction_&&nativeHistoryAvailable(redo);
+ }
+ bool mixedHistoryStateCurrent()const{
+  return lastMixedAction_&&nativeSession_&&
+    editor.generation==lastMixedEditorGenerationSeen_&&
+    nativeSession_->undoCount()==lastMixedNativeUndoCount_&&
+    nativeSession_->redoCount()==lastMixedNativeRedoCount_;
  }
  bool selectAllNativeContours(){
   if(!nativeSession_||!hasNativeDocument()||busy())return false;
@@ -2358,6 +2399,26 @@ public:
  // its Undo/Redo must still target the native history, not polylines.
  void history(bool redo){
   if(busy())return;
+  if(lastMixedAction_){
+   if(!mixedHistoryStateCurrent())lastMixedAction_=false;
+   else{
+    const bool nativeChanged=nativeSession_&&(redo?nativeSession_->redo():nativeSession_->undo());
+    if(!nativeChanged){lastMixedAction_=false;return;}
+    const bool editorChanged=redo?editor.redo():editor.undo();
+    if(!editorChanged){
+     if(redo)nativeSession_->undo();else nativeSession_->redo();
+     lastMixedAction_=false;createNativeItems();return;
+    }
+    lastMixedEditorGenerationSeen_=editor.generation;
+    lastMixedNativeUndoCount_=nativeSession_->undoCount();
+    lastMixedNativeRedoCount_=nativeSession_->redoCount();
+    lastEditorGenerationSeen_=editor.generation;lastNativeAction_=false;
+    nativeSelectedPart_.reset();createNativeItems();active_.reset();selected.clear();rebuild();
+    if(diagnosticEvent)diagnosticEvent(redo?"mixed_redo":"mixed_undo",1);
+    if(stateChanged)stateChanged();
+    return;
+   }
+  }
   if(shouldUseNativeHistory(redo)){nativeHistory(redo);return;}
   if(redo?editor.redo():editor.undo()){
    lastNativeAction_=false;lastEditorGenerationSeen_=editor.generation;
@@ -2647,9 +2708,13 @@ void mousePressEvent(QMouseEvent* e)override{
        e->modifiers().testFlag(Qt::ShiftModifier)||e->modifiers().testFlag(Qt::ControlModifier))){
      e->accept();return;
     }
-    nativeMode_=false;
-    nativeSession_->clearSelection();
-    updateNativeSelection199();
+    const bool additive=e->modifiers().testFlag(Qt::ShiftModifier)||
+                        e->modifiers().testFlag(Qt::ControlModifier);
+    if(!additive){
+     nativeMode_=false;
+     nativeSession_->clearSelection();
+     updateNativeSelection199();
+    }
    }else if(tool==Tool::Select&&nativeEditHandles_){
     // A click away from native edges/handles returns to ordinary selection.
     const Pt at=fromQt(mapToScene(e->position().toPoint()));
