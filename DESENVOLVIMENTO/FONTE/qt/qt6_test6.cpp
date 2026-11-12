@@ -3281,6 +3281,10 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    if(e->key()==Qt::Key_Z){history(e->modifiers().testFlag(Qt::ShiftModifier));e->accept();return;}
    if(e->key()==Qt::Key_Y){history(true);e->accept();return;}
   }
+  if(e->modifiers()==Qt::ControlModifier&&e->key()==Qt::Key_A&&tool==Tool::Select&&nativeMode_&&nativeSession_){
+   nativeSession_->selectAllContours();nativeEditHandles_=false;
+   updateNativeSelection199();if(stateChanged)stateChanged();e->accept();return;
+  }
   if(e->modifiers()==Qt::ControlModifier&&e->key()==Qt::Key_A&&tool==Tool::Select&&!nativeMode_){
    selectAllVisible();e->accept();return;
   }
@@ -10315,6 +10319,22 @@ QJsonObject nativeImportGui199Test(){
        "native selection rebuilt more than the selected contour");
  check(w.view.nativeItemPath(w.curves->committed().contours.at(1).key)==secondPathBeforeSelect,
        "native selection changed an unrelated cubic path");
+ const Key firstNative=w.curves->committed().contours.at(0).key;
+ const Key secondNative=w.curves->committed().contours.at(1).key;
+ check(w.view.selectNativeAt(Pt{20.,25.},false,true),
+       "native additive selection could not pick the second contour");
+ check(w.curves->selectedKeys().size()==2,
+       "native additive selection did not retain both contours");
+ const auto buildsBeforeAll=w.view.nativeFullPathBuilds();
+ w.curves->selectAllContours();w.view.updateNativeSelection199();
+ check(w.curves->selectedKeys().size()==2&&
+       w.curves->selectedKeys().end()!=std::find(w.curves->selectedKeys().begin(),
+          w.curves->selectedKeys().end(),firstNative)&&
+       w.curves->selectedKeys().end()!=std::find(w.curves->selectedKeys().begin(),
+          w.curves->selectedKeys().end(),secondNative),
+       "Ctrl+A native selection did not include every contour");
+ check(w.view.nativeFullPathBuilds()==buildsBeforeAll,
+       "selecting all native contours rebuilt unrelated path geometry");
  const auto& state=w.view.editor.state();
  check(state.layers.count(1)&&state.layers.count(2)&&
        !state.layers.at(1).parametersVerified&&
