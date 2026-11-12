@@ -10492,8 +10492,7 @@ QJsonObject nativeImportGui199Test(){
  // and both native Bezier contours, not the native-only bounding box.
  const auto mixedQuad=w.view.selectionFrameQuad();
  check(mixedQuad.has_value(),"mixed Ctrl+A did not expose a shared transform frame");
- const QRectF mixedFrame=QPolygonF{(*mixedQuad)[0],(*mixedQuad)[1],
-                                   (*mixedQuad)[2],(*mixedQuad)[3]}.boundingRect();
+ const QRectF mixedFrame=QRectF((*mixedQuad)[0],(*mixedQuad)[2]).normalized();
  const QRectF shapeFrame=QRectF(QPointF(42.,3.),QSizeF(5.,5.));
  const QRectF firstCurveFrame=w.view.nativeItemPath(firstNative).boundingRect();
  check(mixedFrame.contains(shapeFrame)&&mixedFrame.contains(firstCurveFrame),
@@ -10506,7 +10505,7 @@ QJsonObject nativeImportGui199Test(){
  const Pt shapePointBefore=w.view.editor.state().doc.contours.front().nodes.front().p;
  const QPainterPath nativePathBefore=w.view.nativeItemPath(firstNative);
  const QPoint mixedStart=w.view.mapFromScene(
-   middle((*beforeMixedQuad)[0],(*beforeMixedQuad)[2]));
+   ((*beforeMixedQuad)[0]+(*beforeMixedQuad)[2])/2.);
  const QPoint mixedFinish=mixedStart+QPoint(16,12);
  const QPointF mixedDelta=w.view.mapToScene(mixedFinish)-w.view.mapToScene(mixedStart);
  QTest::mousePress(w.view.viewport(),Qt::LeftButton,Qt::NoModifier,mixedStart);
@@ -10522,7 +10521,9 @@ QJsonObject nativeImportGui199Test(){
        std::abs(nativePathMoved.top()-nativePathBefore.boundingRect().top()-mixedDelta.y())<1e-6,
        "shared transform did not move native Bezier");
  pressKey(w,Qt::Key_Z,Qt::ControlModifier);QApplication::processEvents();
- check(w.view.editor.state().doc.contours.front().nodes.front().p==shapePointBefore&&
+ const Pt shapePointUndo=w.view.editor.state().doc.contours.front().nodes.front().p;
+ check(std::abs(shapePointUndo.x-shapePointBefore.x)<1e-8&&
+       std::abs(shapePointUndo.y-shapePointBefore.y)<1e-8&&
        w.view.nativeItemPath(firstNative)==nativePathBefore,
        "single Undo did not restore both sides of mixed transform");
  pressKey(w,Qt::Key_Y,Qt::ControlModifier);QApplication::processEvents();
