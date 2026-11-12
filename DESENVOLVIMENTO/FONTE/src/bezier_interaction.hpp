@@ -210,7 +210,7 @@ public:
    }
    d.contours.push_back(std::move(contour));
   });
-  selected_=key;index_.reset();
+  selected_=key;additionalSelected_.clear();index_.reset();
   return key;
  }
  // Append a complete imported vector batch as one native-history transaction.
@@ -242,7 +242,7 @@ public:
     d.contours.push_back(std::move(contour));
    }
   });
-  selected_.reset();index_.reset();preview_.reset();
+  selected_.reset();additionalSelected_.clear();index_.reset();preview_.reset();
  }
  // Nova curva cúbica nativa com âncoras/alças e Ctrl+Z na mesma sessão.
  Key addEditableCubic(Pt a,Pt out,Pt in,Pt b,int objectId,int layer=0){
@@ -257,7 +257,7 @@ public:
    c.nodes.push_back({d.nextId++,b,in,b});
    d.contours.push_back(std::move(c));
   });
-  selected_=key;index_.reset();return key;
+  selected_=key;additionalSelected_.clear();index_.reset();return key;
  }
  bool setLayer(Key key,int layer){
   if(dragging()||layer<0)return false;
@@ -392,7 +392,7 @@ public:
     d.contours.push_back(std::move(right));
    }
   });
-  selected_.reset();index_.reset();
+  selected_.reset();additionalSelected_.clear();index_.reset();
   return true;
  }
  // Remove âncora do contorno selecionado.
@@ -481,7 +481,7 @@ public:
   bool found=false;
   for(const auto& c:committed().contours)if(c.key==key){found=true;break;}
   if(!found)return false;
-  selected_=key;contourMoving_=key;contourStart_=at;preview_=committed();return true;
+  selected_=key;additionalSelected_.clear();contourMoving_=key;contourStart_=at;preview_=committed();return true;
  }
  void updateContourMove(Pt at){
   if(!contourMoving_||!std::isfinite(at.x)||!std::isfinite(at.y))throw std::runtime_error("no curve contour move");
@@ -513,12 +513,12 @@ public:
    if(it==d.contours.end())throw std::runtime_error("curve not found");
    d.contours.erase(it);
   });
-  selected_.reset();index_.reset();return true;
+  selected_.reset();additionalSelected_.clear();index_.reset();return true;
  }
  void replaceDocument(CurveDocument doc){
   if(dragging())cancel();
   history_=CurveHistory(std::move(doc));
-  selected_.reset();
+  selected_.reset();additionalSelected_.clear();
   index_.reset();
  }
 };
