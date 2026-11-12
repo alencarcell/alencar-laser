@@ -1653,7 +1653,7 @@ public:
   if(matches.empty())return false;
   nativeSession_->select(matches.front().key,additive);
   nativeMode_=true;nativeEditHandles_=false;tool=Tool::Select;
-  active_.reset();selected.clear();applySelectionStyles();
+  if(!additive){active_.reset();selected.clear();applySelectionStyles();}
   if(startMove){
    nativeContourPressing_=nativeSession_->startContourMove(matches.front().key,click);
   }
