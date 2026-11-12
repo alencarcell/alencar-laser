@@ -1593,8 +1593,28 @@ public:
   if(!nativeSession_||!hasNativeDocument()||busy())return false;
   nativeSession_->selectAllContours();
   nativeMode_=true;nativeEditHandles_=false;tool=Tool::Select;
-  active_.reset();selected.clear();applySelectionStyles();
+  // Keep conventional objects selected: native and editor selections coexist.
+  applySelectionStyles();
   updateNativeSelection199();
+  viewport()->update();
+  if(stateChanged)stateChanged();
+  return true;
+ }
+ bool selectAllMixed(){
+  if(busy())return false;
+  selected.clear();active_.reset();
+  for(const auto& [id,meta]:editor.state().objects)
+   if(editable(editor.state(),id))selected.insert(id);
+  applySelectionStyles();
+  if(nativeSession_&&hasNativeDocument()){
+   nativeSession_->selectAllContours();
+   nativeMode_=true;nativeEditHandles_=false;tool=Tool::Select;
+   updateNativeSelection199();
+  }else{
+   if(nativeSession_)nativeSession_->clearSelection();
+   nativeMode_=false;nativeEditHandles_=false;
+  }
+  viewport()->update();
   if(stateChanged)stateChanged();
   return true;
  }
@@ -2323,7 +2343,7 @@ public:
   repaintForegroundChange20zb(before,{});
  }
  void selectAllVisible(){
-  if(nativeMode_||busy())return;
+  if(busy())return;
   selected.clear();active_.reset();
   for(const auto& [id,meta]:editor.state().objects)
    if(editable(editor.state(),id))selected.insert(id);
@@ -3309,11 +3329,8 @@ void mouseReleaseEvent(QMouseEvent* e)override{
    if(e->key()==Qt::Key_Z){history(e->modifiers().testFlag(Qt::ShiftModifier));e->accept();return;}
    if(e->key()==Qt::Key_Y){history(true);e->accept();return;}
   }
-  if(e->modifiers()==Qt::ControlModifier&&e->key()==Qt::Key_A&&tool==Tool::Select&&nativeMode_&&nativeSession_){
-   selectAllNativeContours();e->accept();return;
-  }
-  if(e->modifiers()==Qt::ControlModifier&&e->key()==Qt::Key_A&&tool==Tool::Select&&!nativeMode_){
-   selectAllVisible();e->accept();return;
+  if(e->modifiers().testFlag(Qt::ControlModifier)&&e->key()==Qt::Key_A&&tool==Tool::Select){
+   selectAllMixed();e->accept();return;
   }
   if(e->modifiers()==(Qt::ControlModifier|Qt::ShiftModifier)&&e->key()==Qt::Key_I&&tool==Tool::Select&&!nativeMode_){
    invertSelection();e->accept();return;
