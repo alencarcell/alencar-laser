@@ -2601,7 +2601,8 @@ void mousePressEvent(QMouseEvent* e)override{
       if(rasterFrame_)rasterFrame_->setVisible(false);
       if(rasterHandle_)rasterHandle_->setVisible(false);
       e->accept();return;}
-    if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),true)){
+    if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),true,
+       e->modifiers().testFlag(Qt::ShiftModifier)||e->modifiers().testFlag(Qt::ControlModifier))){
      e->accept();return;
     }
     auto hits=clickHits(e->position().toPoint());
