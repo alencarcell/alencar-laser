@@ -8578,6 +8578,33 @@ static QJsonObject refineCurvesTrace198Test(const QString& folder){
    "Handles de Bezier nao controlam suavizacao");
  check(curves.undo()&&curves.committed().contours.empty(),"Undo Bezier falhou");
  check(curves.redo()&&curves.committed().contours.size()==1,"Redo Bezier falhou");
+ // Multi-selection foundation: two native contours, one active reference,
+ // exact anchor/handle translation, and one atomic undo/redo transaction.
+ const Key secondCurve=curves.addEditableCubic({30,0},{36,-10},{44,-10},{50,0},101);
+ curves.select(curveKey,true);
+ const auto selectedNative=curves.selectedKeys();
+ check(selectedNative.size()==2&&curves.selected().has_value()&&
+       *curves.selected()==curveKey,
+       "Selecao aditiva nativa nao preservou dois contornos e objeto ativo");
+ const auto beforeMulti=curves.committed();
+ check(curves.transformSelectedContours({0,0},1,1,0,{5,7}),
+       "Transformacao conjunta nativa nao foi aplicada");
+ check(curves.committed().contours.size()==2&&
+       dist(curves.committed().contours[0].nodes[0].anchor,
+            beforeMulti.contours[0].nodes[0].anchor+Pt{5,7})<1e-9&&
+       dist(curves.committed().contours[1].nodes[0].handleOut,
+            beforeMulti.contours[1].nodes[0].handleOut+Pt{5,7})<1e-9,
+       "Transformacao conjunta perdeu geometria de ancora/alca");
+ check(curves.undo()&&
+       dist(curves.committed().contours[0].nodes[0].anchor,
+            beforeMulti.contours[0].nodes[0].anchor)<1e-9&&
+       dist(curves.committed().contours[1].nodes[0].handleOut,
+            beforeMulti.contours[1].nodes[0].handleOut)<1e-9,
+       "Undo nao restaurou ambos os contornos nativos");
+ check(curves.redo()&&
+       dist(curves.committed().contours[0].nodes[0].anchor,
+            beforeMulti.contours[0].nodes[0].anchor+Pt{5,7})<1e-9,
+       "Redo nao reaplicou transformacao conjunta");
  // Confirmar fluxo REAL da GUI: ativar coleta, escolher Tesoura e clicar no vazio.
  LabWindow ui(Document{});ui.show();QApplication::processEvents();
  auto* enabled=ui.findChild<QCheckBox*>("diagnostics_enable");
