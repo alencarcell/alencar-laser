@@ -10413,6 +10413,10 @@ QJsonObject nativeImportGui199Test(){
  check(w.view.selectAllMixed(),"Ctrl+A mixed selection action failed");
  check(w.view.selected.size()==1&&w.curves->selectedKeys().size()==2,
        "Ctrl+A did not select conventional object and native Bezier contours together");
+ w.view.clearSelection();
+ pressKey(w,Qt::Key_A,Qt::ControlModifier);
+ check(w.view.selected.size()==1&&w.curves->selectedKeys().size()==2,
+       "Qt Ctrl+A key event did not select conventional and native objects together");
  const auto& state=w.view.editor.state();
  check(state.layers.count(1)&&state.layers.count(2)&&
        !state.layers.at(1).parametersVerified&&
