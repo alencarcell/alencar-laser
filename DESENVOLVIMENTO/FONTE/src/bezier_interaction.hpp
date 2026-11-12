@@ -156,17 +156,28 @@ class CurveDragSession {
  std::optional<Key> contourMoving_;
  Pt contourStart_{};
  std::optional<Key> selected_;
+ std::set<Key> additionalSelected_;
  Pt startPosition_{};
 public:
  explicit CurveDragSession(CurveDocument doc):history_(std::move(doc)){}
  const CurveDocument& committed()const{return history_.document();}
  const CurveDocument& visible()const{return preview_?*preview_:history_.document();}
- std::optional<Key> selected()const{return selected_;}
- void clearSelection(){if(dragging())return;selected_.reset();}
+ std::optional<Key> selected()const{return selected_;} // objeto ativo (referência)
+ std::vector<Key> selectedKeys()const{
+  std::vector<Key> keys(additionalSelected_.begin(),additionalSelected_.end());
+  if(selected_&&std::find(keys.begin(),keys.end(),*selected_)==keys.end())keys.push_back(*selected_);
+  return keys;
+ }
+ void clearSelection(){if(dragging())return;selected_.reset();additionalSelected_.clear();}
  void reconcileSelection(){
-  if(!selected_)return;
-  for(const auto& c:committed().contours)if(c.key==*selected_)return;
-  selected_.reset();
+  auto exists=[&](Key key){return std::any_of(committed().contours.begin(),committed().contours.end(),
+    [&](const CurveContour& c){return c.key==key;});};
+  if(selected_&&!exists(*selected_))selected_.reset();
+  for(auto it=additionalSelected_.begin();it!=additionalSelected_.end();)
+   if(!exists(*it))it=additionalSelected_.erase(it);else ++it;
+  if(!selected_&&!additionalSelected_.empty()){
+   selected_=*additionalSelected_.begin();additionalSelected_.erase(additionalSelected_.begin());
+  }
  }
  bool dragging()const{return dragging_.has_value()||contourMoving_.has_value();}
  // Draw Lines interaction: corner nodes are clicks, smooth nodes derive
@@ -260,10 +271,23 @@ public:
   });
   index_.reset();return true;
  }
- void select(Key key){
+ void select(Key key,bool additive=false){
   if(dragging())throw std::runtime_error("cannot select while dragging");
-  for(auto& c:history_.document().contours)if(c.key==key){selected_=key;return;}
+  for(const auto& c:history_.document().contours)if(c.key==key){
+   if(!additive)additionalSelected_.clear();
+   else if(selected_&&*selected_!=key)additionalSelected_.insert(*selected_);
+   additionalSelected_.erase(key);
+   selected_=key;return;
+  }
   throw std::runtime_error("selection key not found");
+ }
+ void selectAllContours(){
+  if(dragging())throw std::runtime_error("cannot select all while dragging");
+  additionalSelected_.clear();selected_.reset();
+  for(const auto& c:committed().contours){
+   if(!selected_)selected_=c.key;
+   else additionalSelected_.insert(c.key);
+  }
  }
  bool start(const CurveHit& h){
   if(dragging()||!selected_||*selected_!=h.key||h.part==CurvePart::Edge)return false;
@@ -418,6 +442,40 @@ public:
  }
  // Move um contorno inteiro (âncoras E alças) com uma única entrada no histórico.
  // A prévia não altera o documento confirmado nem o índice espacial.
+ // Transform all selected native contours in one native-history transaction.
+ // Cubic anchors AND both handles are transformed exactly; no flattening.
+ bool transformSelectedContours(Pt pivot,double sx,double sy,double degrees,Pt offset={}){
+  if(dragging()||!selected_)return false;
+  if(!std::isfinite(pivot.x)||!std::isfinite(pivot.y)||
+     !std::isfinite(sx)||!std::isfinite(sy)||
+     !std::isfinite(degrees)||!std::isfinite(offset.x)||!std::isfinite(offset.y)||
+     sx<=0.0||sy<=0.0||sx>100.0||sy>100.0)
+   throw std::invalid_argument("invalid native multi-selection transform");
+  const auto keys=selectedKeys();
+  std::set<Key> requested(keys.begin(),keys.end());
+  for(const auto& key:requested)
+   if(std::none_of(committed().contours.begin(),committed().contours.end(),
+      [&](const CurveContour& c){return c.key==key;}))
+    throw std::runtime_error("selected native contour missing");
+  if(std::abs(sx-1)<1e-10&&std::abs(sy-1)<1e-10&&
+     std::abs(degrees)<1e-10&&dist(offset,{})<1e-10)return false;
+  const double angle=degrees*std::numbers::pi/180.0;
+  const double cs=std::cos(angle),sn=std::sin(angle);
+  const auto changePoint=[&](Pt pt){
+   const double dx=(pt.x-pivot.x)*sx,dy=(pt.y-pivot.y)*sy;
+   return Pt{pivot.x+dx*cs-dy*sn+offset.x,
+             pivot.y+dx*sn+dy*cs+offset.y};
+  };
+  history_.change([&](CurveDocument& d){
+   for(auto& contour:d.contours)if(requested.count(contour.key))
+    for(auto& node:contour.nodes){
+     node.anchor=changePoint(node.anchor);
+     node.handleIn=changePoint(node.handleIn);
+     node.handleOut=changePoint(node.handleOut);
+    }
+  });
+  index_.reset();return true;
+ }
  bool startContourMove(Key key,Pt at){
   if(dragging()||!std::isfinite(at.x)||!std::isfinite(at.y))return false;
   bool found=false;
