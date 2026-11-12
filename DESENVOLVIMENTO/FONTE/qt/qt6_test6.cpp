@@ -696,8 +696,37 @@ class QtEditorLab final:public QGraphicsView{
    else if(ctrl){if(!selected.erase(id))selected.insert(id);}
    else selected.insert(id);
   }
-  active_.reset();applySelectionStyles();viewport()->update();
-  if(diagnosticEvent)diagnosticEvent("marquee_selected",int(selected.size()));
+  // Native Bezier contours participate in the same marquee gesture.
+  std::set<Key> nativeFound,nativeNext;
+  if(nativeSession_&&hasNativeDocument()){
+   for(const auto& contour:nativeSession_->visible().contours){
+    const auto item=nativeItems_.find(contour.key);
+    if(item==nativeItems_.end()||!item->second->isVisible())continue;
+    const QRectF bounds=item->second->sceneBoundingRect();
+    const bool inside=area.contains(bounds);
+    bool cross=false;
+    if(area.intersects(bounds)){
+     const QPainterPath world=item->second->mapToScene(item->second->path());
+     cross=world.intersects(area)||area.contains(bounds);
+    }
+    if(crossing?cross:inside)nativeFound.insert(contour.key);
+   }
+   if(shift||ctrl){
+    const auto current=nativeSession_->selectedKeys();
+    nativeNext.insert(current.begin(),current.end());
+   }
+   for(const auto& key:nativeFound){
+    if(shift&&ctrl)nativeNext.erase(key);
+    else if(ctrl){if(!nativeNext.erase(key))nativeNext.insert(key);}
+    else nativeNext.insert(key);
+   }
+   nativeSession_->clearSelection();
+   for(const auto& key:nativeNext)nativeSession_->select(key,true);
+  }
+  nativeMode_=!nativeNext.empty();
+  nativeEditHandles_=false;
+  active_.reset();applySelectionStyles();updateNativeSelection199();viewport()->update();
+  if(diagnosticEvent)diagnosticEvent("marquee_selected",int(selected.size()+nativeNext.size()));
   if(stateChanged)stateChanged();
  }
  void clearPolyline(){
@@ -2337,9 +2366,12 @@ public:
   }
  }
  void clearSelection(){
-  if(!active_&&selected.empty()&&styledObjects_.empty())return;
+  const bool hasNative=nativeSession_&&!nativeSession_->selectedKeys().empty();
+  if(!active_&&selected.empty()&&styledObjects_.empty()&&!hasNative)return;
   const QRect before=foregroundOverlayDirtyRect20zb();
   active_.reset();selected.clear();applySelectionStyles();
+  if(nativeSession_)nativeSession_->clearSelection();
+  nativeMode_=false;nativeEditHandles_=false;updateNativeSelection199();
   repaintForegroundChange20zb(before,{});
  }
  void selectAllVisible(){
@@ -10378,6 +10410,9 @@ QJsonObject nativeImportGui199Test(){
        "Ctrl+A native selection did not include every contour");
  check(w.view.nativeFullPathBuilds()==buildsBeforeAll,
        "selecting all native contours rebuilt unrelated path geometry");
+ check(w.view.selectAllMixed(),"Ctrl+A mixed selection action failed");
+ check(w.view.selected.size()==1&&w.curves->selectedKeys().size()==2,
+       "Ctrl+A did not select conventional object and native Bezier contours together");
  const auto& state=w.view.editor.state();
  check(state.layers.count(1)&&state.layers.count(2)&&
        !state.layers.at(1).parametersVerified&&
