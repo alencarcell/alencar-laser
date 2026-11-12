@@ -10376,6 +10376,12 @@ QJsonObject nativeImportGui199Test(){
        "Native GUI changed rejected LightBurn group source");
  w.importNativeLightBurn199(file,false);QApplication::processEvents();
  check(w.view.editor.state().doc.contours.empty(),"native GUI imported polylines instead of native cubics");
+ // Native LBRN2 import intentionally replaces the conventional editor state.
+ // Create the conventional object AFTER import so this fixture truly exercises
+ // Ctrl+A across both independent geometry stores.
+ w.view.editor.rectangle({42.,3.},5.,5.);w.view.rebuild();QApplication::processEvents();
+ check(w.view.editor.state().objects.size()==1,
+       "native GUI mixed-selection conventional fixture missing after import");
  check(w.curves&&w.curves->committed().contours.size()==2,"native GUI curve document mismatch");
  check(w.view.nativeItemCount()==2&&w.view.hasNativeDocument(),
        "native GUI scene native curves were not rendered");
