@@ -839,16 +839,28 @@ class QtEditorLab final:public QGraphicsView{
   if(!has)return {};
   return QRectF(QPointF(minX,minY),QPointF(maxX,maxY));
  }
+ // Bounds of every selected native contour; active key is the reference only.
+ std::optional<QRectF> nativeSelectedBounds()const{
+  if(!nativeSession_)return {};
+  const auto keys=nativeSession_->selectedKeys();
+  if(keys.empty())return {};
+  std::optional<QRectF> bounds;
+  for(const auto& key:keys){
+   const auto it=nativeItems_.find(key);
+   if(it==nativeItems_.end())continue;
+   const QRectF rect=it->second->path().boundingRect();
+   bounds=bounds?bounds->united(rect):rect;
+  }
+  return bounds;
+ }
  // Mesmo preview visual dos itens: sem alteracao dos nos antes de mouseRelease.
  std::optional<QRectF> selectionDisplayBounds()const{
   if(shapeDragging_&&shapePreviewBounds_)
    return shapePreviewBounds_->translated(shapePreviewDelta_);
   if(transformDragging_)
    return selectionPreviewTransform_.mapRect(transformBounds_);
-  if(nativeMode_&&!nativeEditHandles_&&nativeSession_&&nativeSession_->selected()){
-   const auto it=nativeItems_.find(*nativeSession_->selected());
-   if(it!=nativeItems_.end())return it->second->path().boundingRect();
-  }
+  if(nativeMode_&&!nativeEditHandles_&&nativeSession_&&nativeSession_->selected())
+   return nativeSelectedBounds();
   return selectedBounds();
  }
  static std::array<QPointF,4> quadFromRect(const QRectF& r){
@@ -865,8 +877,8 @@ class QtEditorLab final:public QGraphicsView{
    return points;
   }
   if(nativeMode_&&!nativeEditHandles_&&nativeSession_&&nativeSession_->selected()){
-   const auto it=nativeItems_.find(*nativeSession_->selected());
-   if(it!=nativeItems_.end())return quadFromRect(it->second->path().boundingRect());
+   const auto bounds=nativeSelectedBounds();
+   if(bounds)return quadFromRect(*bounds);
   }
   if(shapeDragging_&&cachedDragOverlay199_&&dragOverlayBaseQuad199_&&
      shouldUseLocalDragOverlay199()){
@@ -962,11 +974,13 @@ class QtEditorLab final:public QGraphicsView{
   }
   if(h<0)return false;
   if(native){
-   nativeTransformKey_=*nativeSession_->selected();
-   const auto it=nativeItems_.find(nativeTransformKey_);
-   if(it==nativeItems_.end())return false;
+   nativeTransformKey_=*nativeSession_->selected(); // active reference
+   for(const auto& key:nativeSession_->selectedKeys()){
+    const auto it=nativeItems_.find(key);
+    if(it!=nativeItems_.end())transformItems_.push_back(it->second);
+   }
+   if(transformItems_.empty())return false;
    nativeTransformDragging_=true;
-   transformItems_.push_back(it->second);
   }else{
   transformIds_=expandedSelection();
   for(int id:transformIds_){
@@ -1099,8 +1113,10 @@ class QtEditorLab final:public QGraphicsView{
   const auto finishedQuad=selectionQuadScene();
   cancelSelectionTransform();
   if(native){
-   if(!nativeSession_||!nativeSession_->selected()||*nativeSession_->selected()!=nativeKey)return;
-   const bool changed=nativeSession_->transformSelectedContour(fromQt(pivot),sx,sy,angle,fromQt(move));
+   if(!nativeSession_||!nativeSession_->selected())return;
+   const auto keys=nativeSession_->selectedKeys();
+   if(std::find(keys.begin(),keys.end(),nativeKey)==keys.end())return;
+   const bool changed=nativeSession_->transformSelectedContours(fromQt(pivot),sx,sy,angle,fromQt(move));
    if(changed){
     lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
     updateNativePaths(true);
