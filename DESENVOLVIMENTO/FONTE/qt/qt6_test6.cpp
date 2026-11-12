@@ -10321,17 +10321,16 @@ QJsonObject nativeImportGui199Test(){
        "native selection changed an unrelated cubic path");
  const Key firstNative=w.curves->committed().contours.at(0).key;
  const Key secondNative=w.curves->committed().contours.at(1).key;
- check(w.view.selectNativeAt(Pt{20.,25.},false,true),
+ check(w.view.selectNativeAt(Pt{22.,25.},false,true),
        "native additive selection could not pick the second contour");
  check(w.curves->selectedKeys().size()==2,
        "native additive selection did not retain both contours");
  const auto buildsBeforeAll=w.view.nativeFullPathBuilds();
  w.curves->selectAllContours();w.view.updateNativeSelection199();
- check(w.curves->selectedKeys().size()==2&&
-       w.curves->selectedKeys().end()!=std::find(w.curves->selectedKeys().begin(),
-          w.curves->selectedKeys().end(),firstNative)&&
-       w.curves->selectedKeys().end()!=std::find(w.curves->selectedKeys().begin(),
-          w.curves->selectedKeys().end(),secondNative),
+ const auto allNativeKeys=w.curves->selectedKeys();
+ check(allNativeKeys.size()==2&&
+       std::find(allNativeKeys.begin(),allNativeKeys.end(),firstNative)!=allNativeKeys.end()&&
+       std::find(allNativeKeys.begin(),allNativeKeys.end(),secondNative)!=allNativeKeys.end(),
        "Ctrl+A native selection did not include every contour");
  check(w.view.nativeFullPathBuilds()==buildsBeforeAll,
        "selecting all native contours rebuilt unrelated path geometry");
