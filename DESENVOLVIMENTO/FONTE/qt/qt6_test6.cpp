@@ -387,7 +387,7 @@ class QtEditorLab final:public QGraphicsView{
  QPointF rasterStartMouse_;
  std::map<Key,QGraphicsPathItem*> nativeItems_;
  std::optional<CurveHit> nativeSelectedPart_;
- std::optional<Key> nativeStyledKey_;
+ std::set<Key> nativeStyledKeys_;
  // Diagnostics only: count QPainterPath constructions, not scene repaints.
  // No paths, coordinates, or project data leave the local process.
  quint64 nativeFullPathBuilds_=0,nativeSelectivePathBuilds_=0;
@@ -759,32 +759,36 @@ class QtEditorLab final:public QGraphicsView{
  void updateNativePaths(bool all){
   if(!nativeSession_)return;
   QElapsedTimer nativePathProfiler;nativePathProfiler.start();
-  auto selectedKey=nativeSession_->selected();
-  // Durante drag, apenas o item ativo recebe setPath; selecao troca estilo
-  // somente do item anterior/novo, nunca dos 575 outros contornos.
-  bool selectionChanged=nativeStyledKey_!=selectedKey;
-  QRect nativeSelectionDirty;
+  const auto selectedKeysVector=nativeSession_->selectedKeys();
+  const std::set<Key> selectedKeys(selectedKeysVector.begin(),selectedKeysVector.end());
+  // During drag, only changed geometry gets setPath. Selection styling is
+  // updated only for keys entering/leaving the set, preserving large-document performance.
+  const bool selectionChanged=nativeStyledKeys_!=selectedKeys;
+  std::set<Key> dirtyKeys;
   if(selectionChanged&&!all&&!nativeLegacyFullViewportOnSelect_){
-   nativeSelectionDirty=nativeSelectionDirtyRect199(nativeStyledKey_);
-   nativeSelectionDirty=nativeSelectionDirty.united(nativeSelectionDirtyRect199(selectedKey));
+   std::set_symmetric_difference(nativeStyledKeys_.begin(),nativeStyledKeys_.end(),
+      selectedKeys.begin(),selectedKeys.end(),
+      std::inserter(dirtyKeys,dirtyKeys.end()));
   }
+  QRect nativeSelectionDirty;
+  for(const auto& key:dirtyKeys)
+   nativeSelectionDirty=nativeSelectionDirty.united(nativeSelectionDirtyRect199(key));
   for(const auto& c:nativeSession_->visible().contours){
    auto it=nativeItems_.find(c.key);if(it==nativeItems_.end())continue;
-   const bool selected=selectedKey&&*selectedKey==c.key;
-   const bool wasSelected=nativeStyledKey_&&*nativeStyledKey_==c.key;
+   const bool selected=selectedKeys.count(c.key)>0;
    if(all||selected){
     it->second->setPath(nativeCurvePath(c));
     if(all)++nativeFullPathBuilds_;
     else ++nativeSelectivePathBuilds_;
    }
-   if(all||(selectionChanged&&(selected||wasSelected))){
+   if(all||(selectionChanged&&dirtyKeys.count(c.key))){
     QPen pen(selected?QColor(239,109,25):QColor(71,91,105));
     pen.setCosmetic(true);pen.setWidthF(selected?2.0:1.2);
     pen.setCapStyle(Qt::RoundCap);pen.setJoinStyle(Qt::RoundJoin);
     it->second->setPen(pen);it->second->setZValue(selected?30:3);
    }
   }
-  nativeStyledKey_=selectedKey;
+  nativeStyledKeys_=selectedKeys;
   if(all)viewport()->update();
   else if(selectionChanged){
    if(nativeLegacyFullViewportOnSelect_){
@@ -1287,7 +1291,7 @@ private:
  void clearNativeItems(){
   nativeContourPressing_=false;
   for(auto& entry:nativeItems_){scene_.removeItem(entry.second);delete entry.second;}
-  nativeItems_.clear();nativeSelectedPart_.reset();nativeStyledKey_.reset();nativePressing_=false;
+  nativeItems_.clear();nativeSelectedPart_.reset();nativeStyledKeys_.clear();nativePressing_=false;
  }
  void createNativeItems(){
   clearNativeItems();
@@ -1567,11 +1571,11 @@ public:
   }
   return lastNativeAction_&&nativeHistoryAvailable(redo);
  }
- bool selectNativeAt(Pt click,bool startMove){
+ bool selectNativeAt(Pt click,bool startMove,bool additive=false){
   if(!nativeSession_||!hasNativeDocument())return false;
   const auto matches=nativeSession_->pickEdges(click,nativePxPerMm(),viewport()->devicePixelRatioF(),8);
   if(matches.empty())return false;
-  nativeSession_->select(matches.front().key);
+  nativeSession_->select(matches.front().key,additive);
   nativeMode_=true;nativeEditHandles_=false;tool=Tool::Select;
   active_.reset();selected.clear();applySelectionStyles();
   if(startMove){
@@ -2560,7 +2564,8 @@ void mousePressEvent(QMouseEvent* e)override{
    if(tool==Tool::Select&&!nativeEditHandles_){
     if(beginSelectionTransform(e->position())){e->accept();return;}
     // Normal Select must pick both native Bézier and regular polylines.
-    if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),true)){
+    if(selectNativeAt(fromQt(mapToScene(e->position().toPoint())),true,
+       e->modifiers().testFlag(Qt::ShiftModifier)||e->modifiers().testFlag(Qt::ControlModifier))){
      e->accept();return;
     }
     nativeMode_=false;
