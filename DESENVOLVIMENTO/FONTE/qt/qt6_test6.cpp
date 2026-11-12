@@ -10488,6 +10488,48 @@ QJsonObject nativeImportGui199Test(){
  pressKey(w,Qt::Key_A,Qt::ControlModifier);
  check(w.view.selected.size()==1&&w.curves->selectedKeys().size()==2,
        "Qt Ctrl+A key event did not select conventional and native objects together");
+ // The visible selection frame must be the union of the conventional rectangle
+ // and both native Bezier contours, not the native-only bounding box.
+ const auto mixedQuad=w.view.selectionFrameQuad();
+ check(mixedQuad.has_value(),"mixed Ctrl+A did not expose a shared transform frame");
+ const QRectF mixedFrame=QPolygonF{(*mixedQuad)[0],(*mixedQuad)[1],
+                                   (*mixedQuad)[2],(*mixedQuad)[3]}.boundingRect();
+ const QRectF shapeFrame=QRectF(QPointF(42.,3.),QSizeF(5.,5.));
+ const QRectF firstCurveFrame=w.view.nativeItemPath(firstNative).boundingRect();
+ check(mixedFrame.contains(shapeFrame)&&mixedFrame.contains(firstCurveFrame),
+       "mixed selection frame omitted conventional or native geometry");
+ // Translate both models through one shared handle and verify coordinated undo/redo.
+ w.view.setTransform(QTransform::fromScale(4.,4.));
+ w.view.centerOn(QPointF(24.,15.));QApplication::processEvents();
+ const auto beforeMixedQuad=w.view.selectionFrameQuad();
+ check(beforeMixedQuad.has_value(),"mixed transform frame disappeared before drag");
+ const Pt shapePointBefore=w.view.editor.state().doc.contours.front().nodes.front().p;
+ const QPainterPath nativePathBefore=w.view.nativeItemPath(firstNative);
+ const QPoint mixedStart=w.view.mapFromScene(
+   middle((*beforeMixedQuad)[0],(*beforeMixedQuad)[2]));
+ const QPoint mixedFinish=mixedStart+QPoint(16,12);
+ const QPointF mixedDelta=w.view.mapToScene(mixedFinish)-w.view.mapToScene(mixedStart);
+ QTest::mousePress(w.view.viewport(),Qt::LeftButton,Qt::NoModifier,mixedStart);
+ QTest::mouseMove(w.view.viewport(),mixedFinish);QApplication::processEvents();
+ QTest::mouseRelease(w.view.viewport(),Qt::LeftButton,Qt::NoModifier,mixedFinish);
+ QApplication::processEvents();
+ const Pt shapePointMoved=w.view.editor.state().doc.contours.front().nodes.front().p;
+ const QRectF nativePathMoved=w.view.nativeItemPath(firstNative).boundingRect();
+ check(std::abs(shapePointMoved.x-shapePointBefore.x-mixedDelta.x())<1e-6&&
+       std::abs(shapePointMoved.y-shapePointBefore.y-mixedDelta.y())<1e-6,
+       "shared transform did not move conventional shape");
+ check(std::abs(nativePathMoved.left()-nativePathBefore.boundingRect().left()-mixedDelta.x())<1e-6&&
+       std::abs(nativePathMoved.top()-nativePathBefore.boundingRect().top()-mixedDelta.y())<1e-6,
+       "shared transform did not move native Bezier");
+ pressKey(w,Qt::Key_Z,Qt::ControlModifier);QApplication::processEvents();
+ check(w.view.editor.state().doc.contours.front().nodes.front().p==shapePointBefore&&
+       w.view.nativeItemPath(firstNative)==nativePathBefore,
+       "single Undo did not restore both sides of mixed transform");
+ pressKey(w,Qt::Key_Y,Qt::ControlModifier);QApplication::processEvents();
+ check(std::abs(w.view.editor.state().doc.contours.front().nodes.front().p.x-shapePointMoved.x)<1e-6&&
+       std::abs(w.view.nativeItemPath(firstNative).boundingRect().left()-nativePathMoved.left())<1e-6,
+       "single Redo did not restore both sides of mixed transform");
+ pressKey(w,Qt::Key_Z,Qt::ControlModifier);QApplication::processEvents();
  const auto& state=w.view.editor.state();
  check(state.layers.count(1)&&state.layers.count(2)&&
        !state.layers.at(1).parametersVerified&&
