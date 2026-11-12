@@ -1204,7 +1204,7 @@ class QtEditorLab final:public QGraphicsView{
      :(h==12?(native?"bezier_contours_moved":"shapes_moved")
        :h>=8?(native?"bezier_contours_rotated":"selection_rotated")
              :(native?"bezier_contours_scaled":"selection_scaled"));
-   diagnosticEvent(event.toStdString(),int(ids.size()+(native?nativeSession_->selectedKeys().size():0)));
+   diagnosticEvent(event,int(ids.size()+(native?nativeSession_->selectedKeys().size():0)));
   }
   if(stateChanged)stateChanged();
  }
