@@ -2405,7 +2405,7 @@ public:
     return;
    }
    // No native curve under the pointer: allow conventional paths to be tested below.
-   if(nativeScissorHover_||scissorPreview_)clearScissorHover();
+   if(nativeScissorHover_)clearScissorHover();
   }
   if(nativeMode_){clearScissorHover();return;}
   if(scissorIndexVersion_!=editor.generation){
