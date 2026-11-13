@@ -89,6 +89,112 @@ inline std::vector<CubicIntersection> findCubicIntersections(
  std::sort(out.begin(),out.end(),[](const auto& x,const auto& y){return std::tie(x.ta,x.tb)<std::tie(y.ta,y.tb);});
  return out;
 }
+struct NativeScissorSpan {
+ Key key{};
+ int startEdge=-1; double startT=0;
+ int endEdge=-1; double endT=0;
+ bool closed=false;
+};
+struct NativeScissorCrossing { double position=0; Pt point{}; };
+inline std::optional<NativeScissorSpan> findNativeScissorSpan(
+ const CurveDocument& doc,const CurveHit& cursorHit,
+ double intersectionToleranceMm=0.01,double boundaryToleranceMm=0.25){
+ if(cursorHit.part!=CurvePart::Edge||cursorHit.edge<0||
+    !(cursorHit.t>=0&&cursorHit.t<=1)||
+    !(intersectionToleranceMm>0)||!(boundaryToleranceMm>=0)||
+    !std::isfinite(intersectionToleranceMm)||!std::isfinite(boundaryToleranceMm))
+  return std::nullopt;
+ const CurveContour* target=nullptr;
+ for(const auto& c:doc.contours)if(c.key==cursorHit.key){target=&c;break;}
+ if(!target||std::size_t(cursorHit.edge)>=edgeCount(*target))return std::nullopt;
+ const std::size_t targetEdges=edgeCount(*target);
+ std::vector<NativeScissorCrossing> crossings;
+ constexpr double endpointEpsilon=1e-5;
+ auto add=[&](std::size_t edge,double t,Pt point){
+  if(t<=endpointEpsilon||t>=1.0-endpointEpsilon)return;
+  crossings.push_back({double(edge)+t,point});
+ };
+ for(std::size_t i=0;i<targetEdges;++i){
+  const Cubic a=edgeAt(*target,i);
+  for(const auto& other:doc.contours){
+   const bool self=other.key==target->key;
+   const std::size_t otherEdges=edgeCount(other);
+   for(std::size_t j=0;j<otherEdges;++j){
+    if(self){
+     if(j<=i)continue;
+     const std::size_t delta=j-i;
+     if(delta==1||(target->closed&&delta==targetEdges-1))continue;
+    }
+    const auto hits=findCubicIntersections(a,edgeAt(other,j),intersectionToleranceMm);
+    for(const auto& hit:hits){
+     if(hit.ta<=endpointEpsilon||hit.ta>=1.0-endpointEpsilon||
+        hit.tb<=endpointEpsilon||hit.tb>=1.0-endpointEpsilon)continue;
+     add(i,hit.ta,hit.point);
+     if(self)add(j,hit.tb,hit.point);
+    }
+   }
+  }
+ }
+ if(crossings.size()<2)return std::nullopt;
+ std::sort(crossings.begin(),crossings.end(),[](const auto& a,const auto& b){
+  return a.position<b.position;
+ });
+ std::vector<NativeScissorCrossing> unique;
+ for(const auto& crossing:crossings){
+  if(!unique.empty()&&std::abs(unique.back().position-crossing.position)<1e-4){
+   if(dist(unique.back().point,crossing.point)>intersectionToleranceMm*3.0)
+    continue;
+   continue;
+  }
+  unique.push_back(crossing);
+ }
+ if(unique.size()<2)return std::nullopt;
+ const double cursorPosition=double(cursorHit.edge)+cursorHit.t;
+ auto next=std::lower_bound(unique.begin(),unique.end(),cursorPosition,
+   [](const NativeScissorCrossing& x,double p){return x.position<p;});
+ if(next!=unique.end()&&std::abs(next->position-cursorPosition)<1e-5)return std::nullopt;
+ if(!target->closed&&(next==unique.begin()||next==unique.end()))return std::nullopt;
+ auto previous=next==unique.begin()?unique.end()-1:next-1;
+ if(next==unique.end())next=unique.begin();
+ if(dist(cursorHit.point,previous->point)<boundaryToleranceMm||
+    dist(cursorHit.point,next->point)<boundaryToleranceMm)return std::nullopt;
+ return NativeScissorSpan{target->key,int(previous->position),
+   previous->position-std::floor(previous->position),int(next->position),
+   next->position-std::floor(next->position),target->closed};
+}
+inline std::pair<Cubic,Cubic> splitCubicExact(Cubic c,double t){
+ Pt a=lerp(c.p0,c.p1,t),b=lerp(c.p1,c.p2,t),d=lerp(c.p2,c.p3,t);
+ Pt ab=lerp(a,b,t),bd=lerp(b,d,t),m=lerp(ab,bd,t);
+ return {{c.p0,a,ab,m},{m,bd,d,c.p3}};
+}
+inline Cubic subCubicExact(Cubic c,double from,double to){
+ if(!(from>=0&&to<=1&&from<to))throw std::invalid_argument("invalid cubic subrange");
+ if(from<=0&&to>=1)return c;
+ auto left=splitCubicExact(c,to).first;
+ if(from<=0)return left;
+ return splitCubicExact(left,from/to).second;
+}
+inline std::vector<std::pair<Cubic,bool>> nativeScissorSpanGeometry(
+ const CurveDocument& doc,const NativeScissorSpan& span){
+ const CurveContour* c=nullptr;
+ for(const auto& candidate:doc.contours)if(candidate.key==span.key){c=&candidate;break;}
+ if(!c||span.startEdge<0||span.endEdge<0||
+    std::size_t(span.startEdge)>=edgeCount(*c)||std::size_t(span.endEdge)>=edgeCount(*c)||
+    !(span.startT>0&&span.startT<1)||!(span.endT>0&&span.endT<1))
+  return {};
+ std::vector<std::pair<Cubic,bool>> out;
+ std::size_t edge=std::size_t(span.startEdge),count=0,total=edgeCount(*c);
+ while(count<=total){
+  const bool first=count==0,last=edge==std::size_t(span.endEdge);
+  const double from=first?span.startT:0.0;
+  const double to=last?span.endT:1.0;
+  if(to>from+1e-10)
+   out.push_back({subCubicExact(edgeAt(*c,edge),from,to),c->edgeKind[edge]!=0});
+  if(last)break;
+  edge=(edge+1)%total;++count;
+ }
+ return out;
+}
 inline double physicalPixelScale(double pxPerMm,double devicePixelRatio){
  if(!(pxPerMm>0)||!std::isfinite(pxPerMm)||!(devicePixelRatio>0)||!std::isfinite(devicePixelRatio))
   throw std::invalid_argument("invalid display scale");
