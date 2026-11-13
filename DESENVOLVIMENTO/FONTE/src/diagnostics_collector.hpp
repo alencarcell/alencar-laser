@@ -55,7 +55,7 @@ public:
    "bezier_scissor_no_intersection","bezier_scissor_rejected",
    "vector_text_created","groups_ungrouped","layer_mode_visual_changed",
    "lightburn_geometry_imported","marquee_selected","pencil_stroke_created",
-   "tool_scissors_activated","tool_bezier_activated","bezier_curve_created","image_trace_started",
+   "tool_scissors_activated","tool_edge_trim_activated","tool_bezier_activated","bezier_curve_created","image_trace_started",
    "image_trace_created","image_trace_cancelled",
    // Native Bezier v5 edits use the same local opt-in diagnostics contract.
    // Keep the allowlist strict: these names never include path coordinates.
