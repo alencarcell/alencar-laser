@@ -57,7 +57,23 @@ int main(){
   req(std::abs(crossings.front().point.x-5.0)<0.08&&
       std::abs(crossings.front().point.y-5.0)<0.08,
       "intersection point must be refined on native cubics");
-  std::cout<<"PASS: native cuts and cubic intersection detection; no hardware\n";
+  // Two foreign paths delimit a removable native span on one target edge.
+  CurveDragSession nativeSpan(CurveDocument{});
+  const Key target=nativeSpan.addEditablePath({node(0,0),node(10,0)},false,101);
+  nativeSpan.addEditablePath({node(3,-2),node(3,2)},false,102);
+  nativeSpan.addEditablePath({node(7,-2),node(7,2)},false,103);
+  CurveHit cursor=edgeHit(target,0);cursor.t=.5;cursor.point={5,0};
+  const auto planned=findNativeScissorSpan(nativeSpan.committed(),cursor);
+  req(planned.has_value(),"two crossings must delimit native scissor span");
+  const auto preview=nativeScissorSpanGeometry(nativeSpan.committed(),*planned);
+  req(preview.size()==1&&std::abs(preview.front().first.p0.x-3)<0.02&&
+      std::abs(preview.front().first.p3.x-7)<0.02,
+      "preview must contain only the intersection-delimited segment");
+  CurveHit oneCross=edgeHit(target,0);oneCross.t=.2;oneCross.point={2,0};
+  req(!findNativeScissorSpan(CurveDocument{nativeSpan.committed().contours[0],
+      nativeSpan.committed().contours[1]},oneCross),
+      "one crossing is insufficient for a safe cut");
+  std::cout<<"PASS: native cuts, cubic intersections and native span planning; no hardware\n";
   return 0;
  }catch(const std::exception& e){
   std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;
