@@ -515,7 +515,7 @@ public:
   index_.reset();
   return created;
  }
- // Native scissors REMOVE the clicked mathematical edge between anchors.
+ // EdgeTrim J removes the clicked mathematical edge between anchors.
  // The old split-at-click preserved the entire curve, appearing to do nothing.
  // Surviving cubics remain exact and Undo restores the complete original.
  // Crossings-based multi-edge trimming remains future work.
