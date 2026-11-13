@@ -493,6 +493,7 @@ class QtEditorLab final:public QGraphicsView{
  uint64_t scissorHoverEvents_=0;
  std::optional<QPoint> scissorLastHoverPosition_;
  std::optional<Hit> edgeTrimHover20z_;
+ std::optional<CurveHit> edgeTrimNativeHover20z_;
  std::optional<QPoint> edgeTrimPosition20z_;
  QGraphicsPathItem* edgeTrimPreview20z_=nullptr;
  // 20za: visual-only, zoom-stable node markers; never part of the document.
@@ -2180,7 +2181,7 @@ public:
  }
  // 20z: CYAN marks exactly one edge between consecutive nodes.
  void clearEdgeTrimHover20z(){
-  edgeTrimHover20z_.reset();edgeTrimPosition20z_.reset();
+  edgeTrimHover20z_.reset();edgeTrimNativeHover20z_.reset();edgeTrimPosition20z_.reset();
   edgeTrimGeneration20z_=std::numeric_limits<uint64_t>::max();
   edgeTrimViewportTransform20z_=QTransform();
   if(edgeTrimPreview20z_){
@@ -2210,7 +2211,59 @@ public:
  }
  bool edgeTrimPreviewVisible20z()const{return edgeTrimPreview20z_!=nullptr;}
  void updateEdgeTrimHover20z(QPoint at){
-  if(tool!=Tool::EdgeTrim||nativeMode_||busy()){clearEdgeTrimHover20z();return;}
+  if(tool!=Tool::EdgeTrim||busy()){clearEdgeTrimHover20z();return;}
+  // 20zb: native Bezier contours participate in J (Entre nos).
+  // J removes exactly one mathematical edge between anchors; K is the
+  // separate intersection-delimited scissors workflow.
+  if(nativeSession_&&hasNativeDocument()){
+   const auto hits=nativeSession_->pickEdges(fromQt(mapToScene(at)),
+       nativePxPerMm(),viewport()->devicePixelRatioF(),9);
+   if(!hits.empty()){
+    const CurveHit hit=hits.front();
+    const auto* curve=findNativeCurve(nativeSession_->committed(),hit.key);
+    if(curve&&hit.edge>=0&&std::size_t(hit.edge)<edgeCount(*curve)){
+     if(edgeTrimNativeHover20z_&&edgeTrimPreview20z_&&
+        edgeTrimNativeHover20z_->key==hit.key&&
+        edgeTrimNativeHover20z_->edge==hit.edge&&
+        edgeTrimViewportTransform20z_==viewportTransform()){
+      edgeTrimPosition20z_=at;return;
+     }
+     clearEdgeTrimHover20z();
+     const Cubic edge=edgeAt(*curve,std::size_t(hit.edge));
+     QPainterPath path;path.moveTo(toQt(edge.p0));
+     if(curve->edgeKind[std::size_t(hit.edge)]==1)
+      path.cubicTo(toQt(edge.p1),toQt(edge.p2),toQt(edge.p3));
+     else path.lineTo(toQt(edge.p3));
+     QPen pen(QColor("#22D3EE"),3);pen.setCosmetic(true);
+     pen.setCapStyle(Qt::RoundCap);pen.setJoinStyle(Qt::RoundJoin);
+     edgeTrimPreview20z_=scene_.addPath(path,pen);
+     edgeTrimPreview20z_->setZValue(46);
+     edgeTrimPreview20z_->setAcceptedMouseButtons(Qt::NoButton);
+     auto endpoint=[&](Pt p){
+      const double radius=5.;
+      QPen border(QColor("#F8FAFC"),1.5);border.setCosmetic(true);
+      auto* marker=scene_.addEllipse(QRectF(-radius,-radius,2*radius,2*radius),
+                                     border,QBrush(QColor("#22D3EE")));
+      marker->setPos(toQt(p));
+      marker->setFlag(QGraphicsItem::ItemIgnoresTransformations,true);
+      marker->setAcceptedMouseButtons(Qt::NoButton);marker->setZValue(48);
+      edgeTrimNodeMarkers20za_.push_back(marker);
+     };
+     endpoint(edge.p0);endpoint(edge.p3);
+     edgeTrimNativeHover20z_=hit;edgeTrimPosition20z_=at;
+     edgeTrimGeneration20z_=editor.generation;
+     edgeTrimViewportTransform20z_=viewportTransform();
+     viewport()->setToolTip("Entre nos (J): Bezier nativa. CIANO = aresta exata entre duas ancoras; clique remove somente essa aresta. K continua sendo a tesoura por cruzamentos.");
+     viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+     return;
+    }
+   }
+   clearEdgeTrimHover20z();
+   viewport()->setToolTip("Entre nos (J): nenhuma aresta Bezier nativa sob o cursor.");
+   viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+   return;
+  }
+  if(nativeMode_){clearEdgeTrimHover20z();return;}
   std::optional<Hit> chosen;
   for(const Hit& hit:clickHits(at)){
    const Contour* c=get(editor.state().doc,hit.key);
@@ -2771,11 +2824,31 @@ void mousePressEvent(QMouseEvent* e)override{
   if(tool==Tool::EdgeTrim){
    const QPoint at=e->position().toPoint();
    if(!edgeTrimCurrent20z(at))updateEdgeTrimHover20z(at);
-   if(!edgeTrimHover20z_){
+   if(!edgeTrimHover20z_&&!edgeTrimNativeHover20z_){
     if(toolWarning)toolWarning("Entre nós: aproxime o cursor de uma aresta editável. Sem ciano, não corta.");
     e->accept();return;
    }
    try{
+    if(edgeTrimNativeHover20z_&&nativeSession_){
+     const CurveHit target=*edgeTrimNativeHover20z_;
+     int next=1;
+     for(const auto& [id,_]:editor.state().objects)next=std::max(next,id+1);
+     for(const auto& c:nativeSession_->committed().contours)
+      next=std::max(next,c.key.object+1);
+     clearEdgeTrimHover20z();
+     if(!nativeSession_->cutContourAtEdge(target,next)){
+      if(toolWarning)toolWarning("Entre nós: não foi possível remover a aresta Bézier.");
+      e->accept();return;
+     }
+     nativeMode_=false;nativeEditHandles_=false;
+     createNativeItems();
+     lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
+     if(diagnosticEvent)diagnosticEvent("bezier_edge_between_nodes_cut",1);
+     if(scissorDetail)scissorDetail("cut_between_nodes_native",target.key.object,target.edge);
+     if(toolWarning)toolWarning("Aresta Bézier entre âncoras removida. Ctrl+Z restaura.");
+     if(stateChanged)stateChanged();
+     e->accept();return;
+    }
     const Hit target=*edgeTrimHover20z_;
     clearEdgeTrimHover20z();
     const int result=editor.removePolylineEdge(target.key,target.segment);
@@ -8715,7 +8788,7 @@ static QJsonObject refineCurvesTrace198Test(const QString& folder){
    "vector_text_created","image_trace_started","image_trace_created"}){
   check(collector.record(name,1),"Evento esperado nao chegou ao coletor");
  }
- check(collector.records().size()==7,"Historico diagnostico incompleto");
+ check(collector.records().size()==8,"Historico diagnostico incompleto");
  check(collector.counters().at("scissor_no_safe_span")==1,"Motivo da Tesoura nao contabilizado");
  // A interface deve permitir criar/editar uma Bezier verdadeira, com handles.
  CurveDragSession curves(CurveDocument{});
