@@ -66,6 +66,16 @@ int main(){
   const auto planned=findNativeScissorSpan(nativeSpan.committed(),cursor);
   req(planned.has_value(),"two crossings must delimit native scissor span");
   const auto preview=nativeScissorSpanGeometry(nativeSpan.committed(),*planned);
+  if(preview.size()!=1){
+   std::cerr<<"DEBUG span edges="<<planned->startEdge<<","<<planned->endEdge
+            <<" t="<<planned->startT<<","<<planned->endT
+            <<" preview_parts="<<preview.size()<<"\\n";
+  }else{
+   std::cerr<<"DEBUG preview x="<<preview.front().first.p0.x
+            <<" -> "<<preview.front().first.p3.x
+            <<" y="<<preview.front().first.p0.y
+            <<" -> "<<preview.front().first.p3.y<<"\\n";
+  }
   req(preview.size()==1&&std::abs(preview.front().first.p0.x-3)<0.02&&
       std::abs(preview.front().first.p3.x-7)<0.02,
       "preview must contain only the intersection-delimited segment");
