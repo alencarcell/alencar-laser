@@ -9335,6 +9335,44 @@ static QJsonObject drawAndJoin198Test(){
  check(native.undo()&&native.committed().contours.empty()&&
        native.redo()&&native.committed().contours.size()==1,
        "Novo desenho Bézier sem undo/redo");
+ // Real Qt path: native K previews and cuts only the span between two crossings.
+ CurveDragSession nativeK(CurveDocument{});
+ const Key nativeTarget=nativeK.addEditablePath({node(0,0),node(10,0)},false,101);
+ nativeK.addEditablePath({node(3,-2),node(3,2)},false,102);
+ nativeK.addEditablePath({node(7,-2),node(7,2)},false,103);
+ QtEditorLab nativeKView(Document{});
+ nativeKView.attachNative(&nativeK);
+ nativeKView.resize(640,480);nativeKView.show();QApplication::processEvents();
+ nativeKView.setTransform(QTransform::fromScale(20,20));
+ nativeKView.centerOn(5,0);
+ nativeKView.setTool(QtEditorLab::Tool::Scissors);
+ QApplication::processEvents();
+ const QPoint nativeKPoint=nativeKView.mapFromScene(QPointF(5,0));
+ QTest::mouseMove(nativeKView.viewport(),nativeKPoint);
+ QApplication::processEvents();
+ check(nativeKView.scissorDisplayedSpanIsCurrentAt(nativeKPoint)&&
+       nativeKView.scissorPreviewColor20x()==QColor("#22D3EE"),
+       "Tesoura K nativa nao exibiu previsualizacao ciano entre cruzamentos");
+ const QPainterPath verticalLeft=nativeKView.nativeItemPath({102,0});
+ const QPainterPath verticalRight=nativeKView.nativeItemPath({103,0});
+ QTest::mouseClick(nativeKView.viewport(),Qt::LeftButton,Qt::NoModifier,nativeKPoint);
+ QApplication::processEvents();
+ check(nativeK.committed().contours.size()==4&&nativeKView.nativeItemCount()==4,
+       "Tesoura K nativa nao criou dois remanescentes independentes");
+ check(std::abs(nativeKView.nativeItemPath(nativeTarget).boundingRect().right()-3.0)<0.03&&
+       std::abs(nativeKView.nativeItemPath({104,0}).boundingRect().left()-7.0)<0.03,
+       "Tesoura K nativa removeu trecho diferente dos limites dos cruzamentos");
+ check(nativeKView.nativeItemPath({102,0})==verticalLeft&&
+       nativeKView.nativeItemPath({103,0})==verticalRight,
+       "Tesoura K modificou os caminhos cruzadores");
+ check(nativeKView.shouldUseNativeHistory(false),"K perdeu historico nativo para Undo");
+ nativeKView.history(false);
+ check(nativeK.committed().contours.size()==3&&nativeKView.nativeItemCount()==3,
+       "Ctrl+Z/model history nao restaurou os tres caminhos nativos");
+ nativeKView.history(true);
+ check(nativeK.committed().contours.size()==4&&nativeKView.nativeItemCount()==4,
+       "Ctrl+Y/model history nao refez o corte de intersecoes");
+ nativeKView.close();
  // Real Qt viewport event path: no machine or CAM; success requires that
  // the tool is reachable, and mouse gestures create geometries.
  LabWindow ui(Document{});
@@ -9400,50 +9438,61 @@ static QJsonObject drawAndJoin198Test(){
  check(!ui.findChild<QPushButton*>("nodes")->isVisible()&&
        !ui.findChild<QPushButton*>("bezier")->isVisible(),
        "Ferramentas legadas ainda aparecem na barra");
- // Scissors removes the clicked mathematical edge (no flattening).
- // Real user workflow: opt-in diagnostic collector ON, tool click, then
- // keyboard Ctrl+Z/Y while the last native contour is GONE and nativeMode OFF.
+ // K must not destroy an isolated native Bezier without two crossings.
+ // J keeps the explicit anchor-to-anchor removal behavior.
  auto* diagnosticCapture=ui.findChild<QCheckBox*>("diagnostics_enable");
  check(diagnosticCapture!=nullptr,"Ativar coleta de diagnostico nao localizado");
  diagnosticCapture->setChecked(true);
  clickButton(ui,"scissors");
  const QPoint scissorPt=ui.view.mapFromScene(
      ui.view.nativeItemPath(nativeKey).pointAtPercent(.35));
+ QTest::mouseMove(viewport,scissorPt);
  QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,scissorPt);
  QApplication::processEvents();
+ check(ui.view.nativeItemCount()==1&&ui.view.hasNativeDocument(),
+       "Tesoura K removeu Bezier sem dois cruzamentos reais");
+ auto noSpanEvents=ui.captureDocument().value("counts").toObject();
+ check(noSpanEvents.value("bezier_scissor_no_intersection").toInt()>=1,
+       "Tesoura K nao registrou bloqueio de corte sem intersecoes");
+ clickButton(ui,"edge_trim");
+ const QPoint trimPt=ui.view.mapFromScene(
+     ui.view.nativeItemPath(nativeKey).pointAtPercent(.35));
+ QTest::mouseMove(viewport,trimPt);
+ QTest::mouseClick(viewport,Qt::LeftButton,Qt::NoModifier,trimPt);
+ QApplication::processEvents();
  check(ui.view.nativeItemCount()==0&&!ui.view.hasNativeDocument(),
-       "Tesoura deve remover realmente a unica aresta Bezier da forma");
+       "Entre nos (J) nao removeu a aresta nativa entre ancoras");
  const auto cutDiagnostic=ui.captureDocument();
  const auto attempts=cutDiagnostic.value("scissor_attempts").toArray();
  check(attempts.size()>0&&
-       attempts.last().toObject().value("result").toString()=="cut_native"&&
+       attempts.last().toObject().value("result").toString()=="cut_between_nodes_native"&&
        attempts.last().toObject().value("object_id").toInt()==nativeKey.object,
-       "Coleta nao registrou Tesoura Bezier nativa sem coordenadas");
+       "Coleta nao registrou corte J Bezier nativo sem coordenadas");
  check(ui.view.shouldUseNativeHistory(false),
-       "Ultimo corte Bezier perdeu historico nativo ao remover a forma inteira");
+       "Ultimo corte J perdeu historico nativo ao remover a forma inteira");
  pressKey(ui,Qt::Key_Z,Qt::ControlModifier);
  check(ui.view.nativeItemCount()==1&&
        ui.view.nativeItemPath(nativeKey)==initialCurve,
-       "Ctrl+Z apos Tesoura nao restaurou curva Bezier");
+       "Ctrl+Z apos corte J nao restaurou curva Bezier");
  pressKey(ui,Qt::Key_Y,Qt::ControlModifier);
  check(ui.view.nativeItemCount()==0&&!ui.view.hasNativeDocument(),
-       "Ctrl+Y nao refez o corte Bezier real");
+       "Ctrl+Y nao refez o corte J");
  clickButton(ui,"undo");
  check(ui.view.nativeItemCount()==1&&
        ui.view.nativeItemPath(nativeKey)==initialCurve,
-       "Botao Desfazer nao restaurou geometria Bezier apos corte");
+       "Botao Desfazer nao restaurou geometria Bezier apos corte J");
  clickButton(ui,"redo");
  check(ui.view.nativeItemCount()==0&&!ui.view.hasNativeDocument(),
-       "Botao Refazer nao reaplicou o corte Bezier");
+       "Botao Refazer nao reaplicou o corte J");
  clickButton(ui,"undo");
  check(ui.view.nativeItemCount()==1&&
        ui.view.nativeItemPath(nativeKey)==initialCurve,
        "Desfazer final nao recuperou Bezier original");
  const auto events=ui.captureDocument().value("counts").toObject();
- check(events.value("bezier_contour_scissor_cut").toInt()>=1&&
+ check(events.value("bezier_edge_between_nodes_cut").toInt()>=1&&
        events.value("bezier_undo").toInt()>=2&&
        events.value("bezier_redo").toInt()>=2,
-       "Coletor nao contou Tesoura e historico nativos");
+       "Coletor nao contou Tesoura J e historico nativos");
  diagnosticCapture->setChecked(false);
  clickButton(ui,"select");
  const QPoint hitAgain=ui.view.mapFromScene(
