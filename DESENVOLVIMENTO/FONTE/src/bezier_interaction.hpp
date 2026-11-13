@@ -63,7 +63,12 @@ inline std::vector<CubicIntersection> findCubicIntersections(
  for(std::size_t i=1;i<sa.size();++i){
   Pt p=sa[i-1].p,r=sa[i].p-p;double rr=norm2(r);if(rr<=1e-24)continue;
   for(std::size_t j=1;j<sb.size();++j){
-   Pt q=sb[j-1].p,s=sb[j].p-sb[j-1].p;double den=r.x*s.y-r.y*s.x;
+   Pt q=sb[j-1].p,s=sb[j].p-sb[j-1].p;
+   if(std::max(p.x,sa[i].p.x)+toleranceMm<std::min(q.x,sb[j].p.x)||
+      std::max(q.x,sb[j].p.x)+toleranceMm<std::min(p.x,sa[i].p.x)||
+      std::max(p.y,sa[i].p.y)+toleranceMm<std::min(q.y,sb[j].p.y)||
+      std::max(q.y,sb[j].p.y)+toleranceMm<std::min(p.y,sa[i].p.y))continue;
+   double den=r.x*s.y-r.y*s.x;
    if(std::abs(den)<1e-14)continue;Pt qp=q-p;
    double u=(qp.x*s.y-qp.y*s.x)/den,v=(qp.x*r.y-qp.y*r.x)/den;
    if(u< -1e-9||u>1+1e-9||v< -1e-9||v>1+1e-9)continue;
