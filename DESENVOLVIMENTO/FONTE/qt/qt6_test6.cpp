@@ -4771,10 +4771,10 @@ public:
      bezierToolActive_=true;view.enableNative(true);
      captureEvent("tool_bezier_activated");
      status->setText("Bézier: arraste âncoras/alças | Alt alterna | Shift insere | Delete exclui");});
-  compact(editorGrid,3,0,"scissors","✂ Tesoura","Trecho CIANO = recorte até as interseções (K). Bézier: remove aresta nativa. Ctrl+Z desfaz.",
+  compact(editorGrid,3,0,"scissors","✂ Tesoura","K: corte o trecho CIANO delimitado por dois cruzamentos, inclusive em Bézier nativa. J: remove a aresta entre âncoras. Ctrl+Z desfaz.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::Scissors);
      captureEvent("tool_scissors_activated");
-     status->setText("Tesoura (K): CIANO = trecho entre cruzamentos. Ctrl+Z desfaz.");});
+     status->setText("Tesoura (K): CIANO = trecho entre dois cruzamentos, inclusive em Bézier. J remove entre âncoras. Ctrl+Z desfaz.");});
   compact(editorGrid,5,0,"edge_trim","✂ Entre nós","J: remova somente UMA aresta entre dois nós consecutivos, sem cruzamentos. Prévia CIANO; Ctrl+Z desfaz.",
     [this]{bezierToolActive_=false;view.enableNative(false);view.setTool(QtEditorLab::Tool::EdgeTrim);
      captureEvent("tool_edge_trim_activated");
