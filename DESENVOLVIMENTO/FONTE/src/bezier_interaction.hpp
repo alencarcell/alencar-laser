@@ -184,8 +184,10 @@ inline std::vector<std::pair<Cubic,bool>> nativeScissorSpanGeometry(
   return {};
  std::vector<std::pair<Cubic,bool>> out;
  std::size_t edge=std::size_t(span.startEdge),count=0,total=edgeCount(*c);
+ const bool sameEdgeWrap=span.closed&&span.startEdge==span.endEdge&&span.endT<span.startT;
  while(count<=total){
-  const bool first=count==0,last=edge==std::size_t(span.endEdge);
+  const bool first=count==0;
+  const bool last=edge==std::size_t(span.endEdge)&&(!sameEdgeWrap||count>0);
   const double from=first?span.startT:0.0;
   const double to=last?span.endT:1.0;
   if(to>from+1e-10)
@@ -538,6 +540,85 @@ public:
     d.contours.push_back(std::move(right));
    }
   });
+  selected_.reset();additionalSelected_.clear();index_.reset();
+  return true;
+ }
+ // Cut the cursor-delimited span between two genuine intersections.
+ // Splits boundary cubics with De Casteljau and commits one atomic Undo record.
+ bool cutContourSpan(const NativeScissorSpan& span,int newObjectId){
+  if(dragging()||newObjectId<=0||span.startEdge<0||span.endEdge<0||
+     !(span.startT>0&&span.startT<1)||!(span.endT>0&&span.endT<1))return false;
+  std::size_t contourIndex=committed().contours.size();
+  for(std::size_t i=0;i<committed().contours.size();++i)
+   if(committed().contours[i].key==span.key){contourIndex=i;break;}
+  if(contourIndex>=committed().contours.size())return false;
+  const auto& original=committed().contours[contourIndex];
+  if(original.closed!=span.closed||std::size_t(span.startEdge)>=edgeCount(original)||
+     std::size_t(span.endEdge)>=edgeCount(original))return false;
+  const double startPosition=double(span.startEdge)+span.startT;
+  const double endPosition=double(span.endEdge)+span.endT;
+  const bool wraps=original.closed&&endPosition<startPosition;
+  if(!original.closed&&!(startPosition<endPosition))return false;
+  const std::size_t firstEdge=std::size_t(std::min(startPosition,endPosition));
+  const std::size_t lastEdge=std::size_t(std::max(startPosition,endPosition));
+  const double lowT=startPosition<endPosition?span.startT:span.endT;
+  const double highT=startPosition<endPosition?span.endT:span.startT;
+  const std::size_t lowEdge=std::size_t(std::min(startPosition,endPosition));
+  const std::size_t highEdge=std::size_t(std::max(startPosition,endPosition));
+  (void)firstEdge;(void)lastEdge;
+  if(lowEdge==highEdge&&!(highT>lowT))return false;
+  if(!wraps&&!original.closed&&startPosition>=endPosition)return false;
+  for(const auto& c:committed().contours)
+   if(c.key.object==newObjectId)return false;
+  try{
+   history_.change([&](CurveDocument& d){
+    // Split the later parameter first so the earlier edge index remains stable.
+    const int64_t highId=splitEdge(d,contourIndex,highEdge,highT);
+    const double adjustedLowT=lowEdge==highEdge?lowT/highT:lowT;
+    const int64_t lowId=splitEdge(d,contourIndex,lowEdge,adjustedLowT);
+    CurveContour& c=d.contours[contourIndex];
+    std::size_t startIndex=c.nodes.size(),endIndex=c.nodes.size();
+    for(std::size_t i=0;i<c.nodes.size();++i){
+     if(c.nodes[i].id==lowId)endIndex=i;
+     if(c.nodes[i].id==highId)startIndex=i;
+    }
+    if(span.startEdge+span.startT<span.endEdge+span.endT){
+     startIndex=lowId==c.nodes[startIndex].id?startIndex:startIndex;
+     endIndex=lowId==c.nodes[endIndex].id?endIndex:endIndex;
+    }else{
+     // The span starts at the higher parameter and wraps through the seam.
+     std::swap(startIndex,endIndex);
+    }
+    if(startIndex>=c.nodes.size()||endIndex>=c.nodes.size()||startIndex==endIndex)
+     throw std::runtime_error("native scissor split points missing");
+    if(c.closed){
+     CurveContour kept;kept.key=c.key;kept.closed=false;kept.layer=c.layer;
+     std::size_t at=endIndex,steps=0;
+     kept.nodes.push_back(c.nodes[at]);
+     while(at!=startIndex&&steps<c.nodes.size()){
+      kept.edgeKind.push_back(c.edgeKind[at]);
+      at=(at+1)%c.nodes.size();kept.nodes.push_back(c.nodes[at]);++steps;
+     }
+     if(at!=startIndex||kept.nodes.size()<2)
+      throw std::runtime_error("invalid closed native scissor remainder");
+     c=std::move(kept);
+    }else{
+     if(startIndex>=endIndex)throw std::runtime_error("invalid open native scissor order");
+     CurveContour left;left.key=c.key;left.closed=false;left.layer=c.layer;
+     left.nodes.assign(c.nodes.begin(),c.nodes.begin()+static_cast<std::ptrdiff_t>(startIndex+1));
+     left.edgeKind.assign(c.edgeKind.begin(),c.edgeKind.begin()+static_cast<std::ptrdiff_t>(startIndex));
+     CurveContour right;right.closed=false;right.layer=c.layer;
+     right.nodes.assign(c.nodes.begin()+static_cast<std::ptrdiff_t>(endIndex),c.nodes.end());
+     right.edgeKind.assign(c.edgeKind.begin()+static_cast<std::ptrdiff_t>(endIndex),c.edgeKind.end());
+     const bool keepLeft=left.nodes.size()>=2,keepRight=right.nodes.size()>=2;
+     if(keepLeft&&keepRight){
+      right.key={newObjectId,0};c=std::move(left);d.contours.push_back(std::move(right));
+     }else if(keepLeft){c=std::move(left);}
+     else if(keepRight){right.key=c.key;c=std::move(right);}
+     else d.contours.erase(d.contours.begin()+static_cast<std::ptrdiff_t>(contourIndex));
+    }
+   });
+  }catch(...){return false;}
   selected_.reset();additionalSelected_.clear();index_.reset();
   return true;
  }
