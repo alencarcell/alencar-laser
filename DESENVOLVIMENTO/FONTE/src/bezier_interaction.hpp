@@ -73,7 +73,7 @@ inline std::vector<CubicIntersection> findCubicIntersections(
    for(int k=0;k<10;++k){
     Pt pa=cubicPoint(a,ta),pb=cubicPoint(b,tb),da=deriv(a,ta),db=deriv(b,tb),delta=pb-pa;
     double det=da.y*db.x-da.x*db.y;if(std::abs(det)<1e-16)break;
-    double dta=(delta.x*db.y-delta.y*db.x)/det;
+    double dta=(db.x*delta.y-db.y*delta.x)/det;
     double dtb=(da.y*delta.x-da.x*delta.y)/det;
     if(!std::isfinite(dta)||!std::isfinite(dtb))break;
     ta=std::clamp(ta+dta,0.,1.);tb=std::clamp(tb+dtb,0.,1.);
