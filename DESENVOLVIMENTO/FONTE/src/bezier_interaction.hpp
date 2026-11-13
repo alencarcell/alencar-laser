@@ -583,12 +583,10 @@ public:
      if(c.nodes[i].id==highId)startIndex=i;
     }
     if(span.startEdge+span.startT<span.endEdge+span.endT){
-     startIndex=lowId==c.nodes[startIndex].id?startIndex:startIndex;
-     endIndex=lowId==c.nodes[endIndex].id?endIndex:endIndex;
-    }else{
-     // The span starts at the higher parameter and wraps through the seam.
+     // The selected span follows increasing contour order.
      std::swap(startIndex,endIndex);
     }
+    // Otherwise a closed contour span crosses the seam: high parameter to low.
     if(startIndex>=c.nodes.size()||endIndex>=c.nodes.size()||startIndex==endIndex)
      throw std::runtime_error("native scissor split points missing");
     if(c.closed){
