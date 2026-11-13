@@ -138,7 +138,7 @@ inline std::optional<NativeScissorSpan> findNativeScissorSpan(
   crossings.push_back({double(edge)+t,point});
  };
  for(std::size_t i=0;i<targetEdges;++i){
-  const Cubic a=edgeAt(*target,i);
+  const Cubic a=intersectionEdgeAt(*target,i);
   for(const auto& other:doc.contours){
    const bool self=other.key==target->key;
    const std::size_t otherEdges=edgeCount(other);
