@@ -489,6 +489,11 @@ class QtEditorLab final:public QGraphicsView{
  ScissorSpanPlanner scissorPlanner_;
  uint64_t scissorIndexVersion_=std::numeric_limits<uint64_t>::max();
  std::optional<ScissorSpan> scissorHover_;
+ std::optional<NativeScissorSpan> nativeScissorHover_;
+ std::optional<QPoint> nativeScissorPosition_;
+ QTransform nativeScissorViewportTransform_;
+ size_t nativeScissorUndoCount_=std::numeric_limits<size_t>::max();
+ size_t nativeScissorRedoCount_=std::numeric_limits<size_t>::max();
  QGraphicsPathItem* scissorPreview_=nullptr;
  uint64_t scissorHoverEvents_=0;
  std::optional<QPoint> scissorLastHoverPosition_;
@@ -2136,9 +2141,15 @@ public:
  // 20w: commit the exact safe interval that was visibly highlighted
  // when the pointer has not moved. Never accept stale scene geometry.
  bool scissorDisplayedSpanIsCurrentAt(QPoint at)const{
-  return tool==Tool::Scissors&&!nativeMode_&&!busy()&&
-         bool(scissorHover_)&&scissorPreview_!=nullptr&&
-         scissorIndexVersion_==editor.generation&&
+  if(tool!=Tool::Scissors||nativeMode_||busy()||!scissorPreview_)return false;
+  if(nativeScissorHover_&&nativeSession_&&hasNativeDocument()){
+   return nativeScissorPosition_&&
+     (*nativeScissorPosition_-at).manhattanLength()<=1&&
+     nativeScissorViewportTransform_==viewportTransform()&&
+     nativeScissorUndoCount_==nativeSession_->undoCount()&&
+     nativeScissorRedoCount_==nativeSession_->redoCount();
+  }
+  return bool(scissorHover_)&&scissorIndexVersion_==editor.generation&&
          scissorLastHoverPosition_&&
          (*scissorLastHoverPosition_-at).manhattanLength()<=1;
  }
@@ -2175,7 +2186,9 @@ public:
   return out.str();
  }
  void clearScissorHover(){
-  scissorHover_.reset();
+  scissorHover_.reset();nativeScissorHover_.reset();nativeScissorPosition_.reset();
+  nativeScissorViewportTransform_=QTransform();
+  nativeScissorUndoCount_=nativeScissorRedoCount_=std::numeric_limits<size_t>::max();
   if(scissorPreview_){scene_.removeItem(scissorPreview_);delete scissorPreview_;scissorPreview_=nullptr;}
   viewport()->setCursor(Qt::ArrowCursor);
  }
@@ -2337,33 +2350,64 @@ public:
  void updateScissorHover(QPoint where){
   ++scissorHoverEvents_;
   scissorLastHoverPosition_=where;
-  if(tool!=Tool::Scissors||nativeMode_||busy()){clearScissorHover();return;}
-  // Preview the full mathematical Bezier edge that the click will REMOVE.
-  // Never imply that splitting a cubic is equivalent to deleting it.
-  if(nativeSession_&&hasNativeDocument()){
+  if(tool!=Tool::Scissors||busy()){clearScissorHover();return;}
+  // Native Bezier K: highlight only the interval delimited by two real crossings.
+  if(nativeSession_&&hasNativeDocument()&&!nativeMode_){
    const auto hits=nativeSession_->pickEdges(fromQt(mapToScene(where)),
        nativePxPerMm(),viewport()->devicePixelRatioF(),9);
    if(!hits.empty()){
-    const auto& hit=hits.front();
-    const auto* curve=findNativeCurve(nativeSession_->committed(),hit.key);
-    if(curve&&hit.edge>=0&&std::size_t(hit.edge)<edgeCount(*curve)){
-     const Cubic edge=edgeAt(*curve,std::size_t(hit.edge));
-     QPainterPath preview;preview.moveTo(toQt(edge.p0));
-     if(curve->edgeKind[std::size_t(hit.edge)]==1)
-      preview.cubicTo(toQt(edge.p1),toQt(edge.p2),toQt(edge.p3));
-     else preview.lineTo(toQt(edge.p3));
-     clearScissorHover();
-     QPen pen(QColor("#22D3EE"),3);pen.setCosmetic(true);
-     pen.setCapStyle(Qt::RoundCap);pen.setJoinStyle(Qt::RoundJoin);
-     scissorPreview_=scene_.addPath(preview,pen);
-     scissorPreview_->setZValue(45);
-     scissorPreview_->setAcceptedMouseButtons(Qt::NoButton);
-     viewport()->setToolTip("Tesoura: CIANO indica aresta Bezier removivel. LARANJA e selecao; caminhos independentes permanecem separados.");
-     viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
-     return;
+    const CurveHit& hit=hits.front();
+    const auto span=findNativeScissorSpan(nativeSession_->committed(),hit);
+    if(span){
+     const auto geometry=nativeScissorSpanGeometry(nativeSession_->committed(),*span);
+     if(!geometry.empty()){
+      const bool same=nativeScissorHover_&&
+       nativeScissorHover_->key==span->key&&
+       nativeScissorHover_->startEdge==span->startEdge&&
+       nativeScissorHover_->endEdge==span->endEdge&&
+       std::abs(nativeScissorHover_->startT-span->startT)<1e-8&&
+       std::abs(nativeScissorHover_->endT-span->endT)<1e-8&&
+       nativeScissorPosition_&&(*nativeScissorPosition_-where).manhattanLength()<=1&&
+       nativeScissorViewportTransform_==viewportTransform()&&
+       nativeScissorUndoCount_==nativeSession_->undoCount()&&
+       nativeScissorRedoCount_==nativeSession_->redoCount();
+      if(same)return;
+      clearScissorHover();
+      QPainterPath colored;bool started=false;
+      for(const auto& entry:geometry){
+       const Cubic& segment=entry.first;
+       if(!started){colored.moveTo(toQt(segment.p0));started=true;}
+       if(entry.second)colored.cubicTo(toQt(segment.p1),toQt(segment.p2),toQt(segment.p3));
+       else colored.lineTo(toQt(segment.p3));
+      }
+      if(started){
+       QPen highlight(QColor("#22D3EE"),3);highlight.setCosmetic(true);
+       highlight.setCapStyle(Qt::RoundCap);highlight.setJoinStyle(Qt::RoundJoin);
+       scissorPreview_=scene_.addPath(colored,highlight);
+       scissorPreview_->setZValue(45);
+       scissorPreview_->setAcceptedMouseButtons(Qt::NoButton);
+       nativeScissorHover_=*span;nativeScissorPosition_=where;
+       nativeScissorViewportTransform_=viewportTransform();
+       nativeScissorUndoCount_=nativeSession_->undoCount();
+       nativeScissorRedoCount_=nativeSession_->redoCount();
+       if(diagnosticEvent)diagnosticEvent("bezier_intersection_detected",1);
+       viewport()->setToolTip("Tesoura K: CIANO = trecho Bézier entre dois cruzamentos. Clique remove apenas esse trecho; Ctrl+Z restaura. J continua removendo a aresta entre âncoras.");
+       viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+       return;
+      }
+     }
     }
+    clearScissorHover();
+    if(diagnosticEvent)diagnosticEvent("bezier_scissor_rejected",1);
+    if(scissorDetail)scissorDetail("bezier_no_safe_span",hit.key.object,hit.edge);
+    viewport()->setToolTip("Tesoura K: sem intervalo seguro entre dois cruzamentos. A geometria foi preservada.");
+    viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
+    return;
    }
+   // No native curve under the pointer: allow conventional paths to be tested below.
+   if(nativeScissorHover_||scissorPreview_)clearScissorHover();
   }
+  if(nativeMode_){clearScissorHover();return;}
   if(scissorIndexVersion_!=editor.generation){
    clearScissorHover();
    const auto& state=editor.state();
@@ -2865,15 +2909,46 @@ void mousePressEvent(QMouseEvent* e)override{
    e->accept();return;
   }
   if(tool==Tool::Scissors){
-   try{
-    if(cutNativeAt(fromQt(mapToScene(e->position().toPoint())))){
+   const QPoint clickPoint=e->position().toPoint();
+   // Native curves use intersection-delimited K cuts. Never fall back to
+   // deleting the entire anchor-to-anchor edge when no safe span exists.
+   if(nativeSession_&&hasNativeDocument()&&!nativeMode_){
+    const auto nativeHits=nativeSession_->pickEdges(fromQt(mapToScene(clickPoint)),
+        nativePxPerMm(),viewport()->devicePixelRatioF(),9);
+    if(!nativeHits.empty()){
+     if(!scissorDisplayedSpanIsCurrentAt(clickPoint))updateScissorHover(clickPoint);
+     if(!nativeScissorHover_){
+      if(diagnosticEvent)diagnosticEvent("bezier_scissor_no_intersection",1);
+      if(toolWarning)toolWarning("Tesoura K: nenhum trecho seguro delimitado por dois cruzamentos; nada foi removido.");
+      e->accept();return;
+     }
+     try{
+      const NativeScissorSpan cutting=*nativeScissorHover_;
+      int next=1;
+      for(const auto& [id,_]:editor.state().objects)next=std::max(next,id+1);
+      for(const auto& curve:nativeSession_->committed().contours)
+       next=std::max(next,curve.key.object+1);
+      clearScissorHover();
+      if(!nativeSession_->cutContourSpan(cutting,next)){
+       if(diagnosticEvent)diagnosticEvent("bezier_scissor_rejected",1);
+       if(toolWarning)toolWarning("Tesoura K: o intervalo deixou de ser válido; a geometria foi preservada.");
+       e->accept();return;
+      }
+      nativeMode_=false;nativeEditHandles_=false;nativeSelectedPart_.reset();
+      createNativeItems();
+      lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
+      if(diagnosticEvent)diagnosticEvent("bezier_intersection_cut",1);
+      if(scissorDetail)scissorDetail("cut_native_intersection_span",cutting.key.object,cutting.startEdge);
+      if(toolWarning)toolWarning("Trecho Bézier entre cruzamentos removido. Ctrl+Z restaura.");
+      if(stateChanged)stateChanged();
+     }catch(const std::exception& ex){
+      clearScissorHover();
+      if(diagnosticEvent)diagnosticEvent("bezier_scissor_rejected",1);
+      if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));
+     }
      e->accept();return;
     }
-   }catch(const std::exception& ex){
-    if(toolWarning)toolWarning(QString::fromUtf8(ex.what()));
-    e->accept();return;
    }
-   const QPoint clickPoint=e->position().toPoint();
    // Previously every click recomputed the hit list even when the user
    // clicked the currently highlighted orange span. At overlapping edges
    // a new hit ranking could invalidate or change that displayed target.
