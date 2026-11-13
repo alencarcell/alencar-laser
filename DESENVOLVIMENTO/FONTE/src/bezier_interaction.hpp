@@ -49,6 +49,44 @@ inline std::pair<double,double> nearestEdgeApprox(Cubic c,bool cubic,Pt at,doubl
  if(closestOut)*closestOut=bestPos;
  return {best,bestT};
 }
+struct CubicIntersection { double ta=0,tb=0; Pt point{}; };
+inline Pt cubicPoint(Cubic c,double t){
+ const double u=1.0-t;
+ return c.p0*(u*u*u)+c.p1*(3*u*u*t)+c.p2*(3*u*t*t)+c.p3*(t*t*t);
+}
+inline std::vector<CubicIntersection> findCubicIntersections(
+ Cubic a,Cubic b,double toleranceMm=0.01){
+ if(!(toleranceMm>0)||!std::isfinite(toleranceMm))
+  throw std::invalid_argument("invalid intersection tolerance");
+ const auto sa=sampleCubic(a,toleranceMm*0.25),sb=sampleCubic(b,toleranceMm*0.25);
+ std::vector<CubicIntersection> out;
+ for(std::size_t i=1;i<sa.size();++i){
+  Pt p=sa[i-1].p,r=sa[i].p-p;double rr=norm2(r);if(rr<=1e-24)continue;
+  for(std::size_t j=1;j<sb.size();++j){
+   Pt q=sb[j-1].p,s=sb[j].p-sb[j-1].p;double den=r.x*s.y-r.y*s.x;
+   if(std::abs(den)<1e-14)continue;Pt qp=q-p;
+   double u=(qp.x*s.y-qp.y*s.x)/den,v=(qp.x*r.y-qp.y*r.x)/den;
+   if(u< -1e-9||u>1+1e-9||v< -1e-9||v>1+1e-9)continue;
+   double ta=sa[i-1].t+(sa[i].t-sa[i-1].t)*std::clamp(u,0.,1.);
+   double tb=sb[j-1].t+(sb[j].t-sb[j-1].t)*std::clamp(v,0.,1.);
+   auto deriv=[](Cubic c,double t){double z=1-t;return (c.p1-c.p0)*(3*z*z)+(c.p2-c.p1)*(6*z*t)+(c.p3-c.p2)*(3*t*t);};
+   for(int k=0;k<10;++k){
+    Pt pa=cubicPoint(a,ta),pb=cubicPoint(b,tb),da=deriv(a,ta),db=deriv(b,tb),delta=pb-pa;
+    double det=da.y*db.x-da.x*db.y;if(std::abs(det)<1e-16)break;
+    double dta=(delta.x*db.y-delta.y*db.x)/det;
+    double dtb=(da.y*delta.x-da.x*delta.y)/det;
+    if(!std::isfinite(dta)||!std::isfinite(dtb))break;
+    ta=std::clamp(ta+dta,0.,1.);tb=std::clamp(tb+dtb,0.,1.);
+   }
+   Pt pa=cubicPoint(a,ta),pb=cubicPoint(b,tb);if(dist(pa,pb)>toleranceMm)continue;
+   bool duplicate=false;for(const auto& old:out)
+    if(std::abs(old.ta-ta)<1e-4&&std::abs(old.tb-tb)<1e-4){duplicate=true;break;}
+   if(!duplicate)out.push_back({ta,tb,(pa+pb)*0.5});
+  }
+ }
+ std::sort(out.begin(),out.end(),[](const auto& x,const auto& y){return std::tie(x.ta,x.tb)<std::tie(y.ta,y.tb);});
+ return out;
+}
 inline double physicalPixelScale(double pxPerMm,double devicePixelRatio){
  if(!(pxPerMm>0)||!std::isfinite(pxPerMm)||!(devicePixelRatio>0)||!std::isfinite(devicePixelRatio))
   throw std::invalid_argument("invalid display scale");
