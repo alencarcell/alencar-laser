@@ -6251,7 +6251,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   const bool some=count>0&&!native;
   const bool multi=count>=2&&!native;
   if(native)objectsSummary20z_->setText(
-   "Curva Bézier selecionada. Use Tesoura (K) para remover sua aresta nativa.");
+   "Curva Bézier selecionada. K recorta somente entre dois cruzamentos; J remove uma aresta inteira entre âncoras.");
   else if(!count)objectsSummary20z_->setText(
    "Nenhuma forma selecionada. Selecione (V) ou use Entre nós (J) diretamente sobre uma polilinha.");
   else if(single){
