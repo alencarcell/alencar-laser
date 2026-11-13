@@ -50,10 +50,7 @@ inline std::pair<double,double> nearestEdgeApprox(Cubic c,bool cubic,Pt at,doubl
  return {best,bestT};
 }
 struct CubicIntersection { double ta=0,tb=0; Pt point{}; };
-inline Pt cubicPoint(Cubic c,double t){
- const double u=1.0-t;
- return c.p0*(u*u*u)+c.p1*(3*u*u*t)+c.p2*(3*u*t*t)+c.p3*(t*t*t);
-}
+// Reuse cubicPoint() from bezier_native.hpp to keep one canonical evaluator.
 inline std::vector<CubicIntersection> findCubicIntersections(
  Cubic a,Cubic b,double toleranceMm=0.01){
  if(!(toleranceMm>0)||!std::isfinite(toleranceMm))
