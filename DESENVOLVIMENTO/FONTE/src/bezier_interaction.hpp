@@ -518,7 +518,7 @@ public:
  // EdgeTrim J removes the clicked mathematical edge between anchors.
  // The old split-at-click preserved the entire curve, appearing to do nothing.
  // Surviving cubics remain exact and Undo restores the complete original.
- // Crossings-based multi-edge trimming remains future work.
+ // K uses cutContourSpan() below for intersection-delimited trimming.
  bool cutContourAtEdge(const CurveHit& hit,int newObjectId){
   if(dragging()||hit.part!=CurvePart::Edge||newObjectId<=0)return false;
   const auto& doc=committed();
