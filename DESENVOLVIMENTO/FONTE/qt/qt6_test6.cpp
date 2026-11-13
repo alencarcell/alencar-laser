@@ -2181,7 +2181,8 @@ public:
       <<",edge:"<<hits[i].segment<<",candidate:"<<(bool(candidate))
       <<",pts:"<<(candidate?candidate->preview.size():0)<<")";
   }
-  out<<" preview="<<(bool(scissorHover_))
+  out<<" preview="<<(bool(scissorHover_)||bool(nativeScissorHover_))
+     <<" native_preview="<<(bool(nativeScissorHover_))
      <<" overlay="<<(scissorPreview_!=nullptr);
   return out.str();
  }
@@ -2367,11 +2368,10 @@ public:
        nativeScissorHover_->endEdge==span->endEdge&&
        std::abs(nativeScissorHover_->startT-span->startT)<1e-8&&
        std::abs(nativeScissorHover_->endT-span->endT)<1e-8&&
-       nativeScissorPosition_&&(*nativeScissorPosition_-where).manhattanLength()<=1&&
        nativeScissorViewportTransform_==viewportTransform()&&
        nativeScissorUndoCount_==nativeSession_->undoCount()&&
        nativeScissorRedoCount_==nativeSession_->redoCount();
-      if(same)return;
+      if(same){nativeScissorPosition_=where;return;}
       clearScissorHover();
       QPainterPath colored;bool started=false;
       for(const auto& entry:geometry){
