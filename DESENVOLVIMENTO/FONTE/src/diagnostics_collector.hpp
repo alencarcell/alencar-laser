@@ -51,6 +51,8 @@ public:
    // Eventos reais usados pelo Qt 19.8: antes eram rejeitados silenciosamente.
    "scissor_no_hit","scissor_no_safe_span","scissor_continuous_span_removed",
     "bezier_edge_between_nodes_cut",
+   "bezier_intersection_detected","bezier_intersection_cut",
+   "bezier_scissor_no_intersection","bezier_scissor_rejected",
    "vector_text_created","groups_ungrouped","layer_mode_visual_changed",
    "lightburn_geometry_imported","marquee_selected","pencil_stroke_created",
    "tool_scissors_activated","tool_bezier_activated","bezier_curve_created","image_trace_started",
