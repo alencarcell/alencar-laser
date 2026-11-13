@@ -65,17 +65,10 @@ int main(){
   CurveHit cursor=edgeHit(target,0);cursor.t=.5;cursor.point={5,0};
   const auto planned=findNativeScissorSpan(nativeSpan.committed(),cursor);
   req(planned.has_value(),"two crossings must delimit native scissor span");
+  req(planned->startEdge==0&&planned->endEdge==0&&
+      std::abs(planned->startT-.3)<1e-4&&std::abs(planned->endT-.7)<1e-4,
+      "linear crossing parameters must be exact at 0.3 and 0.7");
   const auto preview=nativeScissorSpanGeometry(nativeSpan.committed(),*planned);
-  if(preview.size()!=1){
-   std::cerr<<"DEBUG span edges="<<planned->startEdge<<","<<planned->endEdge
-            <<" t="<<planned->startT<<","<<planned->endT
-            <<" preview_parts="<<preview.size()<<"\\n";
-  }else{
-   std::cerr<<"DEBUG preview x="<<preview.front().first.p0.x
-            <<" -> "<<preview.front().first.p3.x
-            <<" y="<<preview.front().first.p0.y
-            <<" -> "<<preview.front().first.p3.y<<"\\n";
-  }
   req(preview.size()==1&&std::abs(preview.front().first.p0.x-3)<0.02&&
       std::abs(preview.front().first.p3.x-7)<0.02,
       "preview must contain only the intersection-delimited segment");
