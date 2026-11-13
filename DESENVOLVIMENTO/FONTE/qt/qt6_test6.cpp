@@ -2398,8 +2398,8 @@ public:
      }
     }
     clearScissorHover();
-    if(diagnosticEvent)diagnosticEvent("bezier_scissor_rejected",1);
-    if(scissorDetail)scissorDetail("bezier_no_safe_span",hit.key.object,hit.edge);
+    // Hover is passive: do not flood the opt-in diagnostic log.
+    // A rejected click is recorded once in the mouse-press handler.
     viewport()->setToolTip("Tesoura K: sem intervalo seguro entre dois cruzamentos. A geometria foi preservada.");
     viewport()->setCursor(QCursor(alaser::toolGlyph("scissors").pixmap(24,24),4,4));
     return;
