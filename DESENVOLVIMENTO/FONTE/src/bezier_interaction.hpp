@@ -49,6 +49,16 @@ inline std::pair<double,double> nearestEdgeApprox(Cubic c,bool cubic,Pt at,doubl
  if(closestOut)*closestOut=bestPos;
  return {best,bestT};
 }
+// Return a parameterization consistent with splitEdge(): native straight
+// edges are split linearly, so their cubic representation must be linear in t.
+inline Cubic intersectionEdgeAt(const CurveContour& contour,std::size_t edge){
+ Cubic c=edgeAt(contour,edge);
+ if(contour.edgeKind.at(edge)==0){
+  c.p1=lerp(c.p0,c.p3,1.0/3.0);
+  c.p2=lerp(c.p0,c.p3,2.0/3.0);
+ }
+ return c;
+}
 inline bool cubicBoundsOverlap(Cubic a,Cubic b,double tolerance=0){
  const double aminX=std::min({a.p0.x,a.p1.x,a.p2.x,a.p3.x});
  const double amaxX=std::max({a.p0.x,a.p1.x,a.p2.x,a.p3.x});
@@ -138,7 +148,7 @@ inline std::optional<NativeScissorSpan> findNativeScissorSpan(
      const std::size_t delta=j-i;
      if(delta==1||(target->closed&&delta==targetEdges-1))continue;
     }
-    const auto hits=findCubicIntersections(a,edgeAt(other,j),intersectionToleranceMm);
+    const auto hits=findCubicIntersections(a,intersectionEdgeAt(other,j),intersectionToleranceMm);
     for(const auto& hit:hits){
      if(hit.ta<=endpointEpsilon||hit.ta>=1.0-endpointEpsilon||
         hit.tb<=endpointEpsilon||hit.tb>=1.0-endpointEpsilon)continue;
@@ -201,7 +211,7 @@ inline std::vector<std::pair<Cubic,bool>> nativeScissorSpanGeometry(
   const double from=first?span.startT:0.0;
   const double to=last?span.endT:1.0;
   if(to>from+1e-10)
-   out.push_back({subCubicExact(edgeAt(*c,edge),from,to),c->edgeKind[edge]!=0});
+   out.push_back({subCubicExact(intersectionEdgeAt(*c,edge),from,to),c->edgeKind[edge]!=0});
   if(last)break;
   edge=(edge+1)%total;++count;
  }
