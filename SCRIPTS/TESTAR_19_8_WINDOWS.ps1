@@ -489,7 +489,9 @@ try {
         New-Item -ItemType Directory -Path $destino -Force | Out-Null
         & $app --edit-tools-19-7-test $fixture $destino
         Checar-ResultadoQt 'Tesoura - hover GUI' (Join-Path $destino 'RESULTADO_TESTE_19_7_GUI.json')
-        Write-Host 'Tesoura: C++ 19.7 + C++ 19.8 + GUI Qt PASS focado. Validacao manual e suite completa ainda obrigatorias.' -ForegroundColor Green
+        & $app --draw-join-19-8-test $fixture $destino
+        Checar-ResultadoQt 'Tesoura K Bézier entre cruzamentos, J entre âncoras e Undo/Redo Qt' (Join-Path $destino 'RESULTADO_DESENHO_UNIAO_19_8.json')
+        Write-Host 'Tesoura: C++ 19.7 + C++ 19.8 + GUI Qt convencional e Bezier K/J PASS focado. Validacao manual e suite completa ainda obrigatorias.' -ForegroundColor Green
         return
     }
     $alvos = @(
