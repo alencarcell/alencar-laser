@@ -49,12 +49,25 @@ inline std::pair<double,double> nearestEdgeApprox(Cubic c,bool cubic,Pt at,doubl
  if(closestOut)*closestOut=bestPos;
  return {best,bestT};
 }
+inline bool cubicBoundsOverlap(Cubic a,Cubic b,double tolerance=0){
+ const double aminX=std::min({a.p0.x,a.p1.x,a.p2.x,a.p3.x});
+ const double amaxX=std::max({a.p0.x,a.p1.x,a.p2.x,a.p3.x});
+ const double aminY=std::min({a.p0.y,a.p1.y,a.p2.y,a.p3.y});
+ const double amaxY=std::max({a.p0.y,a.p1.y,a.p2.y,a.p3.y});
+ const double bminX=std::min({b.p0.x,b.p1.x,b.p2.x,b.p3.x});
+ const double bmaxX=std::max({b.p0.x,b.p1.x,b.p2.x,b.p3.x});
+ const double bminY=std::min({b.p0.y,b.p1.y,b.p2.y,b.p3.y});
+ const double bmaxY=std::max({b.p0.y,b.p1.y,b.p2.y,b.p3.y});
+ return !(amaxX+tolerance<bminX||bmaxX+tolerance<aminX||
+          amaxY+tolerance<bminY||bmaxY+tolerance<aminY);
+}
 struct CubicIntersection { double ta=0,tb=0; Pt point{}; };
 // Reuse cubicPoint() from bezier_native.hpp to keep one canonical evaluator.
 inline std::vector<CubicIntersection> findCubicIntersections(
  Cubic a,Cubic b,double toleranceMm=0.01){
  if(!(toleranceMm>0)||!std::isfinite(toleranceMm))
   throw std::invalid_argument("invalid intersection tolerance");
+ if(!cubicBoundsOverlap(a,b,toleranceMm))return {};
  const auto sa=sampleCubic(a,toleranceMm*0.25),sb=sampleCubic(b,toleranceMm*0.25);
  std::vector<CubicIntersection> out;
  for(std::size_t i=1;i<sa.size();++i){
@@ -141,11 +154,8 @@ inline std::optional<NativeScissorSpan> findNativeScissorSpan(
  });
  std::vector<NativeScissorCrossing> unique;
  for(const auto& crossing:crossings){
-  if(!unique.empty()&&std::abs(unique.back().position-crossing.position)<1e-4){
-   if(dist(unique.back().point,crossing.point)>intersectionToleranceMm*3.0)
-    continue;
+  if(!unique.empty()&&std::abs(unique.back().position-crossing.position)<1e-4)
    continue;
-  }
   unique.push_back(crossing);
  }
  if(unique.size()<2)return std::nullopt;
@@ -559,13 +569,10 @@ public:
   const double endPosition=double(span.endEdge)+span.endT;
   const bool wraps=original.closed&&endPosition<startPosition;
   if(!original.closed&&!(startPosition<endPosition))return false;
-  const std::size_t firstEdge=std::size_t(std::min(startPosition,endPosition));
-  const std::size_t lastEdge=std::size_t(std::max(startPosition,endPosition));
   const double lowT=startPosition<endPosition?span.startT:span.endT;
   const double highT=startPosition<endPosition?span.endT:span.startT;
   const std::size_t lowEdge=std::size_t(std::min(startPosition,endPosition));
   const std::size_t highEdge=std::size_t(std::max(startPosition,endPosition));
-  (void)firstEdge;(void)lastEdge;
   if(lowEdge==highEdge&&!(highT>lowT))return false;
   if(!wraps&&!original.closed&&startPosition>=endPosition)return false;
   for(const auto& c:committed().contours)
