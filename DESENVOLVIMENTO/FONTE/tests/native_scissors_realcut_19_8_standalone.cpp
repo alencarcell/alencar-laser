@@ -70,9 +70,29 @@ int main(){
       std::abs(preview.front().first.p3.x-7)<0.02,
       "preview must contain only the intersection-delimited segment");
   CurveHit oneCross=edgeHit(target,0);oneCross.t=.2;oneCross.point={2,0};
-  req(!findNativeScissorSpan(CurveDocument{nativeSpan.committed().contours[0],
-      nativeSpan.committed().contours[1]},oneCross),
+  CurveDocument oneCrossDoc;
+  oneCrossDoc.contours.push_back(nativeSpan.committed().contours[0]);
+  oneCrossDoc.contours.push_back(nativeSpan.committed().contours[1]);
+  oneCrossDoc.nextId=nativeSpan.committed().nextId;
+  req(!findNativeScissorSpan(oneCrossDoc,oneCross),
       "one crossing is insufficient for a safe cut");
+  req(nativeSpan.cutContourSpan(*planned,104),"native intersection span cut");
+  req(nativeSpan.committed().contours.size()==4,"native span creates two independent remnants");
+  const CurveContour* left=nullptr;const CurveContour* right=nullptr;
+  for(const auto& curve:nativeSpan.committed().contours){
+   if(curve.key.object==101)left=&curve;
+   if(curve.key.object==104)right=&curve;
+  }
+  req(left&&right&&left->nodes.size()==2&&right->nodes.size()==2,
+      "native span keeps two separate open paths");
+  req(std::abs(left->nodes.back().anchor.x-3.0)<0.02&&
+      std::abs(right->nodes.front().anchor.x-7.0)<0.02,
+      "native span removes only the between-crossings geometry");
+  req(nativeSpan.undo()&&nativeSpan.committed().contours.size()==3,
+      "native intersection span undo restores original");
+  req(nativeSpan.redo()&&nativeSpan.committed().contours.size()==4,
+      "native intersection span redo reapplies cut");
+
   std::cout<<"PASS: native cuts, cubic intersections and native span planning; no hardware\n";
   return 0;
  }catch(const std::exception& e){
