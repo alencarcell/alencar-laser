@@ -50,7 +50,14 @@ int main(){
       "undo closes original ring");
   req(!ring.cutContourAtEdge(edgeHit(closed,-1),88),"invalid index rejected");
   req(!ring.cutContourAtEdge(edgeHit({999,0},0),88),"missing curve rejected");
-  std::cout<<"PASS: native curves remove exact edges; open/closed, undo/redo, no hardware\n";
+  const Cubic rising{{0,0},{3,0},{7,10},{10,10}};
+  const Cubic falling{{0,10},{3,10},{7,0},{10,0}};
+  const auto crossings=findCubicIntersections(rising,falling,0.02);
+  req(!crossings.empty(),"crossing cubic edges must be detected");
+  req(std::abs(crossings.front().point.x-5.0)<0.08&&
+      std::abs(crossings.front().point.y-5.0)<0.08,
+      "intersection point must be refined on native cubics");
+  std::cout<<"PASS: native cuts and cubic intersection detection; no hardware\n";
   return 0;
  }catch(const std::exception& e){
   std::cerr<<"FAIL: "<<e.what()<<"\n";return 1;
