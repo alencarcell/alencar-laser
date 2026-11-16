@@ -27,6 +27,8 @@
 #include "gear_dialog_19_9.hpp"
 #include "escapement_study_dialog_20s.hpp"
 #include "gear_compound_dialog_19_9.hpp"
+#include "svg_export_20zc.hpp"
+#include "svg_import_20ze.hpp"
 #include "mechanism_studio_dialog_19_9.hpp"
 #include <QApplication>
 #include <QGraphicsView>
@@ -116,6 +118,7 @@
 #include <QCryptographicHash>
 #include <QSet>
 #include <QFileDialog>
+#include <QXmlStreamReader>
 #include <QSysInfo>
 #include <QLineF>
 #include <numbers>
@@ -1546,6 +1549,11 @@ public:
   lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
   // Layer selection changes metadata, not the geometry of every path.
   updateNativeSelection199();
+  if(stateChanged)stateChanged();
+ }
+ void markNativeHistoryAction(){
+  if(!nativeSession_)return;
+  lastNativeAction_=true;lastEditorGenerationSeen_=editor.generation;
   if(stateChanged)stateChanged();
  }
  bool nativeModeActive()const{return nativeMode_;}
@@ -3671,14 +3679,22 @@ public:
    {"privacy","Opt-in, memory only, manual JSON export; no paths, device identifiers, raw machine messages or design coordinates."}};
  }
  void exportCapture(){
-  const QString path=QFileDialog::getSaveFileName(this,"Exportar diagnóstico local", 
-   "Alencar_Laser_Diagnostico_TESTE_19_7.json","JSON (*.json)");
+  auto settings=alaser::svg20zc::saveLocationSettings();
+  const QString initial=alaser::svg20zc::initialSavePath(*settings,
+     "Alencar_Laser_Diagnostico_TESTE_19_7.json",projectPath);
+  const QString path=chooseSaveFileName20zd("Exportar diagnóstico local",
+     initial,"JSON (*.json)");
   if(path.isEmpty())return;
   QSaveFile file(path);
   if(!file.open(QIODevice::WriteOnly))throw std::runtime_error("cannot open diagnostics destination");
   const QByteArray content=QJsonDocument(captureDocument()).toJson(QJsonDocument::Indented);
   if(file.write(content)!=content.size()||!file.commit())throw std::runtime_error("cannot save diagnostics file");
-  status->setText("Diagnóstico JSON exportado localmente. Nenhum dado enviado pela rede.");
+  QString persistenceError;
+  const bool remembered=!saveLocationPersistenceEnabled()||
+      alaser::svg20zc::rememberSaveDirectory(*settings,path,&persistenceError);
+  status->setText(remembered
+    ?"Diagnóstico JSON exportado localmente. Nenhum dado enviado pela rede."
+    :"Diagnóstico exportado, mas a pasta não foi memorizada: "+persistenceError);
  }
  static quint64 readResidentMemory(){
 #ifdef Q_OS_WIN
@@ -3726,6 +3742,23 @@ public:
  static bool isInteractive(){
   const auto args=QCoreApplication::arguments();
   return args.size()==1||args.value(1)=="--interactive";
+ }
+ static bool saveLocationPersistenceEnabled(){
+  return isInteractive()||qEnvironmentVariable("ALENCAR_TEST_SAVE_FOLDER_20ZD")=="1";
+ }
+ QString chooseSaveFileName20zd(const QString& title,const QString& initial,
+                                const QString& filter){
+  // The test-only non-native dialog makes the real Save As workflow
+  // automatable without changing the normal Windows native dialog.
+  if(qEnvironmentVariable("ALENCAR_TEST_SAVE_DIALOG_20ZD")=="1"){
+   QFileDialog dialog(this,title,initial,filter);
+   dialog.setOption(QFileDialog::DontUseNativeDialog,true);
+   dialog.setAcceptMode(QFileDialog::AcceptSave);
+   dialog.setFileMode(QFileDialog::AnyFile);
+   if(dialog.exec()!=QDialog::Accepted)return {};
+   return dialog.selectedFiles().value(0);
+  }
+  return QFileDialog::getSaveFileName(this,title,initial,filter);
  }
  void loadWorkspaceSettings(){
   QSettings settings("AlencarLaser","DesktopBeta");
@@ -5288,6 +5321,14 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
     &QAction::triggered,this,[this]{
     if(auto* button=findChild<QPushButton*>("open_image_for_trace"))button->click();
   });
+  auto* importSvgAction=fileMenu->addAction("Importar SVG vetorial...");
+  importSvgAction->setObjectName("import_svg_20ze");
+  importSvgAction->setToolTip("Adiciona os caminhos do SVG ao desenho atual, preservando curvas Bézier. Não importa parâmetros de máquina.");
+  connect(importSvgAction,&QAction::triggered,this,[this]{
+   const QString path=QFileDialog::getOpenFileName(this,"Importar SVG vetorial",{},
+      "SVG vetorial (*.svg)");
+   if(!path.isEmpty())run([this,path]{importSvgFromFile(path);});
+  });
   connect(fileMenu->addAction("Abrir último projeto (manual)"),&QAction::triggered,this,[this]{
    run([this]{
     const QString path=QSettings("AlencarLaser","DesktopBeta").value("files/lastProject").toString();
@@ -5298,6 +5339,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
    });
   });
   command(fileMenu,"Salvar","save");command(fileMenu,"Salvar como...","save_as");
+  auto* exportSvgAction=fileMenu->addAction("Exportar desenho vetorial em SVG...");
+  exportSvgAction->setObjectName("export_svg_20zc");
+  exportSvgAction->setToolTip("Contornos visíveis em mm, incluindo engrenagens e curvas Bézier; não exporta imagem bitmap ou G-code.");
+  connect(exportSvgAction,&QAction::triggered,this,[this]{run([this]{exportSvg();});});
   auto* editMenu=mainMenu->addMenu("Editar");
   command(editMenu,"Desfazer","undo");command(editMenu,"Refazer","redo");command(editMenu,"Duplicar seleção","duplicate_obj");
   command(editMenu,"Excluir formas selecionadas","delete_shapes");
@@ -5466,6 +5511,10 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   });
 
   gearsMenu->addSeparator();
+  auto* exportGearSvg=gearsMenu->addAction("Exportar engrenagens/desenho atual em SVG...");
+  exportGearSvg->setObjectName("export_gears_svg_20zc");
+  exportGearSvg->setToolTip("Exporta os contornos vetoriais visíveis do desenho, incluindo engrenagens, furos, pares e cremalheiras.");
+  connect(exportGearSvg,&QAction::triggered,this,[this]{run([this]{exportSvg();});});
   auto* studio=gearsMenu->addAction("Oficina de Mecanismos — simulação e biblioteca (OFFLINE)...");
   studio->setObjectName("open_mechanism_studio_19_9");
   studio->setIcon(alaser::toolGlyph("mechanism"));
@@ -5697,6 +5746,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   shortcut("Ctrl+Shift+Z",[this]{view.history(true);});
   shortcut("Ctrl+S",[this]{save();});shortcut("Ctrl+O",[this]{open();});
   shortcut("Ctrl+Shift+S",[this]{saveAs();});shortcut("Ctrl+Shift+O",[this]{openOther();});
+   shortcut("Ctrl+Shift+E",[this]{exportSvg();});
   shortcut("Delete",[this]{
    if(view.nativeEditingMode())view.nativeDeleteSelected();
    else if(view.nativeSelectionMode())view.nativeDeleteContour();
@@ -5757,7 +5807,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(!mime||!mime->hasUrls()||mime->urls().size()!=1){e->ignore();return;}
   const QUrl url=mime->urls().first();
   const QString suffix=QFileInfo(url.toLocalFile()).suffix().toLower();
-  if(url.isLocalFile()&&(suffix=="alaser"||suffix=="lbrn2"||suffix=="png"||suffix=="jpg"||suffix=="jpeg"||suffix=="bmp"||suffix=="webp"))
+  if(url.isLocalFile()&&(suffix=="alaser"||suffix=="lbrn2"||suffix=="svg"||suffix=="png"||suffix=="jpg"||suffix=="jpeg"||suffix=="bmp"||suffix=="webp"))
    e->acceptProposedAction();
   else e->ignore();
  }
@@ -5766,19 +5816,21 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(!mime||!mime->hasUrls()||mime->urls().size()!=1){e->ignore();return;}
   const QUrl url=mime->urls().first();
   const QString suffix=QFileInfo(url.toLocalFile()).suffix().toLower();
-  if(!url.isLocalFile()||(suffix!="alaser"&&suffix!="lbrn2"&&suffix!="png"&&
+  if(!url.isLocalFile()||(suffix!="alaser"&&suffix!="lbrn2"&&suffix!="svg"&&suffix!="png"&&
     suffix!="jpg"&&suffix!="jpeg"&&suffix!="bmp"&&suffix!="webp")){e->ignore();return;}
   e->acceptProposedAction();
   try{
-   if(suffix=="alaser"||suffix=="lbrn2")openFilePath(url.toLocalFile());
+   if(suffix=="alaser"||suffix=="lbrn2"||suffix=="svg")openFilePath(url.toLocalFile());
    else{
     loadRasterFromFile(url.toLocalFile());
     QTimer::singleShot(0,this,[this]{traceImageDialog();});
    }
   }
   catch(const std::exception& error){
-   QMessageBox::warning(this,"Arquivo nao importado",QString::fromUtf8(error.what())+
-      "\n\nO desenho anterior foi preservado. Use Referencias para inspecionar o .lbrn2.");
+   status->setText(QString("Arquivo nao importado: %1").arg(QString::fromUtf8(error.what())));
+   if(qEnvironmentVariable("ALENCAR_TEST_SVG_IMPORT_NO_MODAL_20ZE")!="1")
+    QMessageBox::warning(this,"Arquivo nao importado",status->text()+
+      "\n\nO desenho atual foi preservado. SVGs incompatíveis não são importados parcialmente.");
   }
  }
  std::vector<int> selection()const{return {view.selected.begin(),view.selected.end()};}
@@ -6110,8 +6162,39 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
       .arg(workspaceCfg_.drawingWidth,0,'f',0).arg(workspaceCfg_.drawingHeight,0,'f',0)
       .arg(workspaceCfg_.machineWidth,0,'f',0).arg(workspaceCfg_.machineHeight,0,'f',0));
  }
+ void exportSvg(){
+  if(view.busy())throw std::runtime_error("Finalize o gesto antes de exportar SVG.");
+  auto settings=alaser::svg20zc::saveLocationSettings();
+  const QString preferred=alaser::svg20zc::initialSavePath(*settings,
+     projectPath.isEmpty()?QStringLiteral("Alencar_Laser.svg"):
+       QFileInfo(projectPath).completeBaseName()+".svg",projectPath);
+  const QString chosen=chooseSaveFileName20zd("Exportar SVG vetorial (milímetros)",
+     preferred,"Imagem vetorial SVG (*.svg)");
+  if(chosen.isEmpty())return;
+  const alaser::CurveDocument natives=curves?curves->committed():CurveDocument{};
+  const auto report=alaser::svg20zc::saveSvg(chosen,view.editor.state(),natives);
+  QString persistenceError;
+  const bool remembered=!saveLocationPersistenceEnabled()||
+      alaser::svg20zc::rememberSaveDirectory(*settings,chosen,&persistenceError);
+  status->setText(QString("SVG exportado: %1 caminhos, %2 × %3 mm. %4")
+    .arg(report.polylinePaths+report.bezierPaths)
+    .arg(report.widthMm,0,'f',3)
+    .arg(report.heightMm,0,'f',3)
+    .arg(remembered?"Pasta memorizada. Nenhuma operação de laser.":
+      "Pasta NÃO memorizada: "+persistenceError));
+  if(view.hasRasterImage())
+   QMessageBox::information(this,"SVG vetorial",
+      "O SVG contém apenas contornos vetoriais; a imagem bitmap original não foi incluída. "
+      "Use Traçar imagem para converter seus contornos antes de exportar.");
+ }
  void save(){
-  if(projectPath.isEmpty())projectPath=QFileDialog::getSaveFileName(this,"Salvar projeto",{},"Alencar Laser (*.alaser)");
+  if(projectPath.isEmpty()){
+   auto locations=alaser::svg20zc::saveLocationSettings();
+   const QString initial=alaser::svg20zc::initialSavePath(*locations,
+      "Alencar_Laser.alaser",projectPath);
+   projectPath=chooseSaveFileName20zd("Salvar projeto",initial,
+      "Alencar Laser (*.alaser)");
+  }
   if(projectPath.isEmpty())return;
   CurveDocument cd=curves?curves->committed():CurveDocument{};
   loadedProject_=saveNative(projectPath,view.editor.state(),cd,
@@ -6122,12 +6205,27 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   if(uiPersistenceEnabled_){
    QSettings settings("AlencarLaser","DesktopBeta");
    settings.setValue("files/lastProject",projectPath);
+   settings.sync();
+  }
+  QString persistenceError;
+  bool folderRemembered=true;
+  if(saveLocationPersistenceEnabled()){
+   auto locations=alaser::svg20zc::saveLocationSettings();
+   folderRemembered=alaser::svg20zc::rememberSaveDirectory(*locations,projectPath,&persistenceError);
   }
   captureEvent("project_saved");
-  status->setText(QString("Salvo v5: %1 (curvas nativas: %2)").arg(projectPath).arg(cd.contours.size()));
+  status->setText(QString("Salvo v5: %1 (curvas nativas: %2)%3")
+    .arg(projectPath).arg(cd.contours.size())
+    .arg(folderRemembered?QString{}:
+      QString(" | AVISO: pasta não memorizada (%1)").arg(persistenceError)));
  }
  void saveAs(){
-  const QString chosen=QFileDialog::getSaveFileName(this,"Salvar projeto como",projectPath,"Alencar Laser (*.alaser)");
+  auto settings=alaser::svg20zc::saveLocationSettings();
+  const QString suggested=projectPath.isEmpty()?"Alencar_Laser.alaser":
+     QFileInfo(projectPath).fileName();
+  const QString initial=alaser::svg20zc::initialSavePath(*settings,suggested,projectPath);
+  const QString chosen=chooseSaveFileName20zd("Salvar projeto como",initial,
+     "Alencar Laser (*.alaser)");
   if(chosen.isEmpty())return;
   const QString previous=projectPath;projectPath=chosen;
   try{save();}catch(...){projectPath=previous;throw;}
@@ -6153,7 +6251,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
      const auto urls=drag->mimeData()->urls();
      if(urls.size()==1&&urls.first().isLocalFile()){
       const QString suffix=QFileInfo(urls.first().toLocalFile()).suffix().toLower();
-      if(QStringList{"alaser","lbrn2","png","jpg","jpeg","bmp","webp"}.contains(suffix)){
+      if(QStringList{"alaser","lbrn2","svg","png","jpg","jpeg","bmp","webp"}.contains(suffix)){
        drag->acceptProposedAction();return true;
       }
      }
@@ -6334,6 +6432,59 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
   view.setRasterImage(image);
   status->setText("Imagem selecionada: arraste para mover, puxe a alça laranja para redimensionar. Salve em .alaser para preservar.");
  }
+ void importSvgFromFile(const QString& path){
+  check(!view.busy()&&(!curves||!curves->dragging()),
+        "Finalize ou cancele o gesto atual antes de importar SVG.");
+  auto imported=alaser::svg20ze::readSvgGeometry(path);
+  const int layerId=layers->currentData().toInt();
+  const auto layer=view.editor.state().layers.find(layerId);
+  check(layer!=view.editor.state().layers.end()&&layer->second.visible&&!layer->second.locked,
+        "A camada ativa esta oculta ou bloqueada. Escolha uma camada visivel e desbloqueada.");
+  const int contourCount=int(imported.curves.contours.size());
+  const QString layerName=QString::fromStdString(layer->second.name);
+  check(contourCount>0,"SVG sem contornos importaveis.");
+  if(qEnvironmentVariable("ALENCAR_TEST_SVG_IMPORT_ACCEPT_20ZE")!="1"){
+   const auto answer=QMessageBox::question(this,"Importar SVG vetorial",
+    QString("%1 contornos, %2 ancoras e %3 segmentos Bezier.\n"
+            "Dimensoes fisicas: %4 x %5 mm.\n\n"
+            "Adicionar os vetores ao desenho atual, na camada %6?\n"
+            "O desenho existente e o arquivo SVG original serao preservados.\n"
+            "Texto, imagens e parametros de maquina nao sao importados.")
+      .arg(contourCount).arg(qulonglong(imported.anchors)).arg(qulonglong(imported.cubicSegments))
+      .arg(imported.widthMm,0,'f',3).arg(imported.heightMm,0,'f',3)
+      .arg(layerName),
+    QMessageBox::Yes|QMessageBox::No,QMessageBox::No);
+   if(answer!=QMessageBox::Yes)return;
+  }
+  int maxObject=0;
+  for(const auto& [id,meta]:view.editor.state().objects)
+   maxObject=std::max(maxObject,id);
+  if(curves)for(const auto& contour:curves->committed().contours)
+   maxObject=std::max(maxObject,contour.key.object);
+  check(maxObject<std::numeric_limits<int>::max(),
+        "IDs de objetos esgotados; SVG nao foi importado.");
+  if(curves){
+   curves->appendImportedContours(std::move(imported.curves.contours),maxObject+1,layerId);
+  }else{
+   auto next=std::make_unique<CurveDragSession>(CurveDocument{});
+   next->appendImportedContours(std::move(imported.curves.contours),maxObject+1,layerId);
+   curves=std::move(next);
+  }
+  view.attachNative(curves.get());
+  view.enableNative(false);
+  view.markNativeHistoryAction();
+  bezierToolActive_=false;
+  view.setTool(QtEditorLab::Tool::Select);
+  view.clearSelection();view.invalidateSelectionCache();
+  recoveryPolicy_.edited();
+  captureEvent("svg_imported",contourCount);
+  refresh();
+  view.setFocus();
+  status->setText(QString("SVG importado: %1 contornos, %2 ancoras, %3 curvas Bezier. "
+      "Adicionado a camada %4. Ctrl+Z desfaz o lote. Salve o projeto .alaser; nenhum comando de laser foi importado.")
+    .arg(contourCount).arg(qulonglong(imported.anchors)).arg(qulonglong(imported.cubicSegments))
+    .arg(layerName));
+ }
  void traceImageDialog(){
   if(!view.hasRasterImage()){status->setText("Importe uma imagem primeiro.");return;}
   if(view.busy()){status->setText("Conclua o gesto atual antes de rastrear.");return;}
@@ -6465,7 +6616,7 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
  }
  void openOther(){
   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir arquivo de projeto",
-   projectPath,"Projetos de desenho (*.alaser *.lbrn2);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2)");
+   projectPath,"Projetos e vetores (*.alaser *.lbrn2 *.svg);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2);;SVG vetorial (*.svg)");
   if(!chosen.isEmpty())openFilePath(chosen);
  }
  void ensureSafeToReplace(){
@@ -6533,6 +6684,9 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
 
  void openFilePath(const QString& path){
   const QString suffix=QFileInfo(path).suffix().toLower();
+  if(suffix=="svg"){
+   importSvgFromFile(path);return;
+  }
   if(suffix=="alaser"){
    ensureSafeToReplace();
    const QString previous=projectPath;projectPath=path;
@@ -6611,10 +6765,11 @@ auto* lockedNote=new QLabel("Máquina: sem conexão\nCAM / emissão: indisponív
  }
  void open(){
   if(projectPath.isEmpty()){
-   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir projeto",{},
-    "Projetos (*.alaser *.lbrn2);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2)");
+   const QString chosen=QFileDialog::getOpenFileName(this,"Abrir projeto ou importar vetor",{},
+    "Projetos e vetores (*.alaser *.lbrn2 *.svg);;Alencar Laser (*.alaser);;LightBurn (*.lbrn2);;SVG vetorial (*.svg)");
    if(chosen.isEmpty())return;
-   if(QFileInfo(chosen).suffix().compare("lbrn2",Qt::CaseInsensitive)==0){
+   const QString suffix=QFileInfo(chosen).suffix().toLower();
+   if(suffix=="lbrn2"||suffix=="svg"){
     openFilePath(chosen);return;
    }
    projectPath=chosen;
@@ -9560,6 +9715,285 @@ static QJsonObject duplicateBatch20cRegression(){
  return {{"status","PASS"},{"multi_duplicate",true},{"large_batch_2300",true},
          {"undo_redo",true},{"machine_commands_sent",false}};
 }
+static QJsonObject svgExport20zcTest(const QString& directory){
+ QTemporaryDir isolated;
+ check(isolated.isValid(),"20zc: pasta temporaria indisponivel");
+ const QString prefsPath=isolated.filePath("prefs.ini");
+ const QString previous=isolated.filePath("projeto_anterior.alaser");
+ QSettings first(prefsPath,QSettings::IniFormat);
+ const QString defaultPath=alaser::svg20zc::initialSavePath(first,"Desenho.svg",previous,false);
+ check(QFileInfo(defaultPath).absolutePath()==isolated.path()&&
+       QFileInfo(defaultPath).fileName()=="Desenho.svg",
+       "20zc: diretorio inicial nao seguiu o local anterior");
+ const QString exportFolder=isolated.filePath("exportacao");
+ check(QDir().mkpath(exportFolder),"20zc: nao criou pasta de exportacao");
+ // Insert the ACTUAL gear contours: perimeter and central hole, both closed.
+ const alaser::gear::Result generated=alaser::gear::generate(alaser::gear::Parameters{});
+ Editor testEditor(Document{});
+ std::vector<std::vector<Pt>> polys;
+ for(const auto* polygon:{&generated.outer,&generated.bore}){
+  if(polygon->empty())continue;
+  std::vector<Pt> points;
+  for(const auto& p:*polygon)points.push_back({150.+p.x,150.-p.y});
+  polys.push_back(std::move(points));
+ }
+ const auto ids=testEditor.addContours(std::move(polys),true,0,true);
+ check(ids.size()==2,"20zc: engrenagem gerada sem coroa e furo");
+ const auto canonical=stateText(testEditor.state());
+ const size_t history=testEditor.undoCount();
+ // Also include a cubic in the same exported drawing, with exact SVG C data.
+ CurveDocument curves;
+ CurveContour native;
+ native.key={999,0};native.layer=0;native.closed=false;
+ native.nodes={
+   {1,{0.,0.},{0.,0.},{10.,0.}},
+   {2,{30.,0.},{20.,0.},{30.,0.}}
+ };
+ native.edgeKind={1};
+ curves.contours.push_back(native);curves.nextId=3;
+ const QString target=QDir(exportFolder).filePath("engrenagem_e_bezier.svg");
+ const auto summary=alaser::svg20zc::saveSvg(target,testEditor.state(),curves);
+ check(summary.polylinePaths==2&&summary.bezierPaths==1&&summary.segments>200,
+       "20zc: exportador omitiu coroa, furo ou Bezier");
+ check(summary.widthMm>100.&&summary.heightMm>60.&&summary.heightMm<200.,
+       "20zc: limites fisicos do SVG incorretos");
+ QFile output(target);
+ check(output.open(QIODevice::ReadOnly),"20zc: arquivo SVG nao existe");
+ const QString xml=QString::fromUtf8(output.readAll());
+ check(xml.contains("xmlns=\"http://www.w3.org/2000/svg\"")&&
+       xml.contains("mm\"")&&xml.contains("viewBox=")&&
+       xml.count("<path")==3&&xml.contains(" C ")&&xml.contains(" Z"),
+       "20zc: SVG sem unidades, paths fechados ou curvas nativas");
+ QXmlStreamReader reader(xml);
+ while(!reader.atEnd())reader.readNext();
+ check(!reader.hasError(),"20zc: XML do SVG nao e valido");
+ check(stateText(testEditor.state())==canonical&&
+       testEditor.undoCount()==history,
+       "20zc: exportacao alterou arquivo canonico ou historico");
+ // Persistence only after a successful save; a fresh QSettings instance
+ // simulates closing and reopening the editor.
+ check(alaser::svg20zc::rememberSaveDirectory(first,target),
+       "20zc: helper nao confirmou a gravacao da pasta");
+ QSettings restarted(prefsPath,QSettings::IniFormat);
+ const QString remembered=alaser::svg20zc::initialSavePath(restarted,
+    "outra_peca.svg",previous,false);
+ check(QFileInfo(remembered).absolutePath()==exportFolder&&
+       QFileInfo(remembered).fileName()=="outra_peca.svg",
+       "20zc: pasta nao persistiu apos reinicio");
+ bool rejectedExtension=false;
+ try{(void)alaser::svg20zc::saveSvg(isolated.filePath("invalido.txt"),
+       testEditor.state(),curves);}
+ catch(const std::exception&){rejectedExtension=true;}
+ check(rejectedExtension&&!QFile::exists(isolated.filePath("invalido.txt")),
+       "20zc: extensao invalida alterou filesystem");
+ // Real output for optional visual inspection of an original generated gear.
+ QDir().mkpath(directory);
+ const QString sample=QDir(directory).filePath("GEAR_SVG_20ZC_TEST.svg");
+ const auto gearOnly=alaser::svg20zc::saveSvg(sample,testEditor.state(),CurveDocument{});
+ check(std::abs(gearOnly.widthMm-2.*generated.outerRadius)<1.0&&
+       std::abs(gearOnly.heightMm-2.*generated.outerRadius)<1.0,
+       "20zc: dimensoes reais da engrenagem foram alteradas no SVG");
+ return {{"status","PASS"},{"saved_directory_after_restart",true},
+         {"svg_xml_valid",true},{"physical_dimensions_mm",true},
+         {"closed_gear_with_bore",true},{"native_bezier_cubic",true},
+         {"canonical_state_and_undo_unchanged",true},
+         {"safe_extension_rejection",true},
+         {"paths",summary.polylinePaths+summary.bezierPaths},
+         {"width_mm",summary.widthMm},{"height_mm",summary.heightMm},
+         {"sample_file",sample},{"hardware_commands_sent",false}};
+}
+static QJsonObject svgImport20zeTest(const QString& outputDirectory){
+ struct RestoreEnv{
+  const char* key;QByteArray old;bool existed;
+  explicit RestoreEnv(const char* k):key(k),old(qgetenv(k)),existed(qEnvironmentVariableIsSet(k)){}
+  ~RestoreEnv(){if(existed)qputenv(key,old);else qunsetenv(key);}
+ };
+ RestoreEnv acceptEnv("ALENCAR_TEST_SVG_IMPORT_ACCEPT_20ZE");
+ RestoreEnv modalEnv("ALENCAR_TEST_SVG_IMPORT_NO_MODAL_20ZE");
+ qputenv("ALENCAR_TEST_SVG_IMPORT_ACCEPT_20ZE","1");
+ qputenv("ALENCAR_TEST_SVG_IMPORT_NO_MODAL_20ZE","1");
+ QTemporaryDir isolated;
+ check(isolated.isValid(),"20ze: temporary directory unavailable");
+ const auto generated=alaser::gear::generate(alaser::gear::Parameters{});
+ Editor source(Document{});
+ std::vector<std::vector<Pt>> polygons;
+ for(const auto* polygon:{&generated.outer,&generated.bore}){
+  if(polygon->empty())continue;
+  std::vector<Pt> points;
+  for(const auto& p:*polygon)points.push_back({150.+p.x,150.-p.y});
+  polygons.push_back(std::move(points));
+ }
+ source.addContours(std::move(polygons),true,0,true);
+ CurveDocument sourceCurves;
+ CurveContour cubic;cubic.key={900,0};cubic.layer=0;
+ cubic.nodes={{1,{0,0},{0,0},{10,0}},
+              {2,{30,0},{20,0},{30,0}}};
+ cubic.edgeKind={1};sourceCurves.contours.push_back(cubic);sourceCurves.nextId=3;
+ const QString sample=isolated.filePath("roundtrip.svg");
+ const auto exported=alaser::svg20zc::saveSvg(sample,source.state(),sourceCurves);
+ QFile original(sample);
+ check(original.open(QIODevice::ReadOnly),"20ze: exported SVG unavailable");
+ const QByteArray originalBytes=original.readAll();original.close();
+ const QByteArray originalHash=QCryptographicHash::hash(originalBytes,QCryptographicHash::Sha256);
+ const auto parsed=alaser::svg20ze::readSvgGeometry(sample);
+ check(parsed.curves.contours.size()==3&&parsed.curves.contours[0].closed&&
+       parsed.curves.contours[1].closed&&!parsed.curves.contours[2].closed,
+       "20ze: round-trip lost gear rings or open Bezier path");
+ check(parsed.cubicSegments==1&&parsed.curves.contours[2].edgeKind.size()==1&&
+       parsed.curves.contours[2].edgeKind[0]==1,
+       "20ze: native cubic was not preserved");
+ check(std::abs(parsed.widthMm-exported.widthMm)<1e-6&&
+       std::abs(parsed.heightMm-exported.heightMm)<1e-6,
+       "20ze: physical millimetre dimensions changed on import");
+ const auto& roundTripCubic=parsed.curves.contours[2];
+ check(dist(roundTripCubic.nodes[0].anchor,{0,0})<1e-7&&
+       dist(roundTripCubic.nodes[0].handleOut,{10,0})<1e-7&&
+       dist(roundTripCubic.nodes[1].handleIn,{20,0})<1e-7&&
+       dist(roundTripCubic.nodes[1].anchor,{30,0})<1e-7,
+       "20ze: cubic anchors/handles changed on round-trip");
+
+ LabWindow window(Document{});
+ window.view.editor.rectangle({300,300},20,20);
+ window.view.rebuild();
+ window.show();QApplication::processEvents();
+ QMimeData mime;mime.setUrls({QUrl::fromLocalFile(sample)});
+ QDragEnterEvent enter(QPoint(40,40),Qt::CopyAction,&mime,
+                       Qt::LeftButton,Qt::NoModifier);
+ QApplication::sendEvent(window.view.viewport(),&enter);
+ check(enter.isAccepted(),"20ze: SVG drag-enter was rejected by the canvas");
+ QDropEvent drop(QPointF(40,40),Qt::CopyAction,&mime,
+                 Qt::LeftButton,Qt::NoModifier);
+ QApplication::sendEvent(window.view.viewport(),&drop);
+ check(drop.isAccepted(),"20ze: SVG drop was not accepted");
+ check(window.curves&&window.curves->committed().contours.size()==3,
+       "20ze: drag-and-drop did not append all SVG contours");
+ check(window.view.editor.state().doc.contours.size()==1,
+       "20ze: SVG import replaced existing polygon artwork instead of appending");
+ check(window.curves->undoCount()==1,
+       "20ze: imported SVG batch did not create one atomic undo entry");
+ pressKey(window,Qt::Key_Z,Qt::ControlModifier);
+ check(window.curves->committed().contours.empty(),
+       "20ze: Ctrl+Z did not remove the imported SVG batch");
+ pressKey(window,Qt::Key_Y,Qt::ControlModifier);
+ check(window.curves->committed().contours.size()==3,
+       "20ze: Ctrl+Y did not restore the imported SVG batch");
+ window.view.attachNative(window.curves.get());
+ QFile after(sample);
+ check(after.open(QIODevice::ReadOnly),"20ze: source SVG disappeared after import");
+ check(QCryptographicHash::hash(after.readAll(),QCryptographicHash::Sha256)==originalHash,
+       "20ze: import modified the source SVG");
+
+ const QString primitivesPath=isolated.filePath("primitives.svg");
+ QFile primitivesFile(primitivesPath);
+ check(primitivesFile.open(QIODevice::WriteOnly),"20ze: cannot create primitive fixture");
+ primitivesFile.write("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100mm\" height=\"50mm\" viewBox=\"0 0 100 50\"><g transform=\"translate(10,5)\"><rect x=\"0\" y=\"0\" width=\"10\" height=\"5\"/><circle cx=\"20\" cy=\"10\" r=\"3\"/><path d=\"M 30 10 h 10 v 10 a 5 5 0 0 1 -5 5 z\"/></g></svg>");
+ primitivesFile.close();
+ const auto primitives=alaser::svg20ze::readSvgGeometry(primitivesPath);
+ check(primitives.curves.contours.size()==3&&
+       dist(primitives.curves.contours[0].nodes[0].anchor,{10,5})<1e-7&&
+       primitives.cubicSegments>=5,
+       "20ze: primitive shapes, transform or SVG arc conversion failed");
+
+ const QString unsupported=isolated.filePath("unsupported.svg");
+ QFile bad(unsupported);check(bad.open(QIODevice::WriteOnly),"20ze: cannot create negative fixture");
+ bad.write("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10mm\" height=\"10mm\" viewBox=\"0 0 10 10\"><text x=\"1\" y=\"5\">X</text></svg>");
+ bad.close();
+ bool rejected=false;
+ try{(void)alaser::svg20ze::readSvgGeometry(unsupported);}
+ catch(const std::exception&){rejected=true;}
+ check(rejected,"20ze: unsupported text was silently imported as empty geometry");
+ QDir().mkpath(outputDirectory);
+ return {{"status","PASS"},{"svg_drag_enter_drop",true},
+         {"appends_without_replacing_current_drawing",true},
+         {"gear_rings_and_bezier_preserved",true},
+         {"physical_dimensions_mm",true},{"atomic_undo_redo",true},
+         {"source_file_unchanged",true},{"unsupported_text_rejected",true},
+         {"basic_shapes_transforms_and_arcs",true},
+         {"contours",int(parsed.curves.contours.size())},
+         {"anchors",double(parsed.anchors)},
+         {"cubic_segments",double(parsed.cubicSegments)},
+         {"width_mm",parsed.widthMm},{"height_mm",parsed.heightMm},
+         {"machine_commands_sent",false}};
+}
+
+static QJsonObject saveFolderPersistence20zdTest(const QString& outputDirectory){
+ struct RestoreEnv{
+  const char* key;QByteArray old;bool existed;
+  explicit RestoreEnv(const char* k):key(k),old(qgetenv(k)),existed(qEnvironmentVariableIsSet(k)){}
+  ~RestoreEnv(){if(existed)qputenv(key,old);else qunsetenv(key);}
+ };
+ RestoreEnv settingsEnv("ALENCAR_SAVE_LOCATIONS_TEST_FILE_20ZD");
+ RestoreEnv dialogEnv("ALENCAR_TEST_SAVE_DIALOG_20ZD");
+ RestoreEnv allowEnv("ALENCAR_TEST_SAVE_FOLDER_20ZD");
+ QTemporaryDir isolated;
+ check(isolated.isValid(),"20zd: temporary directory unavailable");
+ const QString prefs=isolated.filePath("save-locations.ini");
+ const QString folder=isolated.filePath("chosen_folder");
+ check(QDir().mkpath(folder),"20zd: chosen folder could not be created");
+ qputenv("ALENCAR_SAVE_LOCATIONS_TEST_FILE_20ZD",prefs.toUtf8());
+ qputenv("ALENCAR_TEST_SAVE_DIALOG_20ZD","1");
+ qputenv("ALENCAR_TEST_SAVE_FOLDER_20ZD","1");
+ const QString target=QDir(folder).filePath("projeto_salvo.alaser");
+ LabWindow first(Document{});
+ first.view.editor.rectangle({20,30},50,40);
+ first.view.rebuild();
+ first.show();QApplication::processEvents();
+ bool firstDialogSeen=false;
+ QTimer::singleShot(0,&first,[&]{
+  auto* dialog=qobject_cast<QFileDialog*>(QApplication::activeModalWidget());
+  if(!dialog)return;
+  firstDialogSeen=true;
+  dialog->setDirectory(folder);
+  dialog->selectFile(target);
+  // QFileDialog narrows its accept() override to protected. Call the
+  // public QDialog slot through the base-class interface; virtual dispatch
+  // still reaches QFileDialog's implementation.
+  QDialog* dialogBase=dialog;
+  dialogBase->accept();
+ });
+ first.saveAs();
+ check(firstDialogSeen,"20zd: Save As first dialog was not intercepted");
+ check(QFileInfo::exists(target),"20zd: Save As did not create the chosen project");
+ QSettings afterSave(prefs,QSettings::IniFormat);
+ afterSave.sync();
+ const QString stored=alaser::svg20zc::normalizedExistingDirectory(
+     afterSave.value(alaser::svg20zc::kSaveDirectoryKey).toString());
+ check(afterSave.status()==QSettings::NoError&&stored==QDir(folder).canonicalPath(),
+       "20zd: Save As did not persist the chosen directory in UserScope settings");
+ first.close();QApplication::processEvents();
+ // New LabWindow + new QSettings instance simulate closing and reopening.
+ LabWindow reopened(Document{});
+ reopened.show();QApplication::processEvents();
+ QString reopenedDialogDirectory;
+ bool reopenedDialogSeen=false;
+ QTimer::singleShot(0,&reopened,[&]{
+  auto* dialog=qobject_cast<QFileDialog*>(QApplication::activeModalWidget());
+  if(!dialog)return;
+  reopenedDialogSeen=true;
+  reopenedDialogDirectory=dialog->directory().canonicalPath();
+  dialog->reject();
+ });
+ reopened.saveAs();
+ check(reopenedDialogSeen,"20zd: Save As dialog did not open after restart");
+ check(reopenedDialogDirectory==QDir(folder).canonicalPath(),
+       "20zd: reopened Save As dialog did not start in the last saved folder");
+ QSettings afterCancel(prefs,QSettings::IniFormat);
+ afterCancel.sync();
+ check(alaser::svg20zc::normalizedExistingDirectory(
+       afterCancel.value(alaser::svg20zc::kSaveDirectoryKey).toString())==
+       QDir(folder).canonicalPath(),
+       "20zd: canceling Save As changed the remembered directory");
+ check(reopened.projectPath.isEmpty(),
+       "20zd: canceled Save As unexpectedly assigned a project path");
+ reopened.close();QApplication::processEvents();
+ QDir().mkpath(outputDirectory);
+ return {{"status","PASS"},{"actual_save_as_dialog_exercised",true},
+         {"file_written",true},{"settings_read_back_after_new_instance",true},
+         {"reopened_save_as_initial_directory_matches",true},
+         {"cancel_keeps_previous_directory",true},
+         {"cancel_does_not_assign_project_path",true},
+         {"machine_commands_sent",false}};
+}
 static QJsonObject gearGenerator199Test(){
  // No device, connection, G-code or physical action is involved.
  alaser::gear::GearDialog dialog(400.,400.);
@@ -10570,7 +11004,42 @@ int main(int argc,char** argv){
   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
   return pass?0:1;
  }
- if(mode=="--gear-generator-19-9-test"){
+ if(mode=="--save-folder-20zd-test"){
+  QDir().mkpath(out);QJsonObject report;bool pass=true;
+  try{report=saveFolderPersistence20zdTest(out);}
+  catch(const std::exception& e){
+   pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())},
+                     {"machine_commands_sent",false}};
+  }
+  QFile file(out+"/RESULTADO_MEMORIA_PASTAS_20ZD.json");
+  if(!file.open(QIODevice::WriteOnly))return 2;
+  file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+  return pass?0:1;
+ }
+ if(mode=="--svg-export-20zc-test"){
+   QDir().mkpath(out);QJsonObject report;bool pass=true;
+   try{report=svgExport20zcTest(out);}
+   catch(const std::exception& e){
+    pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())}};
+   }
+   QFile file(out+"/RESULTADO_EXPORTACAO_SVG_20ZC.json");
+   if(!file.open(QIODevice::WriteOnly))return 2;
+   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+   return pass?0:1;
+  }
+  if(mode=="--svg-import-20ze-test"){
+   QDir().mkpath(out);QJsonObject report;bool pass=true;
+   try{report=svgImport20zeTest(out);}
+   catch(const std::exception& e){
+    pass=false;report={{"status","FAIL"},{"error",QString::fromUtf8(e.what())},
+                      {"machine_commands_sent",false}};
+   }
+   QFile file(out+"/RESULTADO_IMPORTACAO_SVG_20ZE.json");
+   if(!file.open(QIODevice::WriteOnly))return 2;
+   file.write(QJsonDocument(report).toJson(QJsonDocument::Indented));
+   return pass?0:1;
+  }
+  if(mode=="--gear-generator-19-9-test"){
   QDir().mkpath(out);QJsonObject report;bool pass=true;
   try{report=gearGenerator199Test();}
   catch(const std::exception& e){pass=false;report={{"status","FAIL"},{"error",e.what()}};}

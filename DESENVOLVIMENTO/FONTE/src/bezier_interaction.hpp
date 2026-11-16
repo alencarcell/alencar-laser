@@ -202,6 +202,37 @@ public:
   selected_=key;index_.reset();
   return key;
  }
+ // Append a complete imported vector batch as one native-history transaction.
+ // Source node IDs/keys are never trusted: remap them into this document.
+ void appendImportedContours(std::vector<CurveContour> contours,int firstObjectId,int layer){
+  if(dragging()||contours.empty()||contours.size()>50000||firstObjectId<=0||layer<0)
+   throw std::runtime_error("invalid imported SVG contour batch");
+  std::size_t totalNodes=0;
+  for(const auto& contour:contours){
+   if(contour.nodes.size()<2||(contour.closed&&contour.nodes.size()<3)||
+      contour.edgeKind.size()!=edgeCount(contour))
+    throw std::runtime_error("invalid imported SVG contour topology");
+   totalNodes+=contour.nodes.size();
+   if(totalNodes>1000000)
+    throw std::runtime_error("SVG import exceeds one million anchors");
+   for(uint8_t edge:contour.edgeKind)if(edge>1)
+    throw std::runtime_error("invalid imported SVG edge kind");
+  }
+  if(contours.size()>std::size_t(std::numeric_limits<int>::max()-firstObjectId))
+   throw std::runtime_error("SVG object ID range exhausted");
+  if(totalNodes>std::size_t(std::numeric_limits<int64_t>::max()-committed().nextId))
+   throw std::runtime_error("SVG node ID range exhausted");
+  history_.change([&](CurveDocument& d){
+   for(std::size_t i=0;i<contours.size();++i){
+    CurveContour contour=std::move(contours[i]);
+    contour.key={firstObjectId+int(i),0};
+    contour.layer=layer;
+    for(auto& node:contour.nodes)node.id=d.nextId++;
+    d.contours.push_back(std::move(contour));
+   }
+  });
+  selected_.reset();index_.reset();preview_.reset();
+ }
  // Nova curva cúbica nativa com âncoras/alças e Ctrl+Z na mesma sessão.
  Key addEditableCubic(Pt a,Pt out,Pt in,Pt b,int objectId,int layer=0){
   if(dragging()||objectId<=0||layer<0||dist(a,b)<1e-6)
