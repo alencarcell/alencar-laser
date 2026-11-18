@@ -199,7 +199,7 @@ public:
   auto* form=new QFormLayout(formHost);form->setVerticalSpacing(4);
   form->setContentsMargins(4,2,4,2);
   teeth_=new QSpinBox(this);teeth_->setObjectName("gear_teeth_19_9");
-  teeth_->setRange(12,120);teeth_->setValue(24);
+  teeth_->setRange(4,120);teeth_->setValue(24);
   form->addRow("Quantidade de dentes:",teeth_);
   profile_=new QComboBox(this);
   profile_->setObjectName("gear_profile_20q");
@@ -228,7 +228,7 @@ public:
   pressure_=metric("gear_pressure_19_9",14.,30.,20.,1,"°");
   pressure_->setToolTip("Ângulo de pressão do perfil evolvente aproximado.");
   form->addRow("Ângulo de pressão:",pressure_);
-  baseWidth_=metric("gear_angular_base_20q",45.,90.,75.,1," %");
+  baseWidth_=metric("gear_angular_base_20q",10.,98.,75.,1," %");
   baseWidth_->setSingleStep(5.);
   baseWidth_->setToolTip("Largura da base do dente como porcentagem do passo angular. Maior = ponta com base mais larga.");
   form->addRow("Base do dente angular:",baseWidth_);
@@ -236,7 +236,7 @@ public:
   includedAngle_->setSingleStep(1.);
   includedAngle_->setToolTip("Ângulo interno real na PONTA entre as duas faces. O programa ajusta a altura da ponta, sem ultrapassar o raio máximo nominal.");
   form->addRow("Ângulo interno na ponta:",includedAngle_);
-  tipPosition_=metric("gear_angular_tip_20q",15.,85.,50.,1," %");
+  tipPosition_=metric("gear_angular_tip_20q",0.,100.,50.,1," %");
   tipPosition_->setSingleStep(5.);
   tipPosition_->setToolTip("Somente serrilhado: 50% = ponta central; 80% = ponta inclinada para a direita.");
   form->addRow("Posição da ponta:",tipPosition_);

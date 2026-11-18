@@ -24,8 +24,16 @@ int main(){
   p.teeth=18;p.boreMm=0;
   const auto withoutHole=generate(p);require(withoutHole.bore.empty(),"zero bore not disabled");
   p.teeth=120;auto large=generate(p);require(large.outer.size()<10000,"large gear too complex");
-  p.teeth=11;require(rejects([&]{generate(p);}),"low tooth count accepted");
-  p.teeth=24;p.boreMm=200;require(rejects([&]{generate(p);}),"unsafe bore accepted");
+  p.teeth=3;require(rejects([&]{generate(p);}),"three teeth must be rejected");
+  p=Parameters{};
+  p.teeth=4;p.profile=ToothProfile::Angular;p.boreMm=0.;
+  p.angularBasePercent=98.;p.tipPositionPercent=100.;
+  const auto fourTooth=generate(p);
+  require(fourTooth.outer.size()==16u,"four-tooth angular gear failed");
+  p.tipPositionPercent=0.;
+  require(!generate(p).outer.empty(),"zero-percent tip position failed");
+  p.teeth=24;p.profile=ToothProfile::Involute;p.boreMm=200;
+  require(rejects([&]{generate(p);}),"unsafe bore accepted");
   p.boreMm=4;p.moduleMm=0;require(rejects([&]{generate(p);}),"bad module accepted");
   p.moduleMm=3;p.pressureDeg=40;require(rejects([&]{generate(p);}),"bad pressure accepted");
   p.pressureDeg=20;p.flankSamples=100;require(rejects([&]{generate(p);}),"bad complexity accepted");

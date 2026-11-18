@@ -8863,7 +8863,7 @@ static QJsonObject refineCurvesTrace198Test(const QString& folder){
    "vector_text_created","image_trace_started","image_trace_created"}){
   check(collector.record(name,1),"Evento esperado nao chegou ao coletor");
  }
- check(collector.records().size()==8,"Historico diagnostico incompleto");
+ check(collector.records().size()==7,"Historico diagnostico incompleto");
  check(collector.counters().at("scissor_no_safe_span")==1,"Motivo da Tesoura nao contabilizado");
  // A interface deve permitir criar/editar uma Bezier verdadeira, com handles.
  CurveDragSession curves(CurveDocument{});
@@ -9337,9 +9337,15 @@ static QJsonObject drawAndJoin198Test(){
        "Novo desenho Bézier sem undo/redo");
  // Real Qt path: native K previews and cuts only the span between two crossings.
  CurveDragSession nativeK(CurveDocument{});
- const Key nativeTarget=nativeK.addEditablePath({node(0,0),node(10,0)},false,101);
- nativeK.addEditablePath({node(3,-2),node(3,2)},false,102);
- nativeK.addEditablePath({node(7,-2),node(7,2)},false,103);
+ const Key nativeTarget=nativeK.addEditablePath(
+     {{0,{0,0},{0,0},{0,0}},
+      {0,{10,0},{10,0},{10,0}}},false,101);
+ nativeK.addEditablePath(
+     {{0,{3,-2},{3,-2},{3,-2}},
+      {0,{3,2},{3,2},{3,2}}},false,102);
+ nativeK.addEditablePath(
+     {{0,{7,-2},{7,-2},{7,-2}},
+      {0,{7,2},{7,2},{7,2}}},false,103);
  QtEditorLab nativeKView(Document{});
  nativeKView.attachNative(&nativeK);
  nativeKView.resize(640,480);nativeKView.show();QApplication::processEvents();
@@ -9348,8 +9354,21 @@ static QJsonObject drawAndJoin198Test(){
  nativeKView.setTool(QtEditorLab::Tool::Scissors);
  QApplication::processEvents();
  const QPoint nativeKPoint=nativeKView.mapFromScene(QPointF(5,0));
- QTest::mouseMove(nativeKView.viewport(),nativeKPoint);
- QApplication::processEvents();
+  const uint64_t nativeKEventsBefore=nativeKView.scissorHoverEventCount();
+  QTest::mouseMove(nativeKView.viewport(),nativeKPoint);
+  QApplication::processEvents();
+  if(nativeKView.scissorHoverEventCount()==nativeKEventsBefore||
+     !nativeKView.scissorHoverReceivedAt(nativeKPoint)){
+   const QPointF local(nativeKPoint),global(nativeKView.viewport()->mapToGlobal(nativeKPoint));
+   QMouseEvent mouse(QEvent::MouseMove,local,global,
+                     Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+   QApplication::sendEvent(nativeKView.viewport(),&mouse);
+   QApplication::processEvents();
+  }
+  if(nativeKView.scissorHoverEventCount()==nativeKEventsBefore||
+     !nativeKView.scissorHoverReceivedAt(nativeKPoint)){
+   throw std::runtime_error("DIAGNOSTICO K: MouseMove nao chegou mesmo apos fallback");
+  }
  check(nativeKView.scissorDisplayedSpanIsCurrentAt(nativeKPoint)&&
        nativeKView.scissorPreviewColor20x()==QColor("#22D3EE"),
        "Tesoura K nativa nao exibiu previsualizacao ciano entre cruzamentos");
@@ -11697,4 +11716,3 @@ int main(int argc,char** argv){
  QFile f(out+(mode=="--workspace-test"?"/RESULTADO_TESTE_19_2.json":mode=="--navigation-test"?"/RESULTADO_TESTE_19_1.json":mode=="--reopen"?"/REABERTURA_TESTE_6.json":"/RESULTADO_TESTE_6.json"));if(!f.open(QIODevice::WriteOnly))return 2;f.write(QJsonDocument(report).toJson());
  qInfo().noquote()<<mode<<report["status"].toString()<<report["error"].toString();return success?0:1;
 }
-

@@ -1,8 +1,15 @@
 {
     "schema":  "alencar-laser-audit-index-v1",
-    "records_count":  2,
-    "latest_report_utc":  "2026-11-04T20:27:40Z",
+    "records_count":  3,
+    "latest_report_utc":  "2026-11-05T15:17:48Z",
     "records":  [
+                    {
+                        "date_utc":  "2026-11-05T15:17:48Z",
+                        "path":  "AUDITORIA_GITHUB/REGISTROS/2026-11-05/interaction_session_be7e09471706d603.json",
+                        "event_id":  "be7e09471706d603",
+                        "type":  "interaction_session",
+                        "status":  "MANUAL_REVIEW_PENDING"
+                    },
                     {
                         "date_utc":  "2026-11-04T20:27:40Z",
                         "path":  "AUDITORIA_GITHUB/REGISTROS/2026-11-04/cache_zoom_validation_4224f067e4316f53.json",

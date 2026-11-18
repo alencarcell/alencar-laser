@@ -1,0 +1,26 @@
+{
+    "schema":  "alencar-laser-audit-sanitized-v1",
+    "event_id":  "be7e09471706d603",
+    "recorded_utc":  "2026-11-05T15:17:48Z",
+    "version":  "19.9-experimental",
+    "type":  "interaction_session",
+    "status":  "MANUAL_REVIEW_PENDING",
+    "source_report_sha256":  "be7e09471706d603298cf9b4741c2712135f4b27c2ec35e6d64c47b3031fca6c",
+    "source_project_sha256_prefix":  null,
+    "machine_commands_sent":  null,
+    "production_homologated":  false,
+    "manual_validation_pending":  true,
+    "metrics":  {
+                    "selection":  "NOT_TESTED",
+                    "drag":  "NOT_TESTED",
+                    "zoom_pan":  "NOT_TESTED",
+                    "scissors":  "NOT_TESTED",
+                    "undo_redo":  "NOT_TESTED",
+                    "tested_cases":  0,
+                    "failed_cases":  0,
+                    "memory_sample_count":  174,
+                    "rss_p95_mb":  115.109,
+                    "rss_max_mb":  115.488,
+                    "cpu_p95_percent":  25
+                }
+}

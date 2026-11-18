@@ -60,9 +60,9 @@ inline Result generateAngularOutline(const Parameters& p){
  if(p.profile!=ToothProfile::Angular && p.profile!=ToothProfile::Sawtooth)
   throw std::invalid_argument("perfil angular desconhecido");
  if(!std::isfinite(p.angularBasePercent)||
-    p.angularBasePercent<45.||p.angularBasePercent>90.||
+    p.angularBasePercent<10.||p.angularBasePercent>98.||
     !std::isfinite(p.tipPositionPercent)||
-    p.tipPositionPercent<15.||p.tipPositionPercent>85.)
+    p.tipPositionPercent<0.||p.tipPositionPercent>100.)
   throw std::invalid_argument("largura da base ou inclinacao fora dos limites");
  if(p.angularDefinition!=AngularDefinition::ByBaseWidth&&
     p.angularDefinition!=AngularDefinition::ByIncludedTipAngle)
@@ -133,7 +133,7 @@ inline Result generateAngularOutline(const Parameters& p){
  return out;
 }
 inline Result generate(const Parameters& p){
- if(p.teeth<12||p.teeth>120||!std::isfinite(p.moduleMm)||
+ if(p.teeth<4||p.teeth>120||!std::isfinite(p.moduleMm)||
     p.moduleMm<0.5||p.moduleMm>20.||
     !std::isfinite(p.pressureDeg)||p.pressureDeg<14.||p.pressureDeg>30.||
     !std::isfinite(p.boreMm)||p.boreMm<0.||p.flankSamples<6||p.flankSamples>20)
