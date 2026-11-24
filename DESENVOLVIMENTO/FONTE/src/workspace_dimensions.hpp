@@ -9,6 +9,7 @@ struct WorkspaceConfig {
  double machineWidth=400.0, machineHeight=400.0;
  bool showGrid=true, showMachineFrame=true, showOrigin=true;
  bool gridToBed=true; // A grade pode seguir a mesa visual, independentemente do desenho.
+ bool showDrawingFrame=true; // Exibir ou ocultar o limite da area de desenho sem alterar medidas.
  std::string profile="AlgoLaser Alpha Mk2 20W";
  // Limite numérico preventivo para QGraphics/Zoom; não é limite do equipamento.
  static constexpr double MaxEditableDimension=1000000.0;

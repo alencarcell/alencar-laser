@@ -51,9 +51,49 @@ int main(){
   try{e.cutPolylineEdge({grouped,0},1,{65,62});throw std::runtime_error("group split permitted");}
   catch(const std::runtime_error& ex){need(std::string(ex.what())!="group split permitted","group guard failed");}
   need(snapshot(e)==prior,"group guard mutated state");
+  // Tesoura v19.8: REMOCAO visual real da aresta, preservando a operacao de corte legado.
+  Editor closed(Document{});
+  const int c=closed.rectangle({0,0},10,10);
+  const auto rectangleBefore=snapshot(closed);
+  const size_t closedHistory=closed.undoCount();
+  int current=closed.removePolylineEdge({c,0},1);
+  need(current==c,"closed erase changed object id");
+  const auto* opened=get(closed.state().doc,{c,0});
+  need(opened&&!opened->closed&&opened->nodes.size()==4,"closed edge was not removed");
+  near(opened->nodes.front().p,{10,10});
+  near(opened->nodes.back().p,{10,0});
+  need(closed.undoCount()==closedHistory+1,"closed removal not atomic");
+  need(closed.undo()&&snapshot(closed)==rectangleBefore,"closed erase undo differs");
+  need(closed.redo()&&!get(closed.state().doc,{c,0})->closed,"closed erase redo failed");
+
+  Editor split(Document{});
+  const int o=split.addContour({{0,0},{10,0},{20,0},{30,0}},false);
+  split.addLayer(7,"Teste camada");split.moveToLayer(o,7);
+  const auto openBefore=snapshot(split); const auto undoBefore=split.undoCount();
+  const int remaining=split.removePolylineEdge({o,0},1);
+  need(remaining!=0&&remaining!=o,"open edge did not create independent contour");
+  auto* l=get(split.state().doc,{o,0});
+  auto* rr=get(split.state().doc,{remaining,0});
+  need(l&&rr&&l->nodes.size()==2&&rr->nodes.size()==2,"open edge still present");
+  near(l->nodes.back().p,{10,0});near(rr->nodes.front().p,{20,0});
+  need(split.state().objects.at(remaining).layer==7,"layer lost on scissor removal");
+  need(split.undoCount()==undoBefore+1,"open removal not atomic");
+  need(split.undo()&&snapshot(split)==openBefore,"open removal undo differs");
+  need(split.redo()&&get(split.state().doc,{remaining,0}),"open removal redo failed");
+  split.setLayerFlags(7,true,true);
+  const auto lockedState=snapshot(split);
+  const auto lockedHistory=split.undoCount();
+  bool refused=false;
+  try{split.removePolylineEdge({o,0},0);}catch(const std::runtime_error&){refused=true;}
+  need(refused&&snapshot(split)==lockedState&&split.undoCount()==lockedHistory,"locked removal altered document");
+  Editor lone(Document{});
+  int single=lone.line({0,0},{10,0});
+  need(lone.removePolylineEdge({single,0},0)==0,"single edge not deleted");
+  need(lone.state().doc.contours.empty()&&lone.state().objects.empty(),"single edge left shadow geometry");
+  need(lone.undo()&&get(lone.state().doc,{single,0}),"single edge undo failed");
   const auto decoded=fromMetadata(decode(encode(e.state().doc)),metadata(e.state()));
   validate(decoded);
-  std::cout<<"PASS: tesoura polilinha aberta/fechada, IDs unicos, metadados, bloqueios, camada, undo/redo, serializacao\n";
+  std::cout<<"PASS: tesoura de corte e remocao real de aresta, IDs unicos, metadados, bloqueios, camada, undo/redo, serializacao\n";
   return 0;
  }catch(const std::exception&ex){std::cerr<<"FAIL: "<<ex.what()<<"\n";return 1;}
 }
