@@ -3,6 +3,7 @@
 // O editor visual é um cliente deste adaptador; este arquivo não depende de Qt.
 #include "bezier_package.hpp"
 #include "editor_tools.hpp"
+#include "curve_layer_bindings.hpp"
 #include <optional>
 #include <map>
 #include <stdexcept>
@@ -70,6 +71,8 @@ inline json::value safeOperations(json::value operations){
 
 // Native Bezier layer bindings live in editor metadata, not in polygon object IDs.
 // This preserves the existing v5 package layout and keeps legacy v4 readable.
+inline IntegratedProject buildEditedIntegratedProject(const EditorState&, const CurveDocument&, const IntegratedProject*);
+
 inline constexpr const char* kNativeCurveLayerBindingsKey = "nativeCurveLayerBindings";
 
 inline json::value preserveCurveLayerBindings(
