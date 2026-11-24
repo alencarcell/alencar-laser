@@ -107,3 +107,17 @@ A orientação anterior permanece válida: preservar backups; não executar `git
 - Não declarar homologação mecânica ou de produção a partir de testes de geometria offline.
 
 **Conclusão:** o commit `be7f468` está confirmado no GitHub e incorpora as sete alterações listadas. A revisão remota confirma o conteúdo dos arquivos e os limites declarados pelo código; compilação limpa do HEAD, regressões Qt e homologação manual permanecem pendentes de evidência local.
+
+
+## 9. Verificação adicional de integração (23/11/2026)
+
+- A branch de trabalho foi confirmada no HEAD `35427776376c141ae9b0d3a3f4927cfb9562dfff`.
+- A branch `main` permanece em `c14008afd0705cc91449b683162e6c1430566cf0`; não foi alterada.
+- Comparação entre `main` e a branch de trabalho retornou `diverged`, com merge-base em `397341d139d974e0f3d90b79ed28604e697a81b1`, 1.019 commits à frente e 2 atrás segundo o endpoint de comparação. O volume elevado reflete a história divergente e **não deve ser interpretado como 1.019 funcionalidades novas**.
+- A busca por PR com head exatamente `feat/selecao-mista-alinhamento-svg-bezier-20ze-20261112` não retornou PR aberto ou fechado. Portanto, o checkpoint/branch não está vinculado a uma proposta de integração identificada nesta consulta.
+- A consulta de Actions para a branch retornou zero execuções. O status do commit de documentação `3542777` retornou `pending`, sem status individuais. Isso não equivale a falha de testes; significa ausência de evidência de CI para esse commit.
+- O índice `AUDITORIA_GITHUB/INDICE.json` contém três registros e aponta o relatório mais recente para 05/11/2026. O relatório desta auditoria é posterior, mas ainda não foi incluído nesse índice. Não alterei o índice para não misturar um relatório de auditoria documental com os registros técnicos sanitizados de sessão sem definir o esquema apropriado.
+
+### Consequência operacional
+
+Não abrir integração automática contra `main` nem tentar rebase/merge remoto. Antes de propor PR, é necessário identificar a branch-base correta e entender a divergência histórica, confirmar se a branch é de continuidade local do operador e reconciliar o estado Windows. O trabalho permanece isolado e a branch principal intacta.
