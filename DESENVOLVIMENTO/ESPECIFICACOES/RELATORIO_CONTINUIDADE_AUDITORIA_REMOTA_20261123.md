@@ -121,3 +121,43 @@ A orientação anterior permanece válida: preservar backups; não executar `git
 ### Consequência operacional
 
 Não abrir integração automática contra `main` nem tentar rebase/merge remoto. Antes de propor PR, é necessário identificar a branch-base correta e entender a divergência histórica, confirmar se a branch é de continuidade local do operador e reconciliar o estado Windows. O trabalho permanece isolado e a branch principal intacta.
+
+
+## 10. Auditoria de integração de testes e CI (24/11/2026)
+
+### CMake / CTest
+
+Foi lido integralmente `DESENVOLVIMENTO/FONTE/CMakeLists.txt` no HEAD da branch de trabalho (`c7308d3c70907f465361187f1d003aa22d9d3421); blob do CMake `ff3f3634cdfa7eb6c85845624c66bc4926c96693`).
+
+- O arquivo declara múltiplos executáveis standalone para recuperação, tesoura, Bézier, distribuição, engrenagens, mecanismos, histórico e importação LightBurn.
+- A configuração Qt usa `ALENCAR_REQUIRE_QT` para permitir exigir o SDK em builds que não podem aceitar um falso sucesso sem GUI.
+- O arquivo termina após as declarações dos alvos 19.9. Na versão examinada, não há chamadas a `enable_testing()`, `include(CTest)` ou `add_test()`.
+- Portanto, os alvos existem para compilação, mas não há registro de descoberta/execução automática deles via CTest. Não afirmar que CTest executa a suíte.
+- Alguns alvos dependem de Qt6 e outros de Boost.JSON, minizip e ZLIB; a disponibilidade dessas dependências precisa ser considerada por qualquer integração futura.
+
+### Workflows
+
+Foram lidos os cinco YAMLs presentes na branch:
+
+- `.github/workflows/portable-curves-19-8.yml`
+- `.github/workflows/preview-19-8-offline.yml`
+- `.github/workflows/qt-windows-gestures-19-8.yml`
+- `.github/workflows/powershell-parser-19-8.yml`
+- `.github/workflows/central-auditoria-19-9.yml`
+
+Constatações:
+
+1. Os workflows `portable-curves`, `powershell-parser`, `qt-windows-gestures` e `central-auditoria` têm gatilhos `push` concentrados na branch antiga `fix/curvas-tesoura-preflight-19-8-20261030`.
+2. Os gatilhos `pull_request` também apontam para branches-base específicas e antigas (`fix/validacao-real-19-8-20261029` ou `feat/refino-curvas-rastreio-diagnosticos-19-8`), não para a branch atual de auditoria.
+3. O workflow `preview-19-8-offline` tem gatilhos para duas branches antigas e um gatilho manual `workflow_dispatch`; seu job Windows de build Qt é explicitamente ignorado em eventos `pull_request`.
+4. O workflow `qt-windows-gestures` tenta compilar e executar um conjunto amplo de testes offline no Windows, mas seus filtros de branch também não incluem a branch de auditoria.
+5. A consulta de Actions para `feat/selecao-mista-alinhamento-svg-bezier-20ze-20261112` retornou zero execuções; o status do commit `c7308d3c70907f465361187f1d003aa22d9d3421` retornou `pending` e zero status individuais.
+
+### Interpretação e ações seguras
+
+- A ausência de execuções na branch atual é coerente com os filtros de branch dos workflows; não é evidência de falha de compilação.
+- Os workflows não devem ser simplesmente ampliados para todas as branches sem uma política de integração: isso poderia executar jobs duplicados ou testar branches com dependências e bases incompatíveis.
+- Recomenda-se criar uma matriz explícita de alvos offline, Qt/Windows e validação manual; depois integrar os testes portáveis ao CTest com condições de dependência claras.
+- Antes de modificar CMake ou workflows, escolher uma branch de integração adequada e confirmar sua relação com a PR e com o estado local do operador.
+
+**Nenhum CMake, YAML, código funcional, branch principal, PR ou configuração de hardware foi alterado nesta etapa.** Esta seção é auditoria documental do conteúdo remoto; nenhum workflow foi executado por esta revisão.
