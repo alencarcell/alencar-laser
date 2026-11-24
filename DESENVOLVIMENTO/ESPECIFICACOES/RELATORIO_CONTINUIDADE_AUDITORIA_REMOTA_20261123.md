@@ -252,3 +252,20 @@ Escopo: revisão estática de svg_import_20ze.hpp, svg_export_20zc.hpp, lightbur
 - Não alterar os parsers sem uma branch de correção isolada, testes de regressão reproduzíveis e build Qt. Não integrar à main nesta etapa.
 
 **Nenhum código funcional, CMake, workflow, PR, branch principal, arquivo local ou configuração de hardware foi alterado.**
+
+### 12.1. Conferência dos testes SVG embutidos na janela Qt
+
+A leitura dos blocos svgExport20zcTest() e svgImport20zeTest() em qt6_test6.cpp confirma que há testes executáveis, não apenas documentação:
+
+- Exportação: cria desenho com engrenagem exterior/furo e uma Bézier aberta; verifica namespace XML, mm, path, C/Z, integridade XML, memória de pasta em QSettings isolado, extensão incorreta e invariância de estado/histórico.
+- Importação: exporta e reimporta um SVG gerado pelo próprio aplicativo; verifica três contornos, anéis da engrenagem, Bézier e handles, dimensões físicas, drag-and-drop, append sem substituir desenho existente, Undo/Redo em lote e hash do arquivo-fonte inalterado.
+- Fixture adicional cobre grupo com translate, retângulo, círculo e arco A; fixture negativa cobre rejeição de texto SVG.
+- Os testes gravam JSON de resultado e usam QTemporaryDir e variáveis de ambiente isoladas para evitar alterar as preferências reais.
+
+Limites confirmados no código dos testes:
+- O roundtrip principal é gerado pelo próprio exportador; não é fixture independente de terceiros.
+- A fixture adicional não cobre matrix, rotate, skew, preserveAspectRatio não padrão, comandos S/T, clip/mask/filter no root, listas numéricas malformadas, unidades q/pc ou SVGs grandes.
+- O teste negativo cobre text, mas não todos os elementos não suportados nem os casos de parse parcial.
+- O teste não verifica cotas de uma curva Bézier cujo ponto extremo real seja diferente do envelope dos pontos de controle.
+
+A existência desses testes melhora a confiança na integração básica, mas não elimina as lacunas da matriz anterior. A execução Qt/Windows permanece pendente até haver log/artefato do SHA exato da branch.
