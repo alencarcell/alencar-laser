@@ -502,3 +502,51 @@ O teste standalone `native_scissors_realcut_19_8_standalone.cpp` confirma no có
 5. Separar o alvo de teste Qt de integração do monólito `qt6_test6.cpp) quando houver branch de integração apropriada; não alterar CMake/workflows nesta auditoria sem build Windows reproduzível.
 
 **Conclusão:** a tesoura linear tem uma suíte adversarial mais madura que a tesoura Bézier. A transformação mista está implementada para deslocamento, escala e rotação, mas sua prova Qt encontrada é principalmente translacional. Alinhamento misto não está demonstrado e centralização de Bézier na mesa é uma restrição beta explícita. Nenhum resultado de execução ou homologação foi inferido.
+
+
+## 15. Revisão numérica do detector de interseções Bézier usado pela tesoura K
+
+**Arquivo:** `DESENVOLVIMENTO/FONTE/src/bezier_interaction.hpp`  
+**Escopo:** análise estática do algoritmo entre as linhas de amostragem, interseção e planejamento de intervalo. Não houve execução numérica nesta etapa.
+
+### 15.1 Pipeline observado
+
+1. Cada cúbica é subdividida recursivamente por De Casteljau (`sampleCubicRec`) até que a distância dos controles à corda seja menor que a tolerância, ou até profundidade 24.
+2. `findCubicIntersections()` rejeita primeiro pares cujas caixas dos quatro pontos de controle não se sobrepõem.
+3. Cada curva é amostrada com tolerância `intersectionToleranceMm * 0.25` (padrão de interseção: 0,01 mm; amostragem: 0,0025 mm).
+4. Os segmentos aproximados são cruzados em pares; segmentos quase paralelos com determinante absoluto abaixo de `1e-14` não geram candidato.
+5. Um candidato é refinado por até 10 iterações de Newton em parâmetros `ta/tb`, com derivadas das cúbicas.
+6. O par é aceito se a distância entre os pontos refinados for menor ou igual à tolerância; duplicatas próximas em parâmetros são removidas.
+7. O planejador ignora interseções muito próximas dos extremos das arestas (`endpointEpsilon=1e-5`), ordena os cruzamentos ao longo do contorno e escolhe os dois limites em torno do cursor, respeitando a tolerância de proximidade de 0,25 mm.
+
+### 15.2 Proteções e decisões conservadoras
+
+- O corte não é executado se não houver pelo menos dois cruzamentos utilizáveis.
+- O cursor próximo de um limite é recusado, evitando selecionar um intervalo instável.
+- Interseções em extremos de arestas não são usadas como limites Bézier nativos neste planejador.
+- A geometria cortada é reconstruída por subdivisão cúbica exata, não por exportação de segmentos lineares.
+- As arestas retas são convertidas para representação cúbica linear antes do cálculo, para manter parâmetro consistente com `splitEdge()`.
+
+Essas decisões favorecem preservar a geometria em casos ambíguos, mesmo que isso signifique não oferecer corte em alguns contatos.
+
+### 15.3 Riscos numéricos a validar, sem declarar defeito
+
+- **Tangência e quase tangência:** o cruzamento inicial depende de segmentos amostrados com determinante não quase nulo. Tangências exatas ou quase paralelas podem não produzir candidato inicial, antes mesmo do refinamento Newton. A política segura é não cortar sem limites confiáveis, mas o usuário pode perceber um corte ausente.
+- **Newton sem convergência explícita:** há limite de 10 iterações e teste final de distância, mas não há critério separado de convergência em `ta/tb` nem retorno de diagnóstico da quantidade de iterações. Casos mal condicionados precisam de fixtures.
+- **Múltiplas raízes próximas:** a deduplicação usa distância em parâmetro `1e-4`; testar raízes distintas mais próximas que esse limiar para verificar se não são fundidas indevidamente.
+- **Parâmetros próximos às pontas:** `endpointEpsilon=1e-5` e a deduplicação podem interagir com curvas curtas ou raízes quase coincidentes com âncoras.
+- **Custo:** para cada par de arestas cujas caixas globais se sobrepõem, o algoritmo compara segmentos amostrados em laço duplo. Em desenhos com muitas cúbicas espacialmente próximas, o custo pode crescer rapidamente. O BVH mencionado na tesoura linear não deve ser presumido como aplicado a este caminho nativo sem evidência específica.
+- **Escala física:** as tolerâncias estão em milímetros; testar a mesma geometria em tamanhos muito pequenos/grandes e em zooms diferentes. O zoom afeta a seleção do cursor, mas não altera diretamente a tolerância geométrica de interseção.
+
+### 15.4 Fixtures propostas antes de qualquer refatoração
+
+1. Cruzamento transversal simples com solução conhecida e erro máximo medido.
+2. Tangência exata entre duas cúbicas: confirmar recusa segura e motivo observável.
+3. Quase tangência com separações graduais (por exemplo 0,1; 0,01; 0,001 mm): medir falso contato e falso negativo.
+4. Duas raízes próximas em uma mesma dupla de curvas, incluindo distância paramétrica menor e maior que `1e-4`.
+5. Cúbicas coincidentes e parcialmente sobrepostas: garantir recusa, nunca corte arbitrário.
+6. Interseção em âncora/limite entre arestas adjacentes: verificar política de endpoint e ausência de duplicatas.
+7. Mesmo conjunto geométrico escalado por fatores 0,01, 1 e 100, mantendo resultado topológico esperado.
+8. Documento com 10, 100, 500 e 1.000 arestas Bézier próximas: registrar tempo, número de amostras e pares de segmentos avaliados.
+
+**Conclusão:** o detector possui uma cadeia clara de aproximação adaptativa, refinamento Newton e validação residual, com política conservadora para não realizar cortes sem dois limites. A principal lacuna é evidência adversarial e de desempenho para casos Bézier mal condicionados. Não se recomenda alterar tolerâncias ou o algoritmo antes de adicionar fixtures mensuráveis e executar a suíte offline.
