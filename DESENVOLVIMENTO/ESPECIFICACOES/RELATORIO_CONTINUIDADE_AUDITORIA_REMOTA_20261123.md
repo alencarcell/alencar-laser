@@ -550,3 +550,90 @@ Essas decisões favorecem preservar a geometria em casos ambíguos, mesmo que is
 8. Documento com 10, 100, 500 e 1.000 arestas Bézier próximas: registrar tempo, número de amostras e pares de segmentos avaliados.
 
 **Conclusão:** o detector possui uma cadeia clara de aproximação adaptativa, refinamento Newton e validação residual, com política conservadora para não realizar cortes sem dois limites. A principal lacuna é evidência adversarial e de desempenho para casos Bézier mal condicionados. Não se recomenda alterar tolerâncias ou o algoritmo antes de adicionar fixtures mensuráveis e executar a suíte offline.
+
+
+## 16. Auditoria do pacote integrado .alaser v5 e preservação de projetos
+
+**Arquivos:** `src/bezier_package.hpp`, `src/persistence.hpp`, `src/integrated_project_edit.hpp`, `src/test_alaser_v5_codec_regression.cpp`, `src/test16_preserve_project.cpp`, `qt/qt6_test16_persistence.cpp` e `qt/qt6_test17_mission.cpp`. Revisão estática do HEAD remoto `a97d717eda1e524dd83d4821c47f1e3320a73635`; nenhum binário foi compilado ou executado.
+
+### 16.1 Estrutura e integridade
+
+- O pacote v5 é um ZIP com `manifest.json`, `design/geometry.json`, `design/bezier.json`, `design/layers.json`, `fabrication/operations.json` e `design/original_bezier_samples.csv`.
+- A geometria convencional e as curvas Bézier são serializadas separadamente. As coordenadas nativas usam representação hexadecimal dos bits IEEE-754 de 64 bits, preservando os valores exatos de ponto flutuante no roundtrip.
+- O manifesto guarda digests FNV-1a de 64 bits para geometria, curvas, camadas, operações e amostras originais. O leitor extrai cada membro, verifica CRC/tamanho e compara os digests antes de decodificar o projeto.
+- Cada membro extraído tem limite de 64 MiB e a rotina verifica tamanho final e CRC. Não foi localizada, nesta implementação, uma cota agregada explícita para o tamanho total descompactado do pacote nem uma política explícita para rejeitar entradas ZIP duplicadas ou membros adicionais desconhecidos.
+- FNV-1a é uma etiqueta de integridade acidental, não hash criptográfico. É útil para detectar corrupção casual, mas não deve ser descrito como proteção contra adulteração deliberada.
+- O leitor mantém compatibilidade com v4 pelo caminho `readPackage()`; versões integradas diferentes de 4 e 5 são recusadas.
+
+### 16.2 Gravação e substituição de arquivo — bloqueio Windows confirmado no próprio código
+
+A gravação v5 cria `<destino>.partial`, remove previamente um temporário com esse nome, escreve os membros ZIP, fecha o arquivo e então chama `std::filesystem::rename(temp, path)`. O arquivo `persistence.hpp` contém comentário explícito: a substituição por rename é atômica em POSIX; no Windows, o produto deve usar `QSaveFile` ou `ReplaceFileW`, com flush/backup.
+
+Consequência: **não considerar comprovado o salvamento por cima de um .alaser já existente no Windows**. O código atual não implementa nessa rotina o caminho de substituição Windows descrito pelo próprio comentário. O teste de codec grava repetidamente no mesmo caminho, mas não demonstra que o comportamento funciona no Windows; também não foi executado nesta auditoria. A GUI deve ser testada em Windows com destino já existente, incluindo falha/interrupção e preservação do arquivo anterior.
+
+Não corrigi essa rotina remotamente: é código de persistência de dados do usuário e requer teste Windows reproduzível, política de backup/recuperação e verificação de falha antes de qualquer alteração funcional.
+
+### 16.3 Preservação de metadados e estado seguro
+
+- `integrated_project_edit.hpp` preserva campos adicionais de metadados e operações, sobrepondo os atributos canônicos modificados pelo editor.
+- Registros de camadas/objetos são reconciliados por ID; itens removidos não são ressuscitados pelo overlay.
+- Schema de metadados desconhecido é recusado para evitar gravação destrutiva. Projetos sem schema recebem estado padrão e podem ser atualizados para `editor-meta-1`, mantendo campos de origem.
+- Camadas referenciadas por curvas LightBurn nativas podem ser registradas como placeholders, explicitamente marcadas com parâmetros não verificados. O código não trata CutIndex como velocidade/potência confiável.
+- `safeOperations()` força `fabricationEnabled=false` ao preparar o projeto editado. Isso é uma salvaguarda de estado do documento, não uma validação de hardware ou CAM.
+- Os testes 16/17 incluem preservação de metadados, operações, amostras originais, recusa de schema futuro e rejeição de arquivo corrompido sem danificar o documento aberto.
+
+### 16.4 Matriz de cobertura
+
+| Caso | Cobertura no código | Estado nesta auditoria |
+|---|---|---|
+| Roundtrip v5 de curvas/IDs/handles | Codec standalone e testes 13–17 | Codificado; não executado |
+| Compatibilidade de leitura v4 | Teste 13 | Codificado; não executado |
+| CRC e digest por membro | Leitor ZIP | Revisado estaticamente |
+| Membro acima de 64 MiB | Limite no extrator | Revisado; sem ensaio executado |
+| Limite agregado do ZIP | Não localizado | Lacuna |
+| Entradas duplicadas/adicionais no ZIP | Política explícita não localizada | Lacuna |
+| Schema de editor desconhecido | Recusa em `integrated_project_edit.hpp` e teste 16 | Codificado; não executado |
+| Arquivo corrompido sem danificar projeto aberto | Teste Qt 17 | Codificado; não executado |
+| Salvar por cima de arquivo existente no Windows | Comentário de implementação aponta necessidade de API Windows própria | **Bloqueio de validação** |
+| Recuperação após interrupção durante substituição | Não comprovada no Windows | Lacuna |
+
+## 17. Histórico Bézier, coordenação entre modelos e desempenho
+
+### 17.1 Histórico Bézier nativo
+
+A classe `CurveHistory` mantém snapshots completos de `CurveDocument` em vetores `undo_` e `redo_`. Cada alteração copia o documento, aplica a função, valida o resultado e só então publica o novo estado; Undo/Redo movem snapshots entre as pilhas e uma nova edição limpa Redo. `CurveDragSession` agrupa todos os eventos de mousemove em uma única entrada de histórico e mantém preview separado do estado confirmado.
+
+**Risco de memória:** não há limite de quantidade de estados nem orçamento de bytes na classe `CurveHistory` revisada. O teste `history_memory_19_9_standalone.cpp` cobre limite de 40 estados/estimativa de payload de outro histórico, mas isso não demonstra que a pilha nativa Bézier esteja limitada. Em documentos grandes, snapshots completos podem multiplicar o consumo de memória. Não é possível concluir que haverá esgotamento; a política de retenção precisa ser medida e definida.
+
+### 17.2 Coordenação do histórico misto
+
+A janela possui coordenação de Undo/Redo entre o editor convencional e a sessão Bézier, conforme as fixtures de integração já descritas nas seções 13–14. A classe `CurveHistory`, isoladamente, não conhece o histórico convencional nem a identidade de uma transação mista. Portanto, a consistência depende da camada coordenadora da janela.
+
+Casos que merecem fixtures explícitas adicionais:
+1. sequência alternada: edição convencional, edição Bézier, Undo duas vezes, Redo duas vezes;
+2. edição convencional depois de Undo misto, confirmando que Redo é invalidado nos dois modelos;
+3. falha controlada no commit de um dos modelos, confirmando rollback completo;
+4. abrir outro documento durante estado com Redo disponível, confirmando que nenhum snapshot do projeto anterior vaza para o novo;
+5. limite/limpeza de histórico em ambos os modelos com contagens e identidades verificadas;
+6. salvar/reabrir e confirmar que o histórico começa em estado coerente, sem prometer persistência de Undo/Redo se o formato não armazena essas pilhas.
+
+Esses são casos a provar, não defeitos confirmados. Não alterar a coordenação sem uma fixture que reproduza divergência.
+
+### 17.3 Desempenho e validade das métricas
+
+O `perf_test13.cpp` trabalha com fixture real de curvas importadas e exige 575 contornos convencionais no CSV legado. Mede flatten em três tolerâncias, erro de subdivisão, operações de histórico, roundtrip JSON/ZIP e compatibilidade v4; declara explicitamente `qt6_executed=false` e `machine_connected=false` no relatório JSON.
+
+O teste não equivale a benchmark de GUI, renderização, RAM total ou tempo de abertura de projeto em Windows. Os valores e resultados só podem ser considerados medidos quando o executável for efetivamente rodado com as duas fixtures e diretório de saída identificados.
+
+A estimativa de memória do teste standalone de histórico mede payload de nós/arrays, não heap total, alocações temporárias, índices espaciais, caches Qt, bitmaps ou RSS do processo. O custo de snapshots completos de `CurveHistory` também não é representado por uma simples contagem de nós retidos sem medir cópias e capacidades alocadas.
+
+### 17.4 Próximos testes seguros e prioritários
+
+1. Criar cópia de uma fixture v5 e executar o teste de codec em diretório temporário, sem arquivos de cliente.
+2. No Windows, testar salvar uma vez em caminho novo e depois salvar novamente sobre o mesmo caminho; em seguida simular falha antes da substituição e verificar hash/abertura do arquivo anterior.
+3. Testar ZIP com membro acima do limite, total agregado excessivo, entrada duplicada, membro inesperado, CRC incorreto e manifesto/digest divergente.
+4. Executar os casos de Undo/Redo misto da seção 17.2 em fixture Qt, registrando SHA, processo e resultado.
+5. Medir tempo e RSS em documentos sintéticos progressivos (nós, contornos, curvas e estados de histórico), separando tempo de importação, índice espacial, renderização e Undo/Redo.
+6. Definir orçamento de histórico em bytes/estados para o modelo Bézier somente depois de medir cenários reais e decidir política de descarte previsível.
+
+**Conclusão das seções 16–17:** a estrutura v5 contém separação de modelos, verificação de integridade por membro, preservação de metadados e salvaguarda para manter fabricação desabilitada. O bloqueio mais concreto é a substituição de arquivos existentes no Windows: a própria implementação reconhece que o rename POSIX não é estratégia suficiente para o produto Windows. Também faltam limites explícitos de memória na pilha nativa Bézier e evidência de execução das fixtures de persistência/histórico. Nenhum arquivo de produção foi modificado nesta etapa.
