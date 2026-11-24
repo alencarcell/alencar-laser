@@ -394,3 +394,31 @@ Também não foi comprovado nesta auditoria:
 5. Executar os alvos standalone e Qt no ambiente Windows do projeto, registrar comando, SHA do executável, logs completos e fixtures; não conectar máquina laser.
 
 **Conclusão da seção:** a branch contém uma base de testes substancial para edição geométrica, tesoura e curvas nativas, incluindo eventos Qt codificados. O principal bloqueio funcional ainda sem evidência é a seleção/transformação simultânea de geometria legada e Bézier nativa. A auditoria permanece estática: nenhum PASS de execução, build ou homologação é atribuído nesta seção.
+
+
+### 13.8 Complemento após inspeção aprofundada: seleção mista já possui implementação e fixture Qt
+
+A leitura adicional de `qt6_test6.cpp` revelou uma cobertura que não estava visível nos testes 15–17 revisados inicialmente e que precisa qualificar a conclusão das seções 13.5–13.7:
+
+- `combinedSelectionBounds()` une os limites dos objetos convencionais e das curvas nativas selecionadas;
+- `selectAllMixed()` seleciona objetos convencionais editáveis e todos os contornos Bézier nativos, mantendo os dois modelos selecionados simultaneamente;
+- `beginSelectionTransform()` reúne os itens gráficos dos dois modelos em um mesmo quadro/preview;
+- `finishSelectionTransform()` confirma a transformação nos dois modelos; se a operação convencional falhar após o commit nativo, tenta desfazer a alteração nativa;
+- `history()` possui caminho específico para Undo/Redo coordenado, verificando as gerações/contagens de histórico e revertendo o primeiro lado se o segundo lado não puder acompanhar;
+- o atalho Ctrl+A chama `selectAllMixed()`.
+
+Foi localizada uma fixture Qt no próprio `qt6_test6.cpp` que:
+1. importa duas curvas nativas LightBurn;
+2. acrescenta um retângulo convencional ao mesmo documento;
+3. seleciona contornos nativos individualmente e em conjunto;
+4. chama `selectAllMixed()` e também envia Ctrl+A como evento Qt;
+5. verifica que o quadro de seleção contém o retângulo e uma curva nativa;
+6. arrasta um handle compartilhado e confirma o deslocamento de ambos os modelos;
+7. usa um único Ctrl+Z e Ctrl+Y para restaurar/refazer os dois lados;
+8. verifica roundtrip v5 e preservação de metadados de camada não verificados.
+
+**Conclusão corrigida:** seleção mista e transformação translacional coordenada não são apenas intenção de código; há implementação explícita e uma fixture de integração Qt que codifica esse cenário. A classificação correta é **IMPLEMENTADO + TESTE Qt CODIFICADO; EXECUÇÃO NÃO VERIFICADA NESTA AUDITORIA**. A lacuna remanescente não é ausência total de cobertura mista, mas cobertura incompleta: a fixture encontrada demonstra Ctrl+A, quadro combinado, arraste translacional e Undo/Redo; não demonstra claramente escala e rotação mistas, seleção aditiva manual de formas convencionais e Bézier, alinhamento misto por comandos, nem grupos mistos em todas as combinações.
+
+A fixture pertence ao arquivo monolítico `qt6_test6.cpp`; o modo exato de execução e sua associação a um alvo dedicado devem ser conferidos no CMake e no dispatcher antes de afirmar que ela roda automaticamente. A existência do código de teste não comprova que tenha sido compilado ou executado na máquina Windows.
+
+**Prioridade atualizada:** executar o cenário misto existente com o alvo/modo correto; depois acrescentar escala, rotação e alinhamento mistos, mais casos de falha/rollback entre os dois históricos. Não duplicar uma fixture que já existe.
