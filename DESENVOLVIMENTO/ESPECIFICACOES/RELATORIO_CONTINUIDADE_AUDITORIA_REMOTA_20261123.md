@@ -209,3 +209,46 @@ Foram inspecionados os fontes qt6_test11_seams.cpp até qt6_test17_mission.cpp n
 **Conclusão desta etapa:** há uma cadeia de testes mais completa do que a auditoria inicial sugeria, especialmente nos testes 15–17. O principal risco não é ausência total de cobertura, mas a diferença entre testes isolados e a janela integrada, o acoplamento ao qt6_test6.cpp, a orquestração de fixtures/arquivos temporários e a falta de evidência de execução no HEAD atual. Nenhuma alteração funcional é recomendada antes de executar a matriz acima em ambiente controlado.
 
 **Nenhum código funcional, CMake, workflow, branch principal, PR, arquivo local ou configuração de hardware foi alterado nesta etapa.**
+
+## 12. Auditoria de importação/exportação SVG e LightBurn (24/11/2026)
+
+Escopo: revisão estática de svg_import_20ze.hpp, svg_export_20zc.hpp, lightburn_geometry_import.hpp, lightburn_native_import_19_9.hpp, testes LightBurn e trechos de integração em qt6_test6.cpp. Nenhum executável foi compilado ou executado nesta etapa.
+
+### SVG — capacidades verificadas no código
+
+- O importador 20ze lê XML offline e converte path, line, polyline, polygon, rect, circle e ellipse em CurveDocument; preserva segmentos cúbicos como Bézier nativa.
+- O parser de path contempla M/L/H/V/C/S/Q/T/A/Z, incluindo comandos relativos, curvas quadráticas convertidas em cúbicas e arcos convertidos em segmentos cúbicos.
+- Há suporte a grupos SVG (g), transformações matrix/translate/scale/rotate/skewX/skewY, viewBox, dimensões físicas e unidades mm/cm/in/pt/pc/px/q.
+- Há limites declarados para tamanho do arquivo, número de contornos, âncoras e coordenadas. O fluxo de importação na janela adiciona geometria ao desenho existente, pede confirmação e tem teste de Undo/Redo e drag-and-drop.
+- O exportador 20zc grava SVG 1.1 com dimensões físicas em mm, viewBox em mm, caminhos vetoriais, curvas Bézier C, fechamento Z e gravação atômica QSaveFile. Exporta os vetores visíveis, não CAM, potência, velocidade, bitmap ou G-code.
+- O teste SVG está embutido em qt6_test6.cpp nos modos --svg-export-20zc-test e --svg-import-20ze-test; o alvo Qt alencar_test7_qt6 compila esse arquivo. Não há alvo CMake separado e dedicado exclusivamente a SVG.
+
+### Lacunas e riscos identificados
+
+1. **Efeitos no elemento raiz:** checkNoClip() é aplicado aos elementos filhos durante readChildren(), mas não é chamado sobre os atributos do elemento raiz svg. Um clip-path, mask ou filter aplicado diretamente ao SVG raiz pode não ser refletido na geometria importada. Antes de aceitar esse tipo de arquivo, o importador deve rejeitar explicitamente o efeito no root ou implementá-lo.
+2. **Leitura permissiva de listas numéricas:** numbers() extrai substrings numéricas por regex sem validar integralmente os caracteres entre elas. Isso é usado em viewBox, transformações e listas de pontos. Dados malformados com texto intercalado podem ser interpretados como se fossem uma lista válida. Recomenda-se validar separadores e consumir integralmente a string, com testes negativos.
+3. **Dimensão de exportação Bézier:** o exportador calcula bounds incluindo âncoras e pontos de controle, em vez dos extremos analíticos da curva cúbica. Isso gera um retângulo conservador (possivelmente maior que o desenho visível), não altera as coordenadas da curva, mas pode fazer width/height informados no SVG excederem a extensão visual real. Para cotas físicas confiáveis, calcular os extremos da Bézier e testar com curvas cujos controles ficam fora da caixa visual.
+4. **Semântica de visibilidade entre vetores legados e nativos:** polilinhas legadas exigem metadata de objeto e camada; curvas nativas tratam camada ausente como visível. Essa diferença está comentada no código, mas precisa de teste explícito para garantir que ocultar/mostrar camadas tenha comportamento previsível em desenhos mistos.
+5. **Estilos SVG:** o importador deliberadamente importa geometria, não estilos, preenchimentos, espessuras, cores, texto, imagens ou referências use. Elementos text/image/use/foreignObject são rejeitados; clip-path/mask/filter em filhos são rejeitados. Gradientes, patterns, markers e style são ignorados como definições, não convertidos. Isso precisa permanecer claro na interface para evitar expectativa de fidelidade visual integral.
+6. **Escala e alinhamento:** preserveAspectRatio=slice é recusado; meet/none são tratados. Faltam evidências executadas com arquivos reais de Inkscape/Illustrator/LightBurn contendo viewBox, unidades, grupos aninhados, rotação e skew. Os testes sintéticos existentes não equivalem a essa matriz de compatibilidade.
+7. **Precisão de exportação:** coordenadas são serializadas com 9 casas decimais e stroke-width fixo de 0.1 mm; o arquivo representa caminhos de traço sem preencher áreas. Isso é uma escolha de representação vetorial, não exportação de parâmetros de fabricação nem de preenchimento/corte.
+8. **Importação LBRN2 conservadora antiga:** lightburn_geometry_import.hpp aproxima cada curva B por 24 segmentos lineares e impõe limite de 250 mil nós; grupos são achatados com um nível de grupo e formas incompatíveis são recusadas. É útil como caminho legado de geometria, mas não preserva Bézier nativa.
+9. **Importação LBRN2 nativa experimental:** lightburn_native_import_19_9.hpp preserva comandos B como Bézier nativa, resolve VertID/PrimID compartilhados após ler o XML completo e recusa grupos/hierarquia, espelhamento MirrorX/MirrorY, tipos não suportados e arquivos acima de 32 MB. Elipses são aproximadas por 16 arcos cúbicos; isso não é representação cônica analítica exata.
+10. **Camadas e agrupamento LBRN2:** o parser nativo carrega CutIndex em CurveContour.layer, mas o CurveDocument não preserva hierarquia de grupos. O parser recusa grupos para não achatá-los silenciosamente. A importação nativa ainda é exploratória e não substitui o caminho ativo da GUI sem validação de camada, agrupamento, IDs e persistência.
+11. **Segurança de importação:** ambos os importadores recusam arquivos com MirrorX/MirrorY ativo por falta de homologação da origem/orientação. A importação nativa ignora deliberadamente configurações de corte do LightBurn; nenhuma informação de potência/velocidade deve ser tratada como importada.
+
+### Matriz de validação que falta
+
+- SVG: root clip/mask/filter; listas numéricas com caracteres inválidos; unidades físicas e CSS px; viewBox com meet/none/slice; transforms aninhados e skew; comandos S/T/A e paths múltiplos; geometria Bézier com bounds extremos; arquivo com 32 MB/limites; camadas ocultas e desenho misto.
+- LBRN2: fixture real com grupos, subpaths desconectados, referências compartilhadas, curvas fechadas/abertas, elipses, transforms, camadas e MirrorX/Y; comparar contagem e coordenadas contra o LightBurn sem salvar por cima do original.
+- Roundtrip: importar SVG/LBRN2 para cópia .alaser v5, salvar, fechar, reabrir em processo independente, exportar SVG e comparar coordenadas, IDs, número de contornos, fechamento, handles e dimensões. Não exigir preservação de estilo/bitmap quando o formato/código explicitamente não os suporta.
+- GUI: testar diálogo de importação, confirmação, cancelamento, drag-and-drop, Undo/Redo e falha no meio do parse sem substituir o desenho existente.
+
+### Decisão técnica
+
+- **SVG export:** implementação tem uma base coerente e teste integrado escrito, mas falta executar gate Qt/Windows e validar cotas reais; o cálculo conservador de bounds deve ser corrigido ou documentado antes de usar dimensões do SVG como cota final.
+- **SVG import:** cobertura de comandos vetoriais é ampla, mas a validação de listas numéricas e os efeitos no root são bloqueios de confiabilidade a tratar antes de classificar como importador robusto.
+- **LBRN2:** manter o importador poligonal legado separado do importador nativo experimental. Não fazer substituição automática até homologar grupos, camadas, orientação, fixture real e roundtrip v5.
+- Não alterar os parsers sem uma branch de correção isolada, testes de regressão reproduzíveis e build Qt. Não integrar à main nesta etapa.
+
+**Nenhum código funcional, CMake, workflow, PR, branch principal, arquivo local ou configuração de hardware foi alterado.**
