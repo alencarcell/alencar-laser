@@ -128,3 +128,27 @@ Estado do teste:
 - Compilação: NOT TESTED.
 - Execução: NOT TESTED.
 - Alteração em `main`: nenhuma.
+
+
+## 9. Contrato independente de camada para curvas nativas — 24/11/2026
+
+Criado `src/curve_layer_bindings.hpp` com `CurveLayerBindings`, indexado por `Key{object,subpath}`, sem inserir IDs de curvas em `EditorState.objects`. A camada é resolvida contra `EditorState.layers`, enquanto a identidade do contorno continua pertencendo a `CurveDocument`.
+
+O contrato implementado exige:
+- exatamente um vínculo por contorno Bézier;
+- nenhuma referência a contorno inexistente;
+- toda camada referenciada deve existir no editor;
+- chaves duplicadas no JSON são recusadas;
+- serialização JSON explícita de `objectId`, `subpathId` e `layerId`.
+
+Criado `tests/curve_layer_bindings_test.cpp` e alvo `alencar_test_curve_layer_bindings`, incluindo roundtrip JSON e casos negativos para vínculo ausente, camada desconhecida, vínculo órfão e chave duplicada.
+
+**Limite importante:** isto ainda é um contrato isolado, não integração completa de produto. O pacote v5 atual não lê nem grava esse campo; `editorStateForIntegratedProject()` também não carrega os vínculos. A próxima etapa deve incorporar o array como campo adicional preservável em `legacy.layers` (schema `editor-meta-1`) e conectar o ciclo de abrir/salvar sem descartar vínculos, mantendo compatibilidade v4/v5. A função `preserveEditorMetadata()` já conserva campos adicionais que não são sobrescritos por `metadata(edited)`, mas isso, sozinho, não materializa nem valida os vínculos na abertura.
+
+### Estado
+- Header do contrato: publicado.
+- Teste de roundtrip e rejeições: publicado.
+- Alvo CMake: publicado, vincula `boost_json_impl.cpp`.
+- Compilação/execução: NOT TESTED nesta sessão.
+- GUI/importação SVG/persistência `.alaser`: NOT TESTED.
+- `main`: sem alterações.
