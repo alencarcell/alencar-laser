@@ -152,3 +152,35 @@ Criado `tests/curve_layer_bindings_test.cpp` e alvo `alencar_test_curve_layer_bi
 - Compilação/execução: NOT TESTED nesta sessão.
 - GUI/importação SVG/persistência `.alaser`: NOT TESTED.
 - `main`: sem alterações.
+
+
+## 10. Persistência dos vínculos Bézier no pacote v5 — 24/11/2026
+
+Implementada uma primeira integração do contrato de camadas com os metadados do projeto:
+
+- `integrated_project_edit.hpp` agora oferece `preserveCurveLayerBindings()`, `curveLayerBindingsForIntegratedProject()` e `buildEditedIntegratedProjectWithCurveLayers()`.
+- Os vínculos são armazenados no objeto `legacy.layers` sob a chave `nativeCurveLayerBindings`, mantendo `schema=editor-meta-1`.
+- A identidade é a chave composta `objectId/subpathId`; `layerId` é validado contra as camadas do `EditorState`.
+- Projeto v5 com curvas nativas mas sem a chave de vínculos é rejeitado explicitamente. Projeto v4 não ganha vínculos implicitamente.
+- O codec de ZIP não foi alterado: o campo está no membro `design/layers.json`, coberto pelo digest existente do pacote v5.
+
+Adicionado `tests/curve_layer_persistence_test.cpp` e alvo CMake `alencar_test_curve_layer_persistence`. O teste cria estado e curva em memória, grava pacote `.alaser` em arquivo temporário exclusivo, reabre, valida a camada e verifica rejeição de vínculo ausente. O teste remove apenas o arquivo temporário que ele próprio cria.
+
+### Limitações e riscos restantes
+- O teste ainda não foi compilado/executado; revisão remota não confirma compatibilidade de compilação.
+- A GUI ainda não carrega/atualiza `CurveLayerBindings` durante importação, edição, exclusão ou Undo/Redo.
+- A chamada existente `buildEditedIntegratedProject()` permanece disponível e não injeta vínculos; a integração de produto deve migrar para `buildEditedIntegratedProjectWithCurveLayers()` quando possuir estado válido de vínculos.
+- A abertura de projeto v5 com curvas existentes e sem vínculos passa a exigir política explícita de migração/default antes de ser usada por esse novo caminho. Não atribuir camada 0 silenciosamente.
+- O teste não verifica substituição de arquivo existente no Windows, já identificada como risco separado de `std::filesystem::rename`.
+
+### Estado
+| Item | Estado |
+|---|---|
+| Metadado de vínculo no pacote v5 | Implementado na branch |
+| Validação de camada e chave composta | Implementado na branch |
+| Teste de roundtrip `.alaser` | Codificado |
+| CMake do teste | Adicionado |
+| Build/execução Windows | NOT TESTED |
+| Integração GUI/Undo/Redo | NOT IMPLEMENTED |
+| Compatibilidade com projetos v5 antigos com curvas | Requer política de migração explícita |
+| `main` | Intacta |
