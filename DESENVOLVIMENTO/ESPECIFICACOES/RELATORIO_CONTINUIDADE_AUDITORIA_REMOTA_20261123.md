@@ -637,3 +637,44 @@ A estimativa de memória do teste standalone de histórico mede payload de nós/
 6. Definir orçamento de histórico em bytes/estados para o modelo Bézier somente depois de medir cenários reais e decidir política de descarte previsível.
 
 **Conclusão das seções 16–17:** a estrutura v5 contém separação de modelos, verificação de integridade por membro, preservação de metadados e salvaguarda para manter fabricação desabilitada. O bloqueio mais concreto é a substituição de arquivos existentes no Windows: a própria implementação reconhece que o rename POSIX não é estratégia suficiente para o produto Windows. Também faltam limites explícitos de memória na pilha nativa Bézier e evidência de execução das fixtures de persistência/histórico. Nenhum arquivo de produção foi modificado nesta etapa.
+
+
+## 18. Orquestração de build e execução dos testes de persistência
+
+A revisão do bloco final de `DESENVOLVIMENTO/FONTE/CMakeLists.txt` confirmou alvos independentes para os testes 15, 16 e 17:
+
+| Alvo | Dependências | Papel |
+|---|---|---|
+| `alencar_test15_core` | Boost.JSON, minizip, ZLIB | Sessão Bézier e roundtrip sem GUI |
+| `alencar_test15_qt_integrated` | Qt6 Core/Gui/Widgets/Test/Network, Boost.JSON, minizip, ZLIB | Integração da janela |
+| `alencar_test15_real_roundtrip` | Boost.JSON, minizip, ZLIB | Roundtrip com projeto real |
+| `alencar_test16_preserve_project` | Boost.JSON, minizip, ZLIB | Preservação de metadados e operações |
+| `alencar_test16_qt_persistence` | Qt6 + dependências do pacote | Persistência via LabWindow |
+| `alencar_test17_mission` | Qt6 + dependências do pacote | Interação e persistência na mesma LabWindow |
+
+### 18.1 O que o CMake não faz automaticamente
+
+O arquivo declara os executáveis, mas não registra `enable_testing()`, `include(CTest)` nem `add_test()`. Portanto, compilar os alvos não executa os programas e `ctest` não é uma prova de que essas fixtures rodaram. Os modos `--write`, `--verify`, `--selftest` e `--interaction` precisam ser chamados explicitamente, em processos e ordem adequados.
+
+### 18.2 Sequência de build isolado sugerida
+
+A partir da raiz do repositório, em uma cópia de trabalho controlada e sem alterar a pasta de produção:
+
+```powershell
+cmake -S DESENVOLVIMENTO/FONTE -B build-auditoria-v5 -DALENCAR_REQUIRE_QT=ON
+cmake --build build-auditoria-v5 --config Release --target alencar_test15_core alencar_test16_preserve_project alencar_test_v5_codec_regression
+cmake --build build-auditoria-v5 --config Release --target alencar_test15_qt_integrated alencar_test16_qt_persistence alencar_test17_mission
+```
+
+A segunda linha só deve ser usada se o CMake confirmar o alvo opcional `alencar_test_v5_codec_regression`; sua criação depende de Boost.JSON, minizip e ZLIB encontrados na configuração. O modo `ALENCAR_REQUIRE_QT=ON` evita que a ausência do SDK resulte em build aparentemente completo sem os alvos GUI.
+
+### 18.3 Ordem de execução e isolamento de fixtures
+
+- `alencar_test16_preserve_project --selftest` não exige fixture de usuário e cobre os casos sintéticos de schema/proveniência.
+- O modo `--write INPUT OUTPUT` do teste 16 lê um projeto v5 de entrada e grava outro arquivo. O modo `--verify INPUT OUTPUT` precisa da mesma origem e do arquivo produzido.
+- O teste Qt 16 também exige entrada e saída separadas; a origem deve continuar acessível no modo `--verify`.
+- O teste 17 `--interaction DIRETORIO` cria capturas; os modos `--write INPUT OUTPUT` e `--verify INPUT OUTPUT` produzem e consomem sidecars `.expected`, `.png`, `.corrupt` e `.unknown`. Executar exclusivamente em diretório temporário dedicado.
+- O teste 15 core aceita `--write|--verify` com caminho de arquivo; o teste Qt 15 integrado tem seu próprio fluxo e não deve ser confundido com o core.
+- O teste 13 requer duas fixtures CSV e um diretório de saída, e espera 575 contornos convencionais na fixture legada. Sem essas entradas exatas, não interpretar falha de execução como regressão do codec.
+
+**Não executei os comandos acima nesta auditoria.** Eles são um roteiro de reprodução derivado dos alvos e argumentos observados no código; não são evidência de build ou aprovação. Não incluí comandos que apontem para projetos reais do usuário, diretórios de produção ou hardware.
