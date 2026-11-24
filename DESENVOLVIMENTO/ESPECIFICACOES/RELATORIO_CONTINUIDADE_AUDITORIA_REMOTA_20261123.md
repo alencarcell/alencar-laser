@@ -269,3 +269,128 @@ Limites confirmados no código dos testes:
 - O teste não verifica cotas de uma curva Bézier cujo ponto extremo real seja diferente do envelope dos pontos de controle.
 
 A existência desses testes melhora a confiança na integração básica, mas não elimina as lacunas da matriz anterior. A execução Qt/Windows permanece pendente até haver log/artefato do SHA exato da branch.
+
+
+## 13. Auditoria de seleção, transformação, alinhamento, tesoura e histórico
+
+**Escopo:** leitura estática dos fontes e testes remotos da branch. Nenhum executável foi compilado ou rodado nesta etapa; resultados abaixo descrevem o que os testes codificam, não uma execução confirmada.
+
+### 13.1 Transformação de curvas Bézier nativas
+
+Arquivos:
+- `DESENVOLVIMENTO/FONTE/src/bezier_native.hpp`
+- `DESENVOLVIMENTO/FONTE/src/bezier_interaction.hpp`
+- `DESENVOLVIMENTO/FONTE/tests/native_transform_19_8_standalone.cpp`
+
+O teste standalone declara cenários para:
+- escala não uniforme em torno de um pivô;
+- transformação conjunta de âncoras e handles de entrada/saída;
+- preservação de IDs, quantidade de nós e `edgeKind`;
+- rotação, deslocamento e preservação da seleção;
+- Undo/Redo exato e rejeição de escala zero sem acrescentar estado ao histórico.
+
+**Limite:** o teste apresentado transforma um contorno nativo selecionado; não prova todas as combinações de seleção múltipla, objetos bloqueados/ocultos, grupos mistos, texto editável e objetos legados na interface Qt. A validação é de núcleo standalone, não de mouse/GUI.
+
+### 13.2 Alinhamento, centralização e espelhamento
+
+Arquivos:
+- `DESENVOLVIMENTO/FONTE/src/editor_tools.hpp`
+- `DESENVOLVIMENTO/FONTE/tests/alignment_mirror_19_8_standalone.cpp`
+- `DESENVOLVIMENTO/FONTE/tests/text_alignment_19_8_standalone.cpp`
+
+A cobertura standalone declara:
+- alinhamento de centros de dois objetos;
+- centralização do conjunto selecionado no centro da área de trabalho;
+- preservação de desenho não selecionado;
+- espelhamento em torno de eixo calculado a partir dos limites atuais;
+- Undo em uma transação para espelhamento;
+- alinhamento por centro X/Y e bordas esquerda/direita;
+- alinhamento de grupo como unidade, preservando deslocamentos relativos;
+- metadados de texto editável e compatibilidade com metadados legados sem a chave `editableTexts`.
+
+**Limites:** a suíte não equivale a validação visual de alças, indicadores, caixas delimitadoras e comandos de alinhamento na janela Qt. O teste de centralização usa coordenadas sintéticas e centro fixo (200,200); não comprova que o valor venha corretamente da dimensão real da máquina ou do workspace configurado. A área de trabalho e o alinhamento permanecem operações editoriais; não representam movimento físico.
+
+### 13.3 Tesoura em vetores lineares e curvas nativas
+
+Arquivos:
+- `DESENVOLVIMENTO/FONTE/src/scissors_span.hpp`
+- `DESENVOLVIMENTO/FONTE/src/bezier_interaction.hpp`
+- `DESENVOLVIMENTO/FONTE/tests/native_scissors_realcut_19_8_standalone.cpp`
+- `DESENVOLVIMENTO/FONTE/tests/test19_7_scissors_layers.cpp`
+- `DESENVOLVIMENTO/FONTE/tests/test19_8_scissors_span.cpp`
+
+A tesoura linear usa planejamento de trechos delimitados por cruzamentos, índice espacial BVH e cache por contorno. O código explicita recusas para arestas degeneradas, sobreposição colinear e contatos ambíguos; também trata costura duplicada de contorno legado como fechamento lógico sem reescrever os dados originais. Há regras específicas para cruzamentos transversais em vértices e pontas de caminhos abertos.
+
+A tesoura nativa Bézier:
+- aproxima as cúbicas adaptativamente para localizar candidatos;
+- refina parâmetros de interseção com iterações numéricas;
+- calcula um trecho entre cruzamentos;
+- remove efetivamente a geometria selecionada, mantendo remanescentes independentes;
+- contempla Undo/Redo, contorno aberto/fechado e remoção de aresta cúbica única.
+
+O teste standalone inclui fixtures para corte de uma cúbica, corte interno de caminho aberto, abertura de anel fechado, interseção entre duas cúbicas, trecho delimitado por dois cruzamentos e recusa de cenário com apenas um cruzamento.
+
+**Riscos e limites identificados por leitura:**
+- A interseção Bézier é numérica e baseada em amostragem adaptativa seguida de refinamento. Não é um solucionador analítico exato; tangências, contatos quase paralelos, interseções múltiplas muito próximas e segmentos degenerados merecem fixtures adversariais próprias.
+- O teste apresentado confirma uma interseção transversal simples e um trecho reto delimitado por duas linhas. Não demonstra cobertura exaustiva de tangências, cúbicas quase coincidentes, múltiplas raízes na mesma dupla de curvas ou tolerâncias extremas.
+- A política de recusa de contatos ambíguos é uma proteção deliberada contra corte destrutivo, mas precisa ser conferida na GUI para que o usuário receba indicação clara da recusa e não interprete ausência de corte como falha silenciosa.
+- Não há evidência de teste físico ou emissão de comandos; a tesoura é edição geométrica offline.
+
+### 13.4 Histórico e custo de memória
+
+Arquivo:
+- `DESENVOLVIMENTO/FONTE/tests/history_memory_19_9_standalone.cpp`
+
+O teste standalone cria um contorno com 4.000 nós e declara verificações para:
+- contabilização de nós correntes, Undo e Redo;
+- deslocamento, Undo e Redo;
+- limpeza da pilha Redo após nova edição;
+- limite de 40 estados de Undo;
+- estimativa de nós retidos no histórico.
+
+O próprio `editor_tools.hpp` documenta `HistoryNodeFootprint` como estimativa do payload dos arrays de nós, não como medição de RSS ou memória total do processo. Portanto, `undoNodes` e `undoNodeBytes` não devem ser apresentados como consumo total de RAM. O limite de 40 estados reduz retenção, mas um documento muito grande pode continuar gerando histórico substancial.
+
+**Lacuna:** não foi encontrada nesta amostra uma medição de RSS/heap sob edição repetida de documentos grandes com geometrias mistas, curvas Bézier, metadados, imagens e projetos persistidos. O teste de 4.000 nós é uma regressão sintética, não benchmark de produção.
+
+### 13.5 Seleção e integração Qt
+
+Arquivos:
+- `DESENVOLVIMENTO/FONTE/qt/qt6_test15_integrated.cpp`
+- `DESENVOLVIMENTO/FONTE/qt/qt6_test16_persistence.cpp`
+- `DESENVOLVIMENTO/FONTE/qt/qt6_test17_mission.cpp`
+- `DESENVOLVIMENTO/FONTE/qt/qt6_test6.cpp`
+
+O teste 15 declara eventos Qt para inserção por Shift+clique, Undo/Redo, arraste de handle, preview sem mutação do estado confirmado, cancelamento por Escape, Delete e salvamento/reabertura v5.
+
+O teste 17 é a cobertura mais ampla de interação encontrada nesta etapa: declara cliques reais Qt em subpaths Bézier sobrepostos, ciclo por Alt, tolerância de seleção em zooms 1/6/24/200, inserção no subpath selecionado, arraste de âncora e handles, Escape, Delete, Undo/Redo, cliques fora da geometria e persistência com objetos legados e curvas nativas. Também compara estado antes/depois de salvar e reabrir e verifica que arquivos inválidos/schema futuro não danificam o projeto aberto.
+
+**Lacuna central:** o cenário de interação do teste 17 constrói dois contornos Bézier nativos sobrepostos para testar seleção de subpath. A etapa de persistência também mantém geometrias legadas e nativas no mesmo projeto, mas isso não prova que uma única operação de seleção/transformação da GUI consiga selecionar e transformar simultaneamente os dois tipos com comportamento coerente. Essa capacidade deve permanecer como **NÃO COMPROVADA** até existir fixture explícita de seleção mista e eventos Qt sobre objetos legados + Bézier na mesma ação.
+
+Também não foi comprovado nesta auditoria:
+- comportamento visual em diferentes DPRs/monitores Windows;
+- seleção por janela/laço em objetos mistos;
+- seleção e transformação de grupos contendo geometrias legadas e nativas;
+- interação com camadas ocultas/bloqueadas durante seleção mista;
+- uso com documentos grandes e resposta de interface sob carga.
+
+### 13.6 Matriz de evidência desta etapa
+
+| Área | Cobertura declarada nos fontes/testes | Estado desta auditoria |
+|---|---|---|
+| Transformação Bézier nativa | Escala, rotação, deslocamento, handles, Undo/Redo | Fonte/teste revisados; execução não verificada |
+| Alinhamento/espelhamento | Centro, bordas, grupo, eixo dinâmico, Undo | Fonte/teste revisados; GUI não comprovada |
+| Tesoura linear | Cruzamentos, trechos, casos ambíguos e costura legada | Fonte/teste revisados; execução não verificada |
+| Tesoura Bézier | Interseção, corte real, remanescentes, Undo/Redo | Fonte/teste revisados; casos adversariais incompletos |
+| Histórico | Limite de 40 estados e contagem de payload de nós | Fonte/teste revisados; RSS total não medido |
+| Interação Qt | Zoom, subpaths sobrepostos, handles, Escape, Delete | Teste codificado; execução Windows não verificada |
+| Seleção mista legado + Bézier | Persistência conjunta existe; seleção/transformação simultânea não demonstrada | **NÃO COMPROVADA** |
+
+### 13.7 Próximas verificações prioritárias
+
+1. Criar fixture Qt com pelo menos um objeto legado e uma curva Bézier nativa, selecionar ambos na mesma ação e verificar movimento, alinhamento, escala, rotação, Undo/Redo e persistência v5.
+2. Acrescentar casos adversariais da tesoura Bézier: tangência, quase paralelismo, duas ou mais interseções próximas, cúbicas coincidentes/parcialmente sobrepostas, cruzamento em âncora e tolerâncias pequenas/grandes.
+3. Validar no Qt a apresentação de recusas da tesoura e seleção de itens ocultos/bloqueados.
+4. Medir RSS/heap em execução Windows com projeto misto de grande porte e histórico no limite; separar payload estimado de memória real.
+5. Executar os alvos standalone e Qt no ambiente Windows do projeto, registrar comando, SHA do executável, logs completos e fixtures; não conectar máquina laser.
+
+**Conclusão da seção:** a branch contém uma base de testes substancial para edição geométrica, tesoura e curvas nativas, incluindo eventos Qt codificados. O principal bloqueio funcional ainda sem evidência é a seleção/transformação simultânea de geometria legada e Bézier nativa. A auditoria permanece estática: nenhum PASS de execução, build ou homologação é atribuído nesta seção.
