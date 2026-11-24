@@ -274,3 +274,8 @@ target_include_directories(alencar_test19_8_recovery_policy PRIVATE src)
 # Characterization test: native Bezier layer metadata contract in the main architecture.
 add_executable(alencar_test_svg_main_layer_contract tests/svg_main_layer_contract.cpp)
 target_include_directories(alencar_test_svg_main_layer_contract PRIVATE src ${BOOST_JSON_INCLUDE_DIR})
+
+# Native Bezier layer bindings: independent metadata contract and JSON roundtrip.
+add_executable(alencar_test_curve_layer_bindings
+ tests/curve_layer_bindings_test.cpp src/boost_json_impl.cpp)
+target_include_directories(alencar_test_curve_layer_bindings PRIVATE src ${BOOST_JSON_INCLUDE_DIR})
