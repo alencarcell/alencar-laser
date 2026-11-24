@@ -67,6 +67,57 @@ inline json::value safeOperations(json::value operations){
  if(operations.is_object())operations.as_object()["fabricationEnabled"]=false;
  return operations;
 }
+
+// Native Bezier layer bindings live in editor metadata, not in polygon object IDs.
+// This preserves the existing v5 package layout and keeps legacy v4 readable.
+inline constexpr const char* kNativeCurveLayerBindingsKey = "nativeCurveLayerBindings";
+
+inline json::value preserveCurveLayerBindings(
+    const json::value& source,
+    const CurveLayerBindings& bindings,
+    const CurveDocument& curves,
+    const EditorState& state)
+{
+    validateCurveLayerBindings(curves,state,bindings);
+    json::object root;
+    if(source.is_object()) root=source.as_object();
+    auto schema=root.find("schema");
+    if(schema!=root.end() &&
+       (!schema->value().is_string() || schema->value().as_string()!="editor-meta-1"))
+        throw std::runtime_error("unsupported editor metadata schema: refusing curve binding save");
+    root["schema"]="editor-meta-1";
+    root[kNativeCurveLayerBindingsKey]=encodeCurveLayerBindings(bindings);
+    return root;
+}
+
+inline CurveLayerBindings curveLayerBindingsForIntegratedProject(
+    const IntegratedProject& project,
+    const EditorState& state)
+{
+    if(project.version<5)
+        throw std::runtime_error("legacy v4 project has no native Bezier layer bindings");
+    if(!project.legacy.layers.is_object())
+        throw std::runtime_error("invalid editor metadata for native Bezier bindings");
+    const auto& root=project.legacy.layers.as_object();
+    auto it=root.find(kNativeCurveLayerBindingsKey);
+    if(it==root.end()) {
+        if(project.curves.contours.empty()) return {};
+        throw std::runtime_error("native Bezier layer bindings missing from project");
+    }
+    return decodeCurveLayerBindings(it->value(),project.curves,state);
+}
+
+inline IntegratedProject buildEditedIntegratedProjectWithCurveLayers(
+    const EditorState& state,
+    const CurveDocument& curves,
+    const CurveLayerBindings& bindings,
+    const IntegratedProject* previous=nullptr)
+{
+    IntegratedProject output=buildEditedIntegratedProject(state,curves,previous);
+    output.legacy.layers=preserveCurveLayerBindings(output.legacy.layers,bindings,curves,state);
+    return output;
+}
+
 inline IntegratedProject buildEditedIntegratedProject(const EditorState& state,
   const CurveDocument& curves,const IntegratedProject* previous=nullptr){
  validate(state);validateCurve(curves);
