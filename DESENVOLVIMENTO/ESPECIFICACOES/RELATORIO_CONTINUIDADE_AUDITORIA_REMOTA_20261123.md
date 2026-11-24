@@ -678,3 +678,58 @@ A segunda linha só deve ser usada se o CMake confirmar o alvo opcional `alencar
 - O teste 13 requer duas fixtures CSV e um diretório de saída, e espera 575 contornos convencionais na fixture legada. Sem essas entradas exatas, não interpretar falha de execução como regressão do codec.
 
 **Não executei os comandos acima nesta auditoria.** Eles são um roteiro de reprodução derivado dos alvos e argumentos observados no código; não são evidência de build ou aprovação. Não incluí comandos que apontem para projetos reais do usuário, diretórios de produção ou hardware.
+
+
+## 19. Política de renderização densa, prévia em blocos e custo de histórico
+
+### 19.1 Política de renderização densa 19.9
+
+O cabeçalho `src/dense_render_policy_19_9.hpp` contém duas decisões determinísticas:
+- `useFastDisplay(nodes)` só ativa o modo rápido quando o total de nós é maior que 80.000;
+- `batchSelectionStyles(changedObjects)` só ativa o lote quando há pelo menos 32 objetos alterados.
+
+O teste `tests/test_dense_render_policy_19_9.cpp` verifica os limites e alguns valores acima/abaixo por `static_assert` e `assert`. Isso comprova a lógica dos limiares quando o teste é compilado/executado, mas não mede renderização, latência, fidelidade visual, consumo de CPU/GPU ou responsividade. Os valores 80.000 e 32 são parâmetros de política, não resultados de benchmark demonstrados no código revisado.
+
+**Conclusão:** não há base para afirmar que o modo rápido melhora o desempenho ou que o lote em 32 objetos é o ponto ótimo. A validação precisa comparar o mesmo documento e as mesmas ações com política ligada/desligada, em builds equivalentes, registrando tempo de quadro, latência de seleção/arraste e qualidade visual.
+
+### 19.2 Prévia de contorno particionada em blocos
+
+`src/render_chunks.hpp` implementa `ChunkedContourPreview`, particionando arestas em blocos (padrão de 256). Durante a atualização de um nó, recalcula somente as arestas adjacentes e retorna os IDs dos blocos sujos. A geometria de origem é referenciada por ponteiro constante; o objeto de prévia não é proprietário do contorno.
+
+Pontos técnicos observados:
+- O particionamento reduz o conjunto de arestas recalculadas por evento de arraste para as arestas incidentes ao nó, em vez de reconstruir todos os segmentos.
+- A classe mantém `const Contour* src_`; portanto, a vida útil e a estabilidade do contorno de origem precisam exceder a vida útil da prévia. Uma realocação, destruição ou mutação estrutural do contorno enquanto a prévia existir pode invalidar a referência ou tornar os índices obsoletos.
+- `update()` rejeita coordenadas não finitas; `cancel()` restaura a posição original do nó e atualiza as arestas incidentes.
+- A implementação usa `std::set` para deduplicar arestas/blocos afetados; o custo é pequeno para o número usual de arestas adjacentes, mas não há medição associada.
+- A política de blocos não demonstra por si só integração com a renderização Qt, invalidação de regiões de tela, ausência de flicker ou ganho em projetos grandes.
+
+**Cobertura não confirmada:** nesta leitura não foi localizada evidência suficiente de um teste de integração Qt que mantenha o contorno vivo durante todo o arraste e compare a prévia em blocos com a geometria canônica em contornos abertos/fechados, nós inicial/final, fronteiras de bloco e cancelamento. Tratar esses casos como pendentes de execução/validação, não como defeitos confirmados.
+
+### 19.3 Assimetria de retenção de histórico
+
+O teste `history_memory_19_9_standalone.cpp` exercita o histórico convencional com um contorno de 4.000 nós e confirma limite de 40 estados Undo, limpeza de Redo após nova edição e estimativa de nós retidos. A classe `CurveHistory` em `bezier_native.hpp`, por outro lado, mantém snapshots completos sem limite de estados ou orçamento em bytes.
+
+Essa diferença é uma assimetria concreta entre as políticas dos dois modelos. Não prova vazamento nem esgotamento, mas torna inadequado afirmar que o consumo de Undo/Redo está limitado de forma uniforme no editor. O limite do histórico convencional também não deve ser extrapolado para o histórico Bézier ou para o histórico misto da janela.
+
+### 19.4 Matriz de evidência
+
+| Item | Evidência no repositório | Estado da auditoria |
+|---|---|---|
+| Limiar de modo rápido em 80.000 nós | Cabeçalho e teste de política | Regra codificada; sem benchmark |
+| Lote de estilos a partir de 32 objetos | Cabeçalho e teste de política | Regra codificada; sem benchmark |
+| Atualização local de arestas adjacentes | `ChunkedContourPreview::update()` | Revisão estática |
+| Cancelamento da prévia | `ChunkedContourPreview::cancel()` | Revisão estática; integração Qt não comprovada |
+| Vida útil do contorno de origem | Ponteiro não proprietário `src_` | Contrato precisa ser garantido pelo chamador |
+| Histórico convencional limitado a 40 estados | Teste standalone | Codificado; não executado nesta auditoria |
+| Histórico Bézier limitado | Não há limite na classe revisada | Lacuna confirmada no código |
+| Ganho real de renderização/arraste | Não há benchmark comparativo nesta evidência | Não medido |
+
+### 19.5 Próxima sequência segura
+
+1. Criar teste unitário de `ChunkedContourPreview` com contornos aberto/fechado, primeiro/último nó, fronteira entre blocos, múltiplos updates e cancelamento; comparar cada aresta com reconstrução integral.
+2. Documentar e garantir no chamador a vida útil do contorno referenciado durante a sessão de prévia; não mudar a propriedade do objeto sem necessidade.
+3. Fazer benchmark A/B de renderização com documentos sintéticos de tamanhos progressivos, medindo tempo de quadro, arraste e seleção; manter a mesma máquina, build, escala/DPR e conteúdo.
+4. Medir bytes/RSS de snapshots Bézier em sequências reais de edição antes de definir limite; decidir política previsível para descarte de estados e coordenação com Undo/Redo misto.
+5. Não alterar os limiares 80.000/32 nem o tamanho de bloco 256 com base apenas em intuição ou no teste de fronteira.
+
+**Conclusão da seção 19:** há mecanismos de otimização codificados (limiares de política e prévia particionada), mas a evidência revisada não contém benchmark que comprove ganho real nem teste Qt suficiente para homologar o fluxo de prévia. O ponteiro não proprietário do contorno exige contrato de vida útil explícito. A diferença de limite de histórico entre o modelo convencional e o Bézier permanece o principal risco de previsibilidade de memória. Nenhum código funcional foi modificado.
