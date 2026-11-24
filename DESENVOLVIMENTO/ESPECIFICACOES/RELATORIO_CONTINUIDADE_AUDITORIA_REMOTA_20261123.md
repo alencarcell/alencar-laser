@@ -779,3 +779,63 @@ O código escreve resultados CSV, mas nesta auditoria o executável não foi com
 6. Ajustar TESTE_7 para comparar a implementação linear efetiva `bruteHitsNoAlloc()`, preservando a referência independente de correção, e registrar o custo de rebuild.
 
 **Conclusão da seção 20:** a arquitetura de cache/BVH possui invalidação explícita por geração geométrica e um caminho linear adaptativo. O principal achado é metodológico: o benchmark existente não mede exatamente o caminho linear utilizado por `CachedHits` e não inclui o custo de reconstrução do índice. A possível obsolescência por mutação fora do Editor é um contrato a verificar, não um defeito confirmado. Nenhum código funcional foi modificado.
+
+
+## 21. Compatibilidade arquitetural SVG com a main — 24/11/2026
+
+### 21.1 Evidência local de homologação da branch SVG
+
+O usuário executou no Windows, em `DESENVOLVIMENTO/FONTE/build_WINDOWS_SVG_HOMOLOGACAO`:
+
+- Configuração CMake/Ninja com GNU C++ 16.2.0 e Qt6: concluída.
+- Compilação do alvo `alencar_test7_qt6`: concluída; houve warnings C++/Qt, sem impedir o link.
+- `--svg-export-20zc-test`: processo retornou código zero e imprimiu `PASS: EXPORTACAO SVG`.
+- `--svg-import-20ze-test`: processo retornou código zero e imprimiu `PASS: IMPORTACAO SVG`.
+
+A evidência é captura de terminal fornecida pelo usuário. Isso comprova os dois testes automatizados naquela revisão/árvore local e naquele ambiente Windows. Não comprova todos os SVGs de terceiros, homologação visual completa, nem build da `main`.
+
+### 21.2 Estruturas da main verificadas
+
+Referências consultadas em `main`:
+
+- `src/bezier_native.hpp`, blob `6e8ea4a20201c5f482e9ace74d0889e744058e3e`: `CurveContour` possui `key`, `nodes`, `edgeKind`, `closed`; não possui campo `layer`.
+- `src/editor_tools.hpp`, blob `465f260eb49979072cb5e594bbac6ed6828653eb`: `EditorState` contém `objects: map<int,Meta>` e `layers: map<int,Layer>`; `Meta` associa objeto a `layer`. `validate(EditorState)` exige que todo objeto geométrico tenha metadata e uma camada válida.
+- `qt/qt6_test6.cpp`, blob `8c290db337fa8727eaeea1f737b0f46c43b5ce94`: a reconstrução/renderização convencional consulta `editor.state().objects.at(c.key.object).layer`; a visibilidade vem de `editor.state().layers`. A janela mantém curvas nativas em `CurveDragSession`, separadas do `EditorState` convencional.
+- `src/bezier_package.hpp`, blob `e5429243669f8cdc5064e1d6881f29d548768382`: `encodeCurves/decodeCurves` serializam `objectId`, `subpathId`, `closed`, tipos de aresta e nós; não serializam camada nativa.
+- `src/integrated_project_edit.hpp`, blob `66079e243b4ed03347c6828507f716e9df9aa2cb`: a persistência preserva metadados convencionais por ID e grava `CurveDocument` separadamente; não existe associação persistida de camada específica para curva nativa nesta revisão.
+
+### 21.3 Diferença observada nos módulos SVG da branch
+
+Na branch `feat/memoria-pastas-exportacao-svg-20zc-20261111`:
+
+- `src/svg_import_20ze.hpp` define `readSvgGeometry()` que retorna `ImportResult` contendo `CurveDocument`; a rotina de append inicializa `contour.layer=0`.
+- `src/svg_export_20zc.hpp` lê `CurveContour.layer` para filtrar camada/visibilidade.
+- Essa revisão da branch também altera `bezier_native.hpp` para incluir `int layer`; a `main` não tem esse membro.
+
+Conclusão: copiar os dois headers SVG diretamente para a main não é compatível com o `CurveContour` atual. Os PASS do usuário foram obtidos no ramo mais novo, não no código da main.
+
+### 21.4 Caminho de adaptação a avaliar
+
+A arquitetura da main sugere associar a camada da curva nativa pelo identificador do objeto (`CurveContour.key.object`) consultando `EditorState.objects` e `EditorState.layers`, em vez de adicionar imediatamente `CurveContour.layer`. Isso é uma hipótese de adaptação, não implementação validada.
+
+Antes de codificar, definir e testar:
+
+1. Como o importador aloca IDs de objeto e subpath sem colisão com geometrias já existentes, respeitando a semântica de `Key`.
+2. Como a importação comunica/atualiza metadata de objetos e a camada destino padrão, sem corromper `EditorState` ou o histórico.
+3. Como o exportador recebe simultaneamente `EditorState` e `CurveDocument`, filtra visibilidade por metadata e trata IDs sem metadata (rejeitar com erro explícito, não ignorar silenciosamente).
+4. Como a associação objeto/camada sobrevive ao save/open v5 atual. O codec atual não persiste camada nativa separadamente; a estratégia por `key.object` precisa preservar uma associação canônica verificável ou declarar limitação.
+5. Como Undo/Redo, exclusão, troca de documento e importação repetida mantêm IDs únicos e metadados consistentes.
+
+### 21.5 Estado e decisão
+
+| Item | Estado |
+|---|---|
+| Configuração/build/testes SVG na branch do usuário | PASS conforme capturas |
+| Estruturas e persistência da main revisadas estaticamente | PASS |
+| Compatibilidade direta dos headers SVG com main | FAIL (campo `CurveContour.layer` ausente) |
+| Adaptação via metadata de objeto | NOT TESTED; hipótese |
+| Persistência de associação de camada para curvas nativas | NOT TESTED; lacuna de projeto |
+| Build/testes na main | NOT TESTED |
+| Alteração funcional ou merge na main | Nenhum |
+
+**Conclusão da seção 21:** não adicionar um campo de camada isolado nem copiar os headers SVG sem contrato de persistência. A solução preferível a investigar é usar a identidade de objeto já existente em `CurveContour.key.object` como vínculo para metadata de camada da `main`, com IDs, histórico e persistência explicitamente testados. Nenhum código funcional foi alterado.
