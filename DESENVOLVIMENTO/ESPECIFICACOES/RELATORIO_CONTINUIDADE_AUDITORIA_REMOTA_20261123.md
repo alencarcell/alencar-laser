@@ -422,3 +422,83 @@ Foi localizada uma fixture Qt no próprio `qt6_test6.cpp` que:
 A fixture pertence ao arquivo monolítico `qt6_test6.cpp`; o modo exato de execução e sua associação a um alvo dedicado devem ser conferidos no CMake e no dispatcher antes de afirmar que ela roda automaticamente. A existência do código de teste não comprova que tenha sido compilado ou executado na máquina Windows.
 
 **Prioridade atualizada:** executar o cenário misto existente com o alvo/modo correto; depois acrescentar escala, rotação e alinhamento mistos, mais casos de falha/rollback entre os dois históricos. Não duplicar uma fixture que já existe.
+
+
+## 14. Auditoria complementar: transformações mistas, alinhamento GUI e casos-limite da tesoura
+
+**Escopo:** inspeção estática adicional de `qt6_test6.cpp`, `editor_tools.hpp` e testes 19.8. Sem build ou execução nesta etapa.
+
+### 14.1 Transformação mista: implementação mais ampla que a fixture
+
+A implementação de `finishSelectionTransform()` usa os mesmos parâmetros de transformação para os dois modelos:
+- deslocamento: `editor.moveObjects()` + `nativeSession_->transformSelectedContours()`;
+- rotação: `editor.rotateObjects()` + transformação das curvas nativas;
+- escala/afim: `editor.affineObjects()` + transformação das curvas nativas.
+
+O cálculo do preview também trabalha sobre um quadro comum. O caminho de rollback tenta desfazer o lado nativo se o modelo convencional rejeitar a operação. O histórico misto verifica geração e contagens Undo/Redo dos dois modelos antes de aplicar a operação coordenada.
+
+**Cobertura comprovada por leitura:** a fixture Qt encontrada na seção 13.8 verifica arraste translacional e Undo/Redo conjunto. A implementação contempla escala e rotação, mas não encontrei na fixture revisada uma verificação equivalente de escala/rotação mistas, nem testes explícitos que provoquem uma falha real de commit no segundo modelo para validar o rollback.
+
+**Risco residual:** os dois modelos mantêm históricos próprios, coordenados por estado/contagens e uma flag de última ação mista. Isso é uma estratégia deliberada, mas exige testes de sequência: edição externa em um dos modelos após a ação mista, múltiplos Undo/Redo, nova edição após Undo, falha parcial e troca de seleção/documento. A lógica de invalidação reduz risco de desfazer a pilha errada, mas não substitui essas sequências de integração.
+
+### 14.2 Alinhamento GUI e centralização na mesa
+
+O núcleo `Editor::alignObjects()` opera sobre objetos convencionais do `EditorState`, expande grupos como unidades indivisíveis e cria uma única transação de Undo. Modos documentados: esquerda, direita, topo, base, centro X, centro Y e ambos os centros. A referência é o último objeto selecionado.
+
+A barra de ações rápidas expõe os seis alinhamentos direcionais/centros e o alinhamento dos dois centros. Já a ação **Centralizar na mesa física** contém uma guarda explícita que recusa a operação quando `bezierToolActive_` está ativo, informando ao usuário que, nesta beta, deve selecionar polilinhas em vez de curvas Bézier nativas.
+
+**Classificação correta:**
+- Alinhamento de objetos convencionais/grupos: implementado no núcleo, com teste standalone; GUI/execução ainda não homologadas nesta auditoria.
+- Alinhamento de seleção mista convencional + Bézier: **não demonstrado**; a API `alignObjects()` recebe IDs do modelo convencional e não inclui chaves do documento nativo.
+- Centralização na mesa para Bézier nativa: **bloqueada intencionalmente pela interface beta**, não deve ser anunciada como suportada.
+- Centralização na mesa para seleção mista: não suportada/demonstrada.
+
+Não se deve remover a guarda de segurança apenas para uniformizar a interface. A evolução correta é implementar uma operação transacional equivalente nos dois modelos, com Undo/Redo coordenado e testes de preservação do centro da mesa configurada, sem alterar dimensões nem enviar comandos ao hardware.
+
+### 14.3 Tesoura: cobertura adversarial existente
+
+A revisão de `tests/test19_8_scissors_span.cpp` encontrou cenários específicos já codificados:
+- cruzamento transversal em vértice de caminho estrangeiro;
+- cruzamento transversal no próprio vértice do caminho-alvo;
+- tangência em vértice recusada com motivo `vertex_or_tangent`;
+- sobreposição colinear recusada com motivo `collinear_overlap`;
+- contato em T tratado como limite terminal;
+- quase contato (near miss) não promovido a interseção;
+- cortes sucessivos nos remanescentes, preservando linhas-guia;
+- Undo em cadeia restaurando a geometria original;
+- soldagem opcional de extremidades com uma única etapa de Undo.
+
+A integração Qt da tesoura também:
+- não recorre a apagar uma aresta Bézier inteira quando não encontra trecho seguro;
+- exige um intervalo delimitado por dois cruzamentos para o corte K nativo;
+- mantém a geometria se o intervalo ficar inválido antes do commit;
+- apresenta mensagens distintas para sobreposição, tangência/vértice, aresta degenerada, contorno fechado com uma única interseção e cursor perto do limite;
+- informa que nada foi removido quando não existe intervalo seguro.
+
+O teste standalone `native_scissors_realcut_19_8_standalone.cpp` confirma no código de teste interseção cúbica refinada, corte do intervalo e Undo/Redo. Entretanto, o arquivo é curto e não contém uma bateria adversarial Bézier comparável à bateria linear de `test19_8_scissors_span.cpp`.
+
+**Lacuna prioritária da tesoura Bézier:** acrescentar fixtures para tangência entre cúbicas, quase tangência, cúbicas coincidentes/parcialmente sobrepostas, múltiplas interseções próximas na mesma dupla de curvas, interseção em âncora compartilhada e estabilidade sob diferentes tolerâncias/escala. Não afirmar que esses casos falham; eles simplesmente não estão comprovados pela amostra de teste revisada.
+
+### 14.4 Matriz de estado revisada
+
+| Recurso | Implementação encontrada | Teste codificado | Estado de execução |
+|---|---|---|---|
+| Transformação mista por deslocamento | Sim | Fixture Qt com ambos os modelos | Não executado nesta auditoria |
+| Transformação mista por escala/rotação | Sim, no mesmo commit da transformação | Não localizado teste específico equivalente | Não comprovado |
+| Undo/Redo misto | Sim, coordenação dos dois históricos | Fixture Qt para deslocamento | Não executado nesta auditoria |
+| Alinhamento de objetos convencionais/grupos | Sim | Standalone | Não executado nesta auditoria |
+| Alinhamento misto convencional + Bézier | Não demonstrado | Não localizado | Não comprovado |
+| Centralizar Bézier na mesa | Bloqueado explicitamente na beta | Guarda de interface | Restrição intencional |
+| Tesoura linear: vértice, tangência, T, overlap, near miss | Sim | Bateria adversarial standalone | Não executado nesta auditoria |
+| Tesoura Bézier: corte/Undo básico | Sim | Standalone e integração Qt codificados | Não executado nesta auditoria |
+| Tesoura Bézier: tangência/overlap/múltiplas raízes | Não comprovado na suíte revisada | Lacuna de fixtures | Não comprovado |
+
+### 14.5 Próxima sequência recomendada
+
+1. Rodar o executável Qt correto com a fixture de seleção mista já existente e registrar SHA, comando, Qt, ambiente e resultado JSON.
+2. Estender a fixture existente para escala e rotação mistas, Undo/Redo em sequência e rollback provocado por falha controlada.
+3. Implementar alinhamento misto somente após definir uma transação coordenada entre Editor e CurveDocument; manter a guarda atual até então.
+4. Completar a bateria adversarial da tesoura Bézier antes de alterar o solucionador de interseção.
+5. Separar o alvo de teste Qt de integração do monólito `qt6_test6.cpp) quando houver branch de integração apropriada; não alterar CMake/workflows nesta auditoria sem build Windows reproduzível.
+
+**Conclusão:** a tesoura linear tem uma suíte adversarial mais madura que a tesoura Bézier. A transformação mista está implementada para deslocamento, escala e rotação, mas sua prova Qt encontrada é principalmente translacional. Alinhamento misto não está demonstrado e centralização de Bézier na mesa é uma restrição beta explícita. Nenhum resultado de execução ou homologação foi inferido.
