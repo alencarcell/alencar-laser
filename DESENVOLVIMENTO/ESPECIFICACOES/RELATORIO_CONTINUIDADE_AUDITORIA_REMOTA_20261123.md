@@ -733,3 +733,49 @@ Essa diferença é uma assimetria concreta entre as políticas dos dois modelos.
 5. Não alterar os limiares 80.000/32 nem o tamanho de bloco 256 com base apenas em intuição ou no teste de fronteira.
 
 **Conclusão da seção 19:** há mecanismos de otimização codificados (limiares de política e prévia particionada), mas a evidência revisada não contém benchmark que comprove ganho real nem teste Qt suficiente para homologar o fluxo de prévia. O ponteiro não proprietário do contorno exige contrato de vida útil explícito. A diferença de limite de histórico entre o modelo convencional e o Bézier permanece o principal risco de previsibilidade de memória. Nenhum código funcional foi modificado.
+
+
+## 20. Índice espacial de seleção, invalidação de cache e validade do benchmark
+
+### 20.1 Estrutura do índice
+
+A revisão de `geometry.hpp` e `editor_tools.hpp` identificou:
+- `segments()` materializa um vetor de segmentos a partir dos contornos do documento.
+- `SegmentBVH` constrói uma hierarquia binária sobre caixas AABB; divide pelo maior eixo do limite agregado e mantém folhas de até 12 segmentos.
+- `CachedHits` mantém o vetor de segmentos e o BVH; reconstrói ambos quando `Editor::geometryGeneration` muda.
+- A geração geométrica é distinta da geração geral: mudanças exclusivas de metadados não invalidam o índice. Undo/Redo incrementam ambas.
+- A consulta converte raio físico em milímetros usando `pixelRadius/(pxPerMillimeter*dpr)`, usa busca linear abaixo de escala física 0,5 e BVH a partir desse limite, depois filtra objetos não editáveis/ocultos.
+
+A estrutura é coerente com um cache de geometria imutável durante consultas. O ponteiro interno de `SegmentBVH` referencia o vetor de segmentos fornecido a `reset()`; em `CachedHits`, o vetor membro `segs_` tem vida útil compatível com o índice e é atualizado antes do reset. Não se deve extrair o BVH para uso isolado com vetor temporário ou destruído.
+
+### 20.2 Pontos de atenção estáticos
+
+1. **Mutação fora do fluxo do Editor:** a invalidação depende de `geometryGeneration`. Se algum chamador modificar diretamente a geometria subjacente sem passar por uma operação que incremente essa geração, o cache poderá permanecer desatualizado. A revisão estática não prova que exista esse caminho na GUI; é um contrato a auditar nos pontos de acesso mutável.
+2. **Custo de reconstrução:** a primeira consulta e cada commit geométrico materializam todos os segmentos e constroem o BVH. Não há medição aqui do tempo de rebuild em projetos grandes, nem do custo de alocação/RSS.
+3. **Consulta em escala muito baixa:** o caminho linear evita o vetor de índices 0..N-1 por meio de `bruteHitsNoAlloc()`, mas ainda percorre todos os segmentos e usa `std::map` para consolidar o melhor hit por objeto. É uma decisão de previsibilidade, não uma consulta sublinear.
+4. **Filtragem de elegibilidade:** camadas bloqueadas/ocultas são filtradas depois da consulta espacial. Isso preserva a correção da seleção, mas segmentos inelegíveis ainda podem entrar no conjunto de candidatos e consumir trabalho.
+5. **Limites públicos:** `CachedHits::query()` valida escala, DPR e raio positivos e finitos. Métodos públicos de `SegmentBVH` aceitam tolerância sem a mesma validação explícita; não foi demonstrado que a GUI os chame com valores inválidos. Recomenda-se teste de contrato para a API interna, sem declarar vulnerabilidade.
+
+### 20.3 Benchmark TESTE_7 e uma diferença metodológica
+
+`perf_test7.cpp` usa fixture de 575 contornos e 13.415 nós, semente determinística, 20 combinações de zoom/DPR e 105 consultas por combinação. Compara resultados do brute force e BVH, registra candidatos, percentis, divergência de identidade, rebuild após mutações, 240 previews e ciclos Undo/Redo.
+
+Há uma diferença importante entre o benchmark e o caminho de produção:
+- O caminho adaptativo de `CachedHits` em baixa escala chama `bruteHitsNoAlloc()`.
+- O TESTE_7 mede `bruteHits()`, que cria um vetor de índices para todos os segmentos, tanto como referência quanto no ramo adaptativo de baixa escala.
+- Portanto, o tempo adaptativo medido no modo linear não representa exatamente o caminho linear de produção. O teste ainda é útil para equivalência de resultados e comparação geral do BVH, mas não deve ser usado como medição exata da implementação `CachedHits` sem ajustar o benchmark.
+- O tempo medido para BVH inclui a consulta, não a construção do índice. O custo de rebuild deve ser medido separadamente.
+- O comentário do arquivo é explícito: os números não são FPS; o ensaio é do núcleo sem Qt/GRBL/hardware.
+
+O código escreve resultados CSV, mas nesta auditoria o executável não foi compilado nem rodado. Não há números de desempenho novos a reportar.
+
+### 20.4 Casos de teste recomendados
+
+1. Teste diferencial de `CachedHits` contra brute force após cada tipo de mutação geométrica, Undo, Redo, importação, exclusão e troca de documento.
+2. Confirmar que alterações apenas de metadados não reconstruam o BVH e que mudanças geométricas reconstruam exatamente uma vez antes da consulta seguinte.
+3. Verificar a vida útil do vetor fonte do BVH com sanitizadores em teste isolado; nunca consultar após destruição/substituição do vetor.
+4. Benchmarkar separadamente: construção de segmentos, construção BVH, consulta BVH, consulta linear `bruteHitsNoAlloc`, filtro de elegibilidade e custo combinado da consulta.
+5. Repetir com documentos sintéticos progressivos e fixtures reais, incluindo geometrias concentradas, distribuídas, caixas muito extensas e grande proporção de objetos bloqueados/ocultos.
+6. Ajustar TESTE_7 para comparar a implementação linear efetiva `bruteHitsNoAlloc()`, preservando a referência independente de correção, e registrar o custo de rebuild.
+
+**Conclusão da seção 20:** a arquitetura de cache/BVH possui invalidação explícita por geração geométrica e um caminho linear adaptativo. O principal achado é metodológico: o benchmark existente não mede exatamente o caminho linear utilizado por `CachedHits` e não inclui o custo de reconstrução do índice. A possível obsolescência por mutação fora do Editor é um contrato a verificar, não um defeito confirmado. Nenhum código funcional foi modificado.
