@@ -279,3 +279,9 @@ target_include_directories(alencar_test_svg_main_layer_contract PRIVATE src ${BO
 add_executable(alencar_test_curve_layer_bindings
  tests/curve_layer_bindings_test.cpp src/boost_json_impl.cpp)
 target_include_directories(alencar_test_curve_layer_bindings PRIVATE src ${BOOST_JSON_INCLUDE_DIR})
+
+# Native Bezier layer binding persistence through integrated .alaser v5 package.
+add_executable(alencar_test_curve_layer_persistence
+ tests/curve_layer_persistence_test.cpp src/boost_json_impl.cpp)
+target_include_directories(alencar_test_curve_layer_persistence PRIVATE src ${BOOST_JSON_INCLUDE_DIR} ${MINIZIP_INCLUDE_DIR})
+target_link_libraries(alencar_test_curve_layer_persistence PRIVATE ${MINIZIP_LIBRARY} ZLIB::ZLIB)
