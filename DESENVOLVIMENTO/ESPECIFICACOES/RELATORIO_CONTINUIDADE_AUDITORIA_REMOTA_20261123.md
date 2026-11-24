@@ -161,3 +161,51 @@ Constatações:
 - Antes de modificar CMake ou workflows, escolher uma branch de integração adequada e confirmar sua relação com a PR e com o estado local do operador.
 
 **Nenhum CMake, YAML, código funcional, branch principal, PR ou configuração de hardware foi alterado nesta etapa.** Esta seção é auditoria documental do conteúdo remoto; nenhum workflow foi executado por esta revisão.
+
+## 11. Auditoria de dependências Bézier, GUI e persistência v5 (24/11/2026)
+
+Foram inspecionados os fontes qt6_test11_seams.cpp até qt6_test17_mission.cpp na branch feat/selecao-mista-alinhamento-svg-bezier-20ze-20261112. Esta é uma revisão estática do código remoto; os executáveis não foram compilados nem executados nesta etapa.
+
+### Mapa de dependências observado
+
+- **Geometria e renderização:** os testes 11–12 usam geometry.hpp, Document, Contour e renderização Qt (QPainter/QGraphicsScene). São ensaios de rasterização/atualização de cena, não testes de interação física com mouse.
+- **Bézier nativo:** os testes 13–14 usam bezier_native.hpp e bezier_interaction.hpp; trabalham com CurveDocument, CurveContour, CurveDragSession, edgeAt, nativeCurvePath e hit-testing.
+- **Integração com a janela:** os testes 15–17 incluem diretamente qt6_test6.cpp (renomeando o main) e exercitam LabWindow, a viewport, eventos Qt, ferramentas e salvamento. Portanto, são acoplados ao código da janela/monólito de teste 6, não apenas às bibliotecas geométricas.
+- **Persistência:** os testes 15–17 dependem de readIntegratedProject, writeIntegratedProject/rotinas de save, encodeCurves, nativeCurvePath e do formato integrado versão 5. O teste 16 também verifica metadados de editor, operações e proveniência de amostras.
+
+### Cobertura real descrita pelos fontes
+
+| Teste | Cobertura pretendida no código | Limite importante |
+|---|---|---|
+| 11 | Compara contorno completo e dividido, SquareCap/FlatCap, zoom/DPR e subpixel; gera CSV, PNG e JSON | Mede diferenças; não declara aprovação de produção nem homologa Windows |
+| 12 | Atualização incremental de QGraphicsScene versus reconstrução completa, 96 frames e cancelamento sem pixels fantasmas | Offscreen; sem mouse real, Windows ou máquina |
+| 13 | Curvas cúbicas nativas na QGraphicsView, zooms, atualização e cancelamento | Compara janelas/cenas Qt; não é fluxo completo do editor de produção |
+| 14 | Hit-test de traçado, seleção, arraste, preview, commit, Undo/Redo, Escape e contornos coincidentes | Implementa uma classe CurveEditor14 própria; não instancia LabWindow. Assim, não prova por si só a integração do editor de produção |
+| 15 | Janela LabWindow: seleção, inserção Shift+clique, Undo/Redo, arraste de alça, Escape, Delete, gravação e reabertura v5 em outro processo | Forte teste de integração, mas precisa ser compilado/executado; o modo --verify deve receber o mesmo arquivo de projeto gravado pelo --write |
+| 16 | Janela LabWindow: importação v5, curvas nativas, metadados, operações e proveniência; gravação e verificação separada | Depende de fixture de entrada v5 e de duas execuções; no modo --verify, o argumento de origem continua necessário porque o código lê origin antes de ramificar |
+| 17 | Janela LabWindow: zoom, seleção de subpaths coincidentes, inserção, Undo/Redo, arraste de âncoras/alças, Escape, Delete, persistência, arquivos inválidos e schema futuro | Mais abrangente, mas é o teste mais acoplado e exige diretório temporário isolado, fixtures e execução em processos/etapas corretos |
+
+### Riscos e observações estáticas
+
+1. **Teste 14 não equivale à homologação da janela real.** Ele cria seu próprio CurveEditor14 e seu próprio QGraphicsScene. Serve como teste de contrato da sessão/hit-test, mas o teste 15/17 é que alcança LabWindow.
+2. **Teste 15 e 17 compartilham o monólito qt6_test6.cpp.** Uma mudança de API, estado ou comportamento no arquivo central pode afetar vários testes ao mesmo tempo. Isso reforça a necessidade de build completo e execução ordenada; não justifica refatorar agora sem ambiente.
+3. **Persistência v5 exige teste de ida e volta em processo independente.** Um único teste de serialização em memória não cobre a restauração da GUI, identidade dos nós, metadados, operações e proveniência. Os testes 15–17 já tentam cobrir partes diferentes desse contrato.
+4. **Teste 16 --verify lê a origem antes da ramificação.** A execução precisa manter disponível a fixture de origem usada no --write; não basta fornecer apenas o arquivo de destino. Isso deve ser refletido no comando/roteiro de CI.
+5. **Teste 17 tem saídas auxiliares deliberadas.** Além do projeto de destino, grava .expected, .png, .corrupt e .unknown. Executá-lo diretamente sobre arquivos do usuário seria inadequado; usar somente pasta temporária descartável e fixture copiada.
+6. **Teste 17 inclui um caminho de teste de singleton e cenários sintéticos.** Esses cenários ajudam a encontrar regressões de seleção/identidade, mas não substituem a fixture real de projetos do usuário nem o teste manual no Windows.
+7. Os testes 11–13 fazem comparações de pixels/rasterização; diferenças entre plataformas, Qt, DPR e backend podem exigir evidências e tolerâncias justificadas. Não relaxar igualdade estrita sem diagnóstico.
+8. Os comentários e JSONs dos próprios testes explicitam machine_connected=false e/ou windows_homologated=false. Nenhum desses testes autoriza conectar ou movimentar a máquina laser.
+
+### Ordem de validação recomendada
+
+1. Build dos alvos standalone de geometria e Bézier, com dependências explícitas e sem alterar a produção.
+2. Executar testes 11–13 em ambiente Qt offscreen e guardar artefatos por SHA/versão de Qt.
+3. Executar teste 14 para contrato de interação/hit-test isolado.
+4. Executar teste 15 em pasta temporária: --write e depois --verify no arquivo produzido.
+5. Executar teste 16 com fixture v5 original preservada e arquivo de saída separado; manter a origem disponível também no modo --verify.
+6. Executar teste 17 em diretório temporário exclusivo, com as etapas --interaction, --write e --verify conforme seus argumentos; verificar os sidecars antes de limpar a pasta temporária.
+7. Repetir build e testes no Windows/Qt SDK real e realizar homologação visual/manual do editor, sem conectar ou emitir comandos para a máquina laser.
+
+**Conclusão desta etapa:** há uma cadeia de testes mais completa do que a auditoria inicial sugeria, especialmente nos testes 15–17. O principal risco não é ausência total de cobertura, mas a diferença entre testes isolados e a janela integrada, o acoplamento ao qt6_test6.cpp, a orquestração de fixtures/arquivos temporários e a falta de evidência de execução no HEAD atual. Nenhuma alteração funcional é recomendada antes de executar a matriz acima em ambiente controlado.
+
+**Nenhum código funcional, CMake, workflow, branch principal, PR, arquivo local ou configuração de hardware foi alterado nesta etapa.**
