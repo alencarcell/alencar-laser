@@ -269,3 +269,8 @@ endif()
 # TESTE_19.8: dirty/snapshot state machine, no Qt dependency.
 add_executable(alencar_test19_8_recovery_policy tests/test19_8_recovery_policy.cpp)
 target_include_directories(alencar_test19_8_recovery_policy PRIVATE src)
+
+
+# Characterization test: native Bezier layer metadata contract in the main architecture.
+add_executable(alencar_test_svg_main_layer_contract tests/svg_main_layer_contract.cpp)
+target_include_directories(alencar_test_svg_main_layer_contract PRIVATE src)
