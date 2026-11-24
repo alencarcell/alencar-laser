@@ -103,3 +103,28 @@ Regras:
 ## 7. Regra de segurança
 
 Não copiar `qt6_test6.cpp` da branch maior para esta branch. Não adicionar `layer` a `CurveContour` sem migração e roundtrip. Não alterar `main`, não mesclar a branch de memória de pastas e não usar arquivos locais não rastreados como fonte sem inspeção explícita.
+
+
+## 8. Caracterização do contrato de metadados — 24/11/2026
+
+Foi adicionado `tests/svg_main_layer_contract.cpp` e o alvo CMake `alencar_test_svg_main_layer_contract`.
+
+O teste constrói um `EditorState` válido com um objeto poligonal na camada 0 e um `CurveDocument` separado com uma curva Bézier nativa. Em seguida:
+
+1. Registra em `EditorState.objects` um metadata para um ID usado somente pela curva Bézier. A validação atual rejeita o estado porque existe metadata sem objeto poligonal correspondente.
+2. Reutiliza o ID do objeto poligonal para a curva nativa. Os dois modelos aceitam o mesmo número, mas isso representa alias da metadata poligonal, não uma associação independente para a curva.
+
+Isso refuta a hipótese simplista de registrar um objeto Bézier-only em `EditorState.objects` sem alterar o contrato atual de `validate(EditorState)`. Também demonstra que compartilhar um ID numérico com uma polilinha não cria identidade independente.
+
+**Resultado:** teste de caracterização codificado; ainda não compilado nem executado nesta branch. Não é teste de importação SVG e não altera o formato de persistência.
+
+### Decisão arquitetural atualizada
+
+Não implementar a associação via `EditorState.objects` como se fosse direta. Avaliar um registro explícito de vínculo para curvas nativas, com identidade e camada próprias, persistido em campo versionado do pacote ou estrutura canônica equivalente. Se isso exigir evolução de schema, documentar migração e compatibilidade antes de tocar no codec. Não usar `curveSource`/CSV de amostras como armazenamento incidental de metadata.
+
+Estado do teste:
+- Fonte adicionada: PASS (publicada na branch).
+- Alvo CMake adicionado com include explícito de Boost.JSON: PASS (publicado na branch).
+- Compilação: NOT TESTED.
+- Execução: NOT TESTED.
+- Alteração em `main`: nenhuma.
